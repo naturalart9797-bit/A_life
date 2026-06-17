@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Artificial Life Lab — 作品一覧</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans+JP:wght@300;400;500;600&display=swap');
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#06070b;--surface:#0c0e14;--surface2:#11131c;--border:#1a1d28;--border2:#262a38;
+  --accent:#7c8aff;--accent-warm:#e0a050;--accent-green:#5fd99a;--accent-pink:#e07cc0;--accent-cyan:#56c8e0;
+  --text:#d8dcec;--text2:#7a8098;--text3:#3a3f52;
+  --font-mono:'IBM Plex Mono',monospace;--font-ui:'IBM Plex Sans JP',sans-serif;
+}
+body{background:var(--bg);color:var(--text);font-family:var(--font-ui);min-height:100vh;line-height:1.6;
+  background-image:radial-gradient(circle at 20% 10%,rgba(124,138,255,.05),transparent 40%),radial-gradient(circle at 85% 80%,rgba(95,217,154,.04),transparent 45%);}
+
+.hero{max-width:1100px;margin:0 auto;padding:64px 28px 36px;}
+.hero-tag{font-family:var(--font-mono);font-size:11px;letter-spacing:.22em;text-transform:uppercase;color:var(--accent);margin-bottom:16px;}
+.hero h1{font-size:38px;font-weight:600;letter-spacing:-.01em;margin-bottom:14px;line-height:1.2;}
+.hero h1 .sub{display:block;font-size:16px;font-weight:400;color:var(--text2);font-family:var(--font-mono);letter-spacing:.05em;margin-top:8px;}
+.hero p{color:var(--text2);font-size:15px;max-width:680px;}
+.hero .note{margin-top:18px;font-family:var(--font-mono);font-size:12px;color:var(--text3);border-left:2px solid var(--border2);padding-left:12px;line-height:1.9;}
+
+.container{max-width:1100px;margin:0 auto;padding:0 28px 80px;}
+
+.cat{margin-top:48px;}
+.cat-head{display:flex;align-items:baseline;gap:12px;margin-bottom:6px;padding-bottom:10px;border-bottom:1px solid var(--border);}
+.cat-num{font-family:var(--font-mono);font-size:12px;color:var(--text3);}
+.cat-title{font-size:20px;font-weight:600;}
+.cat-desc{color:var(--text2);font-size:13px;margin-bottom:20px;margin-top:8px;}
+
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:14px;}
+
+.card{display:block;text-decoration:none;color:inherit;background:var(--surface);border:1px solid var(--border);border-radius:12px;overflow:hidden;transition:all .18s;position:relative;}
+.card:hover{border-color:var(--c,var(--accent));transform:translateY(-3px);background:var(--surface2);box-shadow:0 8px 30px rgba(0,0,0,.4);}
+.card-vis{height:108px;position:relative;overflow:hidden;background:#05060a;border-bottom:1px solid var(--border);}
+.card-vis canvas{width:100%;height:100%;display:block;}
+.card-body{padding:13px 15px 15px;}
+.card-title{font-size:15px;font-weight:600;margin-bottom:4px;display:flex;align-items:center;gap:7px;}
+.card-en{font-family:var(--font-mono);font-size:9px;color:var(--text3);letter-spacing:.1em;text-transform:uppercase;}
+.card-desc{font-size:12px;color:var(--text2);line-height:1.65;margin-top:6px;}
+.card-tags{display:flex;gap:5px;flex-wrap:wrap;margin-top:10px;}
+.tag{font-family:var(--font-mono);font-size:9px;padding:2px 7px;border-radius:4px;background:var(--surface2);border:1px solid var(--border2);color:var(--text3);}
+.dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;}
+
+footer{max-width:1100px;margin:0 auto;padding:30px 28px 60px;border-top:1px solid var(--border);font-family:var(--font-mono);font-size:11px;color:var(--text3);line-height:2;}
+
+@media(max-width:620px){.hero h1{font-size:28px;}.grid{grid-template-columns:1fr;}}
+</style>
+</head>
+<body>
+
+<div class="hero">
+  <div class="hero-tag">Artificial Life Lab</div>
+  <h1>人工生命・自己組織化シミュレーション集
+    <span class="sub">cellular automata / agents / growth / image-morph</span>
+  </h1>
+  <p>単純なルールから複雑な秩序や生命的な動きが生まれる様子を集めたインタラクティブ作品集です。セルオートマトン、群れ、成長、画像から生命を描くモーフなど、それぞれ異なる原理で動きます。</p>
+  <div class="note">
+    各カードをクリックで起動。すべてブラウザ単体で動作します（一部の画像・動画機能はローカル処理）。<br>
+    操作は共通: Space=一時停止 / 多くはサイドバーのスライダーで挙動を調整できます。
+  </div>
+</div>
+
+<div class="container" id="container"></div>
+
+<footer>
+  Artificial Life Lab — built as single-file HTML/Canvas experiments.<br>
+  cellular automata · particle systems · reaction-diffusion · agent simulation · generative morph
+</footer>
+
+<script>
+// ─────────────────────────────────────────────
+//  CATALOG
+// ─────────────────────────────────────────────
+const CATEGORIES=[
+  {
+    title:'セルオートマトン', en:'Cellular Automata', color:'#7c8aff',
+    desc:'格子上の各セルが近傍の状態だけで次の状態を決める。単純な規則から複雑な模様が創発します。',
+    items:[
+      {file:'life.html', name:'ライフゲーム', en:'Game of Life', desc:'コンウェイの生命ゲーム。プリセット・ルール編集・六角/三角格子。', tags:['CA','2D'], vis:'life'},
+      {file:'life3d.html', name:'3Dライフゲーム', en:'3D Life', desc:'立方体格子・26近傍の3次元ライフ。回転カメラで観察。', tags:['CA','3D','Three.js'], vis:'life3d'},
+      {file:'ca_explorer.html', name:'CA総合エクスプローラ', en:'CA Explorer', desc:'1D/2D・反応拡散・確率的CA・多層・連続値(Lenia)を1つに。', tags:['CA','reaction-diffusion','Lenia'], vis:'caexp'},
+      {file:'life_video.html', name:'映像ライフゲーム', en:'Video Life', desc:'動画のピクセルをCAに注入。キーフレームで演出。', tags:['CA','video'], vis:'vid'},
+      {file:'life_organism.html', name:'生命体オルガニズム', en:'Organism', desc:'動画×ライフゲーム。光・色を保ちながらエフェクト的に重ねる。', tags:['CA','video'], vis:'organism'},
+      {file:'sand.html', name:'落砂シミュレーション', en:'Falling Sand', desc:'砂・水・火などの粒子が重力と相互作用する箱庭。', tags:['falling-sand','粒子'], vis:'sand'},
+    ]
+  },
+  {
+    title:'群れ・粒子の生命', en:'Swarm & Particle Life', color:'#e0a050',
+    desc:'多数の単純な個体が引力・斥力や群れの規則で動くと、コロニーや生態系のような秩序が自発的に生まれます。',
+    items:[
+      {file:'particle_life.html', name:'パーティクルライフ', en:'Particle Life', desc:'種ごとの引力・斥力マトリクスからコロニーが創発。', tags:['粒子','創発'], vis:'plife'},
+      {file:'creature_ecosystem.html', name:'生物の生態系', en:'Creature Ecosystem', desc:'捕食者と被食者。体節と脚を持つ生物が狩り・逃走する。', tags:['捕食','エージェント'], vis:'creature'},
+      {file:'slime_mold.html', name:'粘菌ネットワーク', en:'Slime Mold', desc:'変形菌(Physarum)が餌を結ぶ最適ネットワークを形成。', tags:['粘菌','ネットワーク'], vis:'slime'},
+    ]
+  },
+  {
+    title:'成長・形態形成', en:'Growth & Morphogenesis', color:'#5fd99a',
+    desc:'時間とともに構造が育つシミュレーション。光や栄養などの環境が形を決め、自然界の成長パターンを再現します。',
+    items:[
+      {file:'reef_growth.html', name:'サンゴ礁の成長', en:'Reef Growth', desc:'サンゴ・コケ・藻が光を奪い合いながら広がる多種競合。', tags:['成長','競合','光'], vis:'reef'},
+      {file:'mycelium.html', name:'菌糸ネットワーク', en:'Mycelium', desc:'先端成長する菌糸が栄養を探して枝分かれする。', tags:['成長','先端成長'], vis:'myc'},
+      {file:'current_drift.html', name:'潮流とサンゴ幼生', en:'Current Drift', desc:'流れ場に運ばれた幼生が定着して育つDLA成長。', tags:['フロー場','DLA'], vis:'drift'},
+      {file:'crystal_growth.html', name:'結晶/雪の成長', en:'Crystal Growth', desc:'拡散律速凝集に対称性を加えた雪の結晶。', tags:['DLA','対称性'], vis:'crystal'},
+      {file:'coral_bleaching.html', name:'サンゴの白化', en:'Coral Bleaching', desc:'水温ストレスで白化・回復・死亡する環境応答。', tags:['環境応答','時系列'], vis:'bleach'},
+    ]
+  },
+  {
+    title:'画像から生命を描く', en:'Image → Life', color:'#e07cc0',
+    desc:'画像を生命的な動きで描いたり、2枚の画像の間を有機的な運動で補間します。',
+    items:[
+      {file:'vine_draw.html', name:'蔓が描く（1枚）', en:'Vine Draw', desc:'糸の先端が伸び枝分かれして1枚の画像を描き上げる。', tags:['先端成長','1枚'], vis:'vine', feat:true},
+      {file:'slime_image.html', name:'画像をなぞる粘菌', en:'Slime on Image', desc:'粘菌が画像の明部を餌場として形をなぞる。', tags:['粘菌','1枚'], vis:'slimeimg'},
+      {file:'rd_image.html', name:'画像から育つ模様', en:'RD on Image', desc:'反応拡散を画像で変調しチューリング模様が育つ。', tags:['反応拡散','1枚'], vis:'rdimg'},
+      {file:'living_morph.html', name:'粒子モーフ', en:'Living Morph', desc:'粒子がA↔Bの明部へ集まり往復する。', tags:['粒子','2枚モーフ'], vis:'lmorph'},
+      {file:'slime_morph.html', name:'粘菌モーフ', en:'Slime Morph', desc:'粘菌がロゴAからBへネットワークを保ち流れ移る。', tags:['粘菌','2枚モーフ'], vis:'smorph'},
+      {file:'rd_morph.html', name:'反応拡散モーフ', en:'RD Morph', desc:'チューリング模様が崩れて再形成されA↔B。', tags:['反応拡散','2枚モーフ'], vis:'rdmorph'},
+      {file:'edge_boid_morph.html', name:'点群ボイドモーフ', en:'Edge Boid Morph', desc:'輪郭点が群れてうねりロゴをくっきり可読に往復。', tags:['ボイド','2枚モーフ'], vis:'boid'},
+      {file:'metaball_morph.html', name:'液体ブロブモーフ', en:'Metaball Morph', desc:'水銀/スライム状の塊が融合しながら形を変える。', tags:['メタボール','2枚モーフ'], vis:'meta'},
+      {file:'voronoi_morph.html', name:'ボロノイ結晶モーフ', en:'Voronoi Morph', desc:'区画(セル)が再結晶しステンドグラス状に遷移。', tags:['ボロノイ','2枚モーフ'], vis:'voro'},
+      {file:'vine_growth_morph.html', name:'蔓モーフ（2枚）', en:'Vine Growth Morph', desc:'AからBへ糸が伸びて形を描き替える成長モーフ。', tags:['先端成長','2枚モーフ'], vis:'vine'},
+    ]
+  },
+];
+
+// ─────────────────────────────────────────────
+//  BUILD CARDS
+// ─────────────────────────────────────────────
+const container=document.getElementById('container');
+const allCanvases=[];
+
+CATEGORIES.forEach((cat,ci)=>{
+  const sec=document.createElement('div');
+  sec.className='cat';
+  sec.innerHTML=`
+    <div class="cat-head">
+      <span class="cat-num">0${ci+1}</span>
+      <span class="cat-title">${cat.title}</span>
+      <span class="card-en">${cat.en}</span>
+    </div>
+    <div class="cat-desc">${cat.desc}</div>
+  `;
+  const grid=document.createElement('div');
+  grid.className='grid';
+  cat.items.forEach(it=>{
+    const a=document.createElement('a');
+    a.className='card';
+    a.href=it.file;
+    a.style.setProperty('--c',cat.color);
+    a.innerHTML=`
+      <div class="card-vis"><canvas></canvas></div>
+      <div class="card-body">
+        <div class="card-title"><span class="dot" style="background:${cat.color}"></span>${it.name}</div>
+        <div class="card-en">${it.en}</div>
+        <div class="card-desc">${it.desc}</div>
+        <div class="card-tags">${it.tags.map(t=>`<span class="tag">${t}</span>`).join('')}</div>
+      </div>`;
+    grid.appendChild(a);
+    const cv=a.querySelector('canvas');
+    allCanvases.push({canvas:cv, vis:it.vis, color:cat.color});
+  });
+  sec.appendChild(grid);
+  container.appendChild(sec);
+});
+
+// ─────────────────────────────────────────────
+//  MINI ANIMATED PREVIEWS (lightweight)
+// ─────────────────────────────────────────────
+function hexToRgb(h){const n=parseInt(h.slice(1),16);return[(n>>16)&255,(n>>8)&255,n&255];}
+
+const previews=allCanvases.map(c=>{
+  const cv=c.canvas;
+  const ctx=cv.getContext('2d');
+  const rect=cv.getBoundingClientRect();
+  cv.width=Math.max(200,rect.width||260); cv.height=108;
+  return {ctx,w:cv.width,h:cv.height,vis:c.vis,col:hexToRgb(c.color),t:Math.random()*1000,state:null};
+});
+
+function drawPreview(p){
+  const {ctx,w,h,col,vis}=p;
+  p.t+=0.016;
+  const t=p.t;
+  ctx.fillStyle='rgba(5,6,10,0.25)';
+  ctx.fillRect(0,0,w,h);
+  const [cr,cg,cb]=col;
+
+  if(vis==='life'||vis==='caexp'||vis==='vid'||vis==='organism'){
+    // blinking cells grid
+    if(!p.state){p.state=[];for(let i=0;i<150;i++)p.state.push(Math.random());}
+    const cols=20,rows=8,cw=w/cols,ch=h/rows;
+    for(let i=0;i<p.state.length;i++){
+      if(Math.random()<0.04)p.state[i]=Math.random();
+      const v=p.state[i];if(v<0.5)continue;
+      const x=(i%cols)*cw,y=((i/cols)|0)*ch;
+      ctx.fillStyle=`rgba(${cr},${cg},${cb},${v})`;
+      ctx.fillRect(x+1,y+1,cw-2,ch-2);
+    }
+  } else if(vis==='life3d'){
+    ctx.save();ctx.translate(w/2,h/2);
+    for(let i=0;i<5;i++){
+      const a=t*0.5+i*1.2, r=18+i*6;
+      const x=Math.cos(a)*r, y=Math.sin(a*0.7)*r*0.5;
+      ctx.fillStyle=`rgba(${cr},${cg},${cb},${0.8-i*0.12})`;
+      ctx.fillRect(x-5,y-5,10,10);
+    }
+    ctx.restore();
+  } else if(vis==='sand'){
+    if(!p.state){p.state=[];for(let i=0;i<60;i++)p.state.push({x:Math.random()*w,y:Math.random()*h,vy:0});}
+    for(const s of p.state){s.vy+=0.15;s.y+=s.vy;if(s.y>h){s.y=0;s.vy=0;s.x=Math.random()*w;}ctx.fillStyle=`rgba(${cr},${cg},${cb},0.85)`;ctx.fillRect(s.x,s.y,2.5,2.5);}
+  } else if(vis==='plife'||vis==='creature'){
+    if(!p.state){p.state=[];for(let i=0;i<40;i++)p.state.push({x:Math.random()*w,y:Math.random()*h,a:Math.random()*6.28,c:i%3});}
+    const cols=[[224,82,82],[95,217,154],[124,138,255]];
+    for(const s of p.state){s.a+=(Math.random()-0.5)*0.4;s.x+=Math.cos(s.a)*0.8;s.y+=Math.sin(s.a)*0.8;if(s.x<0)s.x+=w;if(s.x>w)s.x-=w;if(s.y<0)s.y+=h;if(s.y>h)s.y-=h;const cc=cols[s.c];ctx.fillStyle=`rgb(${cc[0]},${cc[1]},${cc[2]})`;ctx.beginPath();ctx.arc(s.x,s.y,2,0,6.28);ctx.fill();}
+  } else if(vis==='slime'||vis==='slimeimg'||vis==='smorph'){
+    if(!p.state){p.state=[];for(let i=0;i<50;i++)p.state.push({x:w/2,y:h/2,a:Math.random()*6.28});}
+    ctx.fillStyle=`rgba(${cr},${cg},${cb},0.5)`;
+    for(const s of p.state){s.a+=(Math.random()-0.5)*0.6;s.x+=Math.cos(s.a)*1.1;s.y+=Math.sin(s.a)*1.1;if(s.x<0||s.x>w||s.y<0||s.y>h){s.x=w/2;s.y=h/2;}ctx.fillRect(s.x,s.y,1.6,1.6);}
+  } else if(vis==='reef'||vis==='myc'||vis==='vine'||vis==='drift'){
+    // branching growth
+    if(!p.state){p.state={tips:[{x:w/2,y:h-4,a:-1.57}],seg:[]};}
+    const st=p.state;
+    for(let k=0;k<2;k++){
+      for(let i=st.tips.length-1;i>=0;i--){
+        const tp=st.tips[i];tp.a+=(Math.random()-0.5)*0.5;const nx=tp.x+Math.cos(tp.a)*2,ny=tp.y+Math.sin(tp.a)*2;
+        st.seg.push([tp.x,tp.y,nx,ny]);tp.x=nx;tp.y=ny;
+        if(Math.random()<0.04&&st.tips.length<14)st.tips.push({x:nx,y:ny,a:tp.a+(Math.random()-0.5)});
+        if(ny<0||tp.x<0||tp.x>w||st.seg.length>400){st.tips.splice(i,1);}
+      }
+    }
+    if(st.tips.length===0){p.state={tips:[{x:w/2,y:h-4,a:-1.57}],seg:[]};}
+    ctx.strokeStyle=`rgba(${cr},${cg},${cb},0.7)`;ctx.lineWidth=1.2;
+    ctx.beginPath();for(const s of st.seg){ctx.moveTo(s[0],s[1]);ctx.lineTo(s[2],s[3]);}ctx.stroke();
+  } else if(vis==='crystal'){
+    ctx.save();ctx.translate(w/2,h/2);
+    const n=6;for(let k=0;k<n;k++){ctx.rotate(6.28/n);ctx.strokeStyle=`rgba(${cr},${cg},${cb},0.7)`;ctx.lineWidth=1;const len=20+Math.sin(t)*8;ctx.beginPath();ctx.moveTo(0,0);ctx.lineTo(0,-len);ctx.moveTo(0,-len*0.5);ctx.lineTo(8,-len*0.7);ctx.moveTo(0,-len*0.5);ctx.lineTo(-8,-len*0.7);ctx.stroke();}
+    ctx.restore();
+  } else if(vis==='bleach'){
+    // temperature wave + coral color
+    ctx.strokeStyle=`rgba(${cr},${cg},${cb},0.8)`;ctx.lineWidth=1.5;ctx.beginPath();
+    for(let x=0;x<w;x++){const y=h/2+Math.sin(x*0.05+t*2)*16;x===0?ctx.moveTo(x,y):ctx.lineTo(x,y);}ctx.stroke();
+    for(let i=0;i<8;i++){const bl=(Math.sin(t+i)+1)/2;ctx.fillStyle=`rgb(${200+bl*35},${105+bl*120},${63+bl*160})`;ctx.beginPath();ctx.arc(15+i*((w-30)/7),h-14,4,0,6.28);ctx.fill();}
+  } else if(vis==='lmorph'||vis==='boid'||vis==='meta'||vis==='voro'){
+    // morphing point cloud between two shapes
+    if(!p.state){p.state=[];for(let i=0;i<70;i++){const a=i/70*6.28;p.state.push({a});}}
+    const m=(Math.sin(t*0.6)+1)/2;
+    for(const s of p.state){
+      const x1=w/2+Math.cos(s.a)*30, y1=h/2+Math.sin(s.a)*22; // circle
+      const sq=20;const x2=w/2+Math.max(-sq,Math.min(sq,Math.cos(s.a)*40)), y2=h/2+Math.max(-sq*0.7,Math.min(sq*0.7,Math.sin(s.a)*40)); // square-ish
+      const x=x1*(1-m)+x2*m+Math.sin(t*3+s.a*5)*4*Math.sin(m*3.14);
+      const y=y1*(1-m)+y2*m+Math.cos(t*3+s.a*5)*4*Math.sin(m*3.14);
+      ctx.fillStyle=`rgba(${cr},${cg},${cb},0.9)`;ctx.fillRect(x,y,2,2);
+    }
+  } else if(vis==='rdimg'||vis==='rdmorph'){
+    // reaction-diffusion-ish spots
+    if(!p.state){p.state=[];for(let i=0;i<24;i++)p.state.push({x:Math.random()*w,y:Math.random()*h,r:3+Math.random()*5,ph:Math.random()*6.28});}
+    for(const s of p.state){const rr=s.r*(1+0.3*Math.sin(t*2+s.ph));ctx.fillStyle=`rgba(${cr},${cg},${cb},0.6)`;ctx.beginPath();ctx.arc(s.x,s.y,rr,0,6.28);ctx.fill();}
+  } else {
+    // default
+    ctx.fillStyle=`rgba(${cr},${cg},${cb},0.6)`;
+    for(let i=0;i<20;i++){const x=(i/20)*w,y=h/2+Math.sin(t+i)*20;ctx.fillRect(x,y,3,3);}
+  }
+}
+
+let visible=new Set();
+const io=new IntersectionObserver(ents=>{
+  ents.forEach(e=>{const idx=previews.findIndex(p=>p.ctx.canvas===e.target);if(idx<0)return;if(e.isIntersecting)visible.add(idx);else visible.delete(idx);});
+},{threshold:0.01});
+previews.forEach(p=>io.observe(p.ctx.canvas));
+
+function animate(){
+  requestAnimationFrame(animate);
+  visible.forEach(idx=>drawPreview(previews[idx]));
+}
+// init backgrounds
+previews.forEach(p=>{p.ctx.fillStyle='#05060a';p.ctx.fillRect(0,0,p.w,p.h);});
+animate();
+</script>
+</body>
+</html>
