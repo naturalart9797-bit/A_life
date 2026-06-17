@@ -1,0 +1,581 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Reef Growth</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+JP:wght@300;400;500&display=swap');
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#040810;--surface:#0a0f18;--border:#162030;--border2:#223044;
+  --accent:#5fb3d9;--accent2:#2f7fa6;
+  --text:#cfe4f0;--text2:#5f7c8f;--text3:#27384a;
+  --font-mono:'IBM Plex Mono',monospace;--font-ui:'IBM Plex Sans JP',sans-serif;
+}
+body{background:var(--bg);color:var(--text);font-family:var(--font-ui);height:100vh;display:flex;flex-direction:column;overflow:hidden;user-select:none;}
+header{display:flex;align-items:center;gap:14px;padding:8px 18px;border-bottom:1px solid var(--border);background:var(--surface);flex-shrink:0;}
+.logo{font-family:var(--font-mono);font-size:12px;font-weight:500;color:var(--accent);letter-spacing:.1em;text-transform:uppercase;}
+.logo em{color:var(--text3);font-style:normal;}
+.stats{margin-left:auto;display:flex;gap:18px;}
+.stat{display:flex;flex-direction:column;align-items:flex-end;}
+.stat-label{font-family:var(--font-mono);font-size:8px;color:var(--text3);letter-spacing:.1em;text-transform:uppercase;}
+.stat-val{font-family:var(--font-mono);font-size:13px;font-weight:500;color:var(--text);line-height:1.2;}
+.main{display:flex;flex:1;overflow:hidden;}
+.sidebar{width:262px;flex-shrink:0;background:var(--surface);border-right:1px solid var(--border);display:flex;flex-direction:column;overflow-y:auto;}
+.sidebar::-webkit-scrollbar{width:3px;}
+.sidebar::-webkit-scrollbar-thumb{background:var(--border2);border-radius:2px;}
+.sec{padding:11px 13px;border-bottom:1px solid var(--border);}
+.sec-title{font-family:var(--font-mono);font-size:8px;color:var(--text3);letter-spacing:.14em;text-transform:uppercase;margin-bottom:9px;}
+button{font-family:var(--font-mono);font-size:11px;font-weight:500;background:transparent;border:1px solid var(--border);color:var(--text2);padding:5px 10px;border-radius:3px;cursor:pointer;transition:all .15s;white-space:nowrap;}
+button:hover{border-color:var(--accent2);color:var(--accent);background:rgba(95,179,217,.07);}
+button.on{border-color:var(--accent)!important;color:var(--accent)!important;background:rgba(95,179,217,.14)!important;}
+.play-btn{width:100%;padding:7px;font-size:12px;border-color:var(--accent2);color:var(--accent);}
+.play-btn.running{background:rgba(95,179,217,.1);}
+.sl-row{margin-bottom:8px;}
+.sl-head{display:flex;justify-content:space-between;margin-bottom:3px;}
+.sl-name{font-family:var(--font-mono);font-size:10px;color:var(--text2);}
+.sl-val{font-family:var(--font-mono);font-size:10px;color:var(--accent);}
+input[type=range]{-webkit-appearance:none;width:100%;height:2px;background:var(--border);border-radius:1px;outline:none;}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:11px;height:11px;background:var(--accent);border-radius:50%;cursor:pointer;}
+
+.sp-card{border:1px solid var(--border);border-radius:6px;padding:9px 10px;margin-bottom:8px;}
+.sp-head{display:flex;align-items:center;gap:7px;margin-bottom:6px;}
+.sp-dot{width:11px;height:11px;border-radius:50%;flex-shrink:0;}
+.sp-name{font-family:var(--font-mono);font-size:11px;font-weight:500;flex:1;}
+.sp-pct{font-family:var(--font-mono);font-size:10px;color:var(--accent);}
+.sp-desc{font-family:var(--font-mono);font-size:8px;color:var(--text3);line-height:1.7;margin-bottom:6px;}
+
+.tog-row{display:flex;align-items:center;justify-content:space-between;margin-bottom:7px;}
+.tog-label{font-family:var(--font-mono);font-size:10px;color:var(--text2);}
+.tog{position:relative;width:28px;height:14px;flex-shrink:0;}
+.tog input{opacity:0;width:0;height:0;position:absolute;}
+.tog-track{position:absolute;inset:0;background:var(--border);border-radius:8px;cursor:pointer;transition:background .2s;}
+.tog input:checked+.tog-track{background:var(--accent2);}
+.tog-track::after{content:'';position:absolute;width:10px;height:10px;left:2px;top:2px;background:var(--text3);border-radius:50%;transition:transform .2s,background .2s;}
+.tog input:checked+.tog-track::after{transform:translateX(14px);background:var(--accent);}
+
+.canvas-wrap{flex:1;position:relative;overflow:hidden;background:#02050a;}
+canvas{display:block;width:100%;height:100%;image-rendering:pixelated;}
+.hint{position:absolute;bottom:10px;left:50%;transform:translateX(-50%);font-family:var(--font-mono);font-size:9px;color:var(--text3);pointer-events:none;white-space:nowrap;}
+.coverage-bar{height:6px;border-radius:3px;overflow:hidden;display:flex;background:var(--border);margin-top:8px;}
+.coverage-seg{height:100%;}
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">Reef <em>//</em> Growth</div>
+  <div class="stats">
+    <div class="stat"><span class="stat-label">世代</span><span class="stat-val" id="statGen">0</span></div>
+    <div class="stat"><span class="stat-label">被覆率</span><span class="stat-val" id="statCov">0%</span></div>
+    <div class="stat"><span class="stat-label">fps</span><span class="stat-val" id="statFps">—</span></div>
+  </div>
+</header>
+
+<div class="main">
+  <div class="sidebar">
+
+    <div class="sec">
+      <button class="play-btn running" id="btnPlay" onclick="togglePlay()">■ pause</button>
+      <div style="display:flex;gap:5px;margin-top:5px;">
+        <button style="flex:1" onclick="step()">1ステップ</button>
+        <button style="flex:1" onclick="reseed()">再生成</button>
+      </div>
+      <div class="coverage-bar" id="covBar"></div>
+    </div>
+
+    <div class="sec">
+      <div class="sec-title">生物種（成長ルール）</div>
+      <div id="speciesCards"></div>
+    </div>
+
+    <div class="sec">
+      <div class="sec-title">環境・光</div>
+      <div class="sl-row">
+        <div class="sl-head"><span class="sl-name">環境光（アンビエント）</span><span class="sl-val" id="vAmbient">0.15</span></div>
+        <input type="range" min="0" max="0.6" value="0.15" step="0.01" id="sAmbient" oninput="vAmbient.textContent=(+this.value).toFixed(2)">
+      </div>
+      <div class="sl-row">
+        <div class="sl-head"><span class="sl-name">遮光の強さ</span><span class="sl-val" id="vShadow">0.10</span></div>
+        <input type="range" min="0.01" max="0.4" value="0.10" step="0.01" id="sShadow" oninput="vShadow.textContent=(+this.value).toFixed(2)">
+      </div>
+      <div class="tog-row"><span class="tog-label">光分布を表示</span>
+        <label class="tog"><input type="checkbox" id="togLight"><div class="tog-track"></div></label>
+      </div>
+    </div>
+
+    <div class="sec">
+      <div class="sec-title">競合・上書き</div>
+      <div class="tog-row"><span class="tog-label">サンゴ・コケが藻を浸食</span>
+        <label class="tog"><input type="checkbox" id="togOvergrow" checked><div class="tog-track"></div></label>
+      </div>
+      <div class="sl-row">
+        <div class="sl-head"><span class="sl-name">浸食速度</span><span class="sl-val" id="vOver">0.02</span></div>
+        <input type="range" min="0" max="0.1" value="0.02" step="0.005" id="sOver" oninput="vOver.textContent=(+this.value).toFixed(3)">
+      </div>
+    </div>
+
+    <div class="sec">
+      <div class="sec-title">岩礁（基盤）</div>
+      <div class="sl-row">
+        <div class="sl-head"><span class="sl-name">岩のクラスター数</span><span class="sl-val" id="vRockN">7</span></div>
+        <input type="range" min="0" max="20" value="7" step="1" id="sRockN" oninput="vRockN.textContent=this.value">
+      </div>
+    </div>
+
+    <div class="sec">
+      <div class="sec-title">表示</div>
+      <div class="sl-row">
+        <div class="sl-head"><span class="sl-name">セルサイズ</span><span class="sl-val" id="vCS">5</span></div>
+        <input type="range" min="2" max="10" value="5" step="1" id="sCS" oninput="vCS.textContent=this.value;rebuild()">
+      </div>
+      <div class="sl-row">
+        <div class="sl-head"><span class="sl-name">シミュ速度（tick/秒）</span><span class="sl-val" id="vTPS">12</span></div>
+        <input type="range" min="1" max="60" value="12" step="1" id="sTPS" oninput="vTPS.textContent=this.value;setTPS()">
+      </div>
+    </div>
+
+    <div class="sec" style="font-family:var(--font-mono);font-size:9px;color:var(--text3);line-height:1.9;">
+      Space: 一時停止<br>
+      クリック/ドラッグ: その種を直接植え付け<br>
+      下のボタンから植え付け対象を選択
+    </div>
+  </div>
+
+  <div class="canvas-wrap" id="canvasWrap">
+    <canvas id="c"></canvas>
+    <div class="hint">クリックで成長点を追加 / Space: pause</div>
+  </div>
+</div>
+
+<script>
+// ════════════════════════════════════════════════
+//  SPECIES DEFINITIONS
+// ════════════════════════════════════════════════
+// state codes: 0 empty(water), 1 rock, 2 coral, 3 moss, 4 algae
+const SPECIES = {
+  coral:{ id:2, name:'サンゴ', dotColor:'rgb(255,140,120)', hueMin:330, hueMax:390, sat:70,
+          desc:'隣接数が少ないセルを好み枝分かれしながら上方(光側)へ伸びる。DLA的な分岐構造。',
+          rate:0.07, seeds:5 },
+  moss:{ id:3, name:'コケ', dotColor:'rgb(120,210,120)', hueMin:80, hueMax:150, sat:55,
+          desc:'日陰・密集した場所を好み塊状に密に広がる。光が弱いほど成長しやすい。',
+          rate:0.05, seeds:5 },
+  algae:{ id:4, name:'藻', dotColor:'rgb(120,220,210)', hueMin:150, hueMax:210, sat:60,
+          desc:'明るい場所を好み隣接数に関係なく薄い膜状に素早く拡散する。',
+          rate:0.10, seeds:6 },
+};
+const SPECIES_LIST=Object.values(SPECIES);
+
+// ════════════════════════════════════════════════
+//  STATE
+// ════════════════════════════════════════════════
+const canvas=document.getElementById('c');
+const ctx=canvas.getContext('2d');
+const wrap=document.getElementById('canvasWrap');
+
+let CS=5, COLS=0, ROWS=0, N=0;
+let grid, age, hue;       // Uint8Array grid (state), Uint16Array age, Uint16Array hue
+let light;                 // Float32Array
+let running=true, gen=0;
+let tickTimer=null;
+let fpsFrames=0,fpsLast=performance.now();
+let paintSpecies='coral';
+let painting=false;
+
+// ════════════════════════════════════════════════
+//  GRID SETUP
+// ════════════════════════════════════════════════
+function rebuild(){
+  CS=+document.getElementById('sCS').value;
+  canvas.width=wrap.clientWidth;
+  canvas.height=wrap.clientHeight;
+  COLS=Math.floor(canvas.width/CS);
+  ROWS=Math.floor(canvas.height/CS);
+  N=COLS*ROWS;
+  grid=new Uint8Array(N);
+  age=new Uint16Array(N);
+  hue=new Uint16Array(N);
+  light=new Float32Array(N);
+  reseed();
+}
+
+function idx(r,c){ return r*COLS+c; }
+
+function reseed(){
+  grid.fill(0); age.fill(0); hue.fill(0);
+  gen=0;
+  document.getElementById('statGen').textContent='0';
+
+  // Bottom 2 rows = rock substrate
+  const rockRows=2;
+  for(let r=ROWS-rockRows;r<ROWS;r++) for(let c=0;c<COLS;c++) grid[idx(r,c)]=1;
+
+  // Random rock blobs (reef outcrops) in lower 70%
+  const nClusters=+document.getElementById('sRockN').value;
+  for(let k=0;k<nClusters;k++){
+    const cx=Math.floor(Math.random()*COLS);
+    const cy=Math.floor(ROWS*0.35+Math.random()*ROWS*0.55);
+    const rad=2+Math.floor(Math.random()*4);
+    for(let dr=-rad;dr<=rad;dr++) for(let dc=-rad;dc<=rad;dc++){
+      if(dr*dr+dc*dc>rad*rad) continue;
+      const r=cy+dr,c=cx+dc;
+      if(r<0||r>=ROWS||c<0||c>=COLS) continue;
+      if(Math.random()<0.85) grid[idx(r,c)]=1;
+    }
+  }
+
+  // Collect substrate-edge cells (empty cells adjacent to rock)
+  const edge=[];
+  for(let r=0;r<ROWS;r++) for(let c=0;c<COLS;c++){
+    if(grid[idx(r,c)]!==0) continue;
+    let nearRock=false;
+    for(const [dr,dc] of [[-1,0],[1,0],[0,-1],[0,1],[-1,-1],[-1,1],[1,-1],[1,1]]){
+      const nr=r+dr,nc=c+dc;
+      if(nr<0||nr>=ROWS||nc<0||nc>=COLS) continue;
+      if(grid[idx(nr,nc)]===1){nearRock=true;break;}
+    }
+    if(nearRock) edge.push(idx(r,c));
+  }
+  shuffle(edge);
+
+  // Place seeds for enabled species
+  let ei=0;
+  SPECIES_LIST.forEach(spec=>{
+    const enabled=document.getElementById('en-'+keyOf(spec)).checked;
+    const n=+document.getElementById('seed-'+keyOf(spec)).value;
+    if(!enabled) return;
+    for(let i=0;i<n && ei<edge.length;i++,ei++){
+      const cell=edge[ei];
+      grid[cell]=spec.id;
+      age[cell]=0;
+      hue[cell]=randHue(spec);
+    }
+  });
+
+  computeLight();
+  render();
+  updateStats();
+}
+
+function shuffle(arr){
+  for(let i=arr.length-1;i>0;i--){
+    const j=Math.floor(Math.random()*(i+1));
+    [arr[i],arr[j]]=[arr[j],arr[i]];
+  }
+}
+function keyOf(spec){
+  for(const k in SPECIES) if(SPECIES[k]===spec) return k;
+}
+function randHue(spec){
+  let h=spec.hueMin+Math.random()*(spec.hueMax-spec.hueMin);
+  return Math.round(((h%360)+360)%360);
+}
+function driftHue(h,spec){
+  const lo=spec.hueMin, hi=spec.hueMax;
+  const range=hi-lo;
+  let nh=h+(Math.random()*8-4);
+  nh=((nh-lo)%360+360)%360;
+  nh=lo+((nh%range)+range)%range;
+  return Math.round(((nh%360)+360)%360);
+}
+
+// ════════════════════════════════════════════════
+//  LIGHT FIELD
+// ════════════════════════════════════════════════
+function computeLight(){
+  const ambient=+document.getElementById('sAmbient').value;
+  const shadowK=+document.getElementById('sShadow').value;
+  for(let c=0;c<COLS;c++){
+    let shadow=0;
+    for(let r=0;r<ROWS;r++){
+      const i=idx(r,c);
+      light[i]=ambient+(1-ambient)*Math.exp(-shadow*shadowK*4);
+      if(grid[i]!==0) shadow++;
+    }
+  }
+}
+
+// ════════════════════════════════════════════════
+//  GROWTH RULES
+// ════════════════════════════════════════════════
+const NB8=[[-1,-1],[-1,0],[-1,1],[0,-1],[0,1],[1,-1],[1,0],[1,1]];
+
+function growthProb(speciesKey, occCount, L){
+  const rate=+document.getElementById('rate-'+speciesKey).value;
+  if(speciesKey==='coral'){
+    // Branchy: prefer occCount around 1-2 (sparse), upward(light) bias
+    const branch=Math.max(0, 1-Math.abs(occCount-1.5)/3.2);
+    return rate*(0.25+0.75*L)*branch;
+  }
+  if(speciesKey==='moss'){
+    // Clumpy: prefer shade, denser with more neighbors
+    const shade=0.15+0.85*(1-L);
+    const density=0.25+0.75*(occCount/8);
+    return rate*shade*density;
+  }
+  if(speciesKey==='algae'){
+    // Thin film: light-loving, neighbor-independent
+    return rate*(0.15+0.85*L);
+  }
+  return 0;
+}
+
+function tick(){
+  if(!running) return;
+  computeLight();
+
+  const overgrow=document.getElementById('togOvergrow').checked;
+  const overRate=+document.getElementById('sOver').value;
+
+  // claims: cellIndex -> array of {speciesKey, parentIdx}
+  const claims=new Map();
+
+  for(let r=0;r<ROWS;r++){
+    for(let c=0;c<COLS;c++){
+      const i=idx(r,c);
+      const st=grid[i];
+      if(st<2) continue; // only living species spread
+      const speciesKey = st===2?'coral': st===3?'moss':'algae';
+      if(!document.getElementById('en-'+speciesKey).checked) continue;
+
+      for(const [dr,dc] of NB8){
+        const nr=r+dr,nc=c+dc;
+        if(nr<0||nr>=ROWS||nc<0||nc>=COLS) continue;
+        const ni=idx(nr,nc);
+        const nst=grid[ni];
+
+        if(nst===0){
+          let occ=0;
+          for(const [ddr,ddc] of NB8){
+            const rr=nr+ddr,cc=nc+ddc;
+            if(rr<0||rr>=ROWS||cc<0||cc>=COLS) continue;
+            if(grid[idx(rr,cc)]!==0) occ++;
+          }
+          const p=growthProb(speciesKey, occ, light[ni]);
+          if(Math.random()<p){
+            if(!claims.has(ni)) claims.set(ni,[]);
+            claims.get(ni).push({key:speciesKey, parent:i});
+          }
+        } else if(overgrow && nst===4 && (st===2||st===3)){
+          const rate=+document.getElementById('rate-'+speciesKey).value;
+          if(Math.random()<overRate*rate*10){
+            if(!claims.has(ni)) claims.set(ni,[]);
+            claims.get(ni).push({key:speciesKey, parent:i, overgrow:true});
+          }
+        }
+      }
+    }
+  }
+
+  // Resolve claims
+  claims.forEach((list, ni)=>{
+    const pick=list[Math.floor(Math.random()*list.length)];
+    const spec=SPECIES[pick.key];
+    grid[ni]=spec.id;
+    age[ni]=0;
+    hue[ni]=driftHue(hue[pick.parent]||randHue(spec), spec);
+  });
+
+  // Age all living cells
+  for(let i=0;i<N;i++) if(grid[i]>=2 && age[i]<2000) age[i]++;
+
+  gen++;
+  document.getElementById('statGen').textContent=gen.toLocaleString();
+  updateStats();
+}
+
+// ════════════════════════════════════════════════
+//  RENDER
+// ════════════════════════════════════════════════
+function hslToRgb(h,s,l){
+  h=((h%360)+360)%360; s/=100; l/=100;
+  const cc=(1-Math.abs(2*l-1))*s, x=cc*(1-Math.abs((h/60)%2-1)), m=l-cc/2;
+  let r=0,g=0,b=0;
+  if(h<60){r=cc;g=x;}else if(h<120){r=x;g=cc;}else if(h<180){g=cc;b=x;}
+  else if(h<240){g=x;b=cc;}else if(h<300){r=x;b=cc;}else{r=cc;b=x;}
+  return [(r+m)*255|0,(g+m)*255|0,(b+m)*255|0];
+}
+
+function render(){
+  const W=canvas.width,H=canvas.height;
+  const img=ctx.createImageData(W,H);
+  const d=img.data;
+  const showLight=document.getElementById('togLight').checked;
+
+  for(let r=0;r<ROWS;r++){
+    for(let c=0;c<COLS;c++){
+      const i=idx(r,c);
+      const st=grid[i];
+      let R,G,B;
+      if(st===0){
+        const depthT=r/ROWS;
+        const baseR=4+depthT*2, baseG=10+depthT*4, baseB=22+depthT*10;
+        if(showLight){
+          const L=light[i];
+          R=baseR+L*40; G=baseG+L*70; B=baseB+L*90;
+        } else { R=baseR;G=baseG;B=baseB; }
+      } else if(st===1){
+        const v=70+((r*7+c*13)%20);
+        R=v;G=v-4;B=v-8;
+      } else {
+        const spec = st===2?SPECIES.coral: st===3?SPECIES.moss:SPECIES.algae;
+        const a=age[i];
+        const tip=Math.max(0,1-a/24);
+        const L = (st===4) ? (38+tip*22) : (32+tip*28);
+        const S = spec.sat;
+        [R,G,B]=hslToRgb(hue[i], S, L);
+        if(st===4){
+          const wR=8,wG=16,wB=30, alpha=0.72;
+          R=R*alpha+wR*(1-alpha); G=G*alpha+wG*(1-alpha); B=B*alpha+wB*(1-alpha);
+        }
+      }
+      for(let dy=0;dy<CS;dy++) for(let dx=0;dx<CS;dx++){
+        const px=((r*CS+dy)*W+(c*CS+dx))*4;
+        if(px<0||px>=d.length) continue;
+        d[px]=R;d[px+1]=G;d[px+2]=B;d[px+3]=255;
+      }
+    }
+  }
+  ctx.putImageData(img,0,0);
+}
+
+// ════════════════════════════════════════════════
+//  STATS
+// ════════════════════════════════════════════════
+function updateStats(){
+  let coral=0,moss=0,algae=0,water=0,rock=0;
+  for(let i=0;i<N;i++){
+    const st=grid[i];
+    if(st===0) water++;
+    else if(st===1) rock++;
+    else if(st===2) coral++;
+    else if(st===3) moss++;
+    else if(st===4) algae++;
+  }
+  const growable=N-rock;
+  const cov=growable>0 ? Math.round((coral+moss+algae)/growable*100) : 0;
+  document.getElementById('statCov').textContent=cov+'%';
+
+  ['coral','moss','algae'].forEach(key=>{
+    const cnt = key==='coral'?coral: key==='moss'?moss:algae;
+    const pct = growable>0? (cnt/growable*100):0;
+    const el=document.getElementById('pct-'+key);
+    if(el) el.textContent=pct.toFixed(1)+'%';
+  });
+
+  const bar=document.getElementById('covBar');
+  bar.innerHTML='';
+  const segs=[
+    {n:coral,c:SPECIES.coral.dotColor},
+    {n:moss,c:SPECIES.moss.dotColor},
+    {n:algae,c:SPECIES.algae.dotColor},
+    {n:water,c:'#16222e'},
+  ];
+  segs.forEach(s=>{
+    const div=document.createElement('div');
+    div.className='coverage-seg';
+    div.style.background=s.c;
+    div.style.width=(s.n/N*100)+'%';
+    bar.appendChild(div);
+  });
+}
+
+// ════════════════════════════════════════════════
+//  MAIN LOOP
+// ════════════════════════════════════════════════
+function renderLoop(){
+  requestAnimationFrame(renderLoop);
+  fpsFrames++;
+  const now=performance.now();
+  if(now-fpsLast>=1000){
+    document.getElementById('statFps').textContent=fpsFrames;
+    fpsFrames=0; fpsLast=now;
+  }
+  render();
+}
+
+function setTPS(){
+  clearInterval(tickTimer);
+  const tps=+document.getElementById('sTPS').value;
+  tickTimer=setInterval(tick,1000/tps);
+}
+
+function step(){ const wasRunning=running; running=true; tick(); running=wasRunning; }
+
+// ════════════════════════════════════════════════
+//  UI BUILD
+// ════════════════════════════════════════════════
+function buildSpeciesCards(){
+  const wrapEl=document.getElementById('speciesCards');
+  Object.entries(SPECIES).forEach(([key,spec])=>{
+    const card=document.createElement('div');
+    card.className='sp-card';
+    card.style.borderColor=spec.dotColor.replace('rgb','rgba').replace(')',',0.3)');
+    card.innerHTML=
+      '<div class="sp-head">'+
+        '<div class="sp-dot" style="background:'+spec.dotColor+'"></div>'+
+        '<div class="sp-name">'+spec.name+'</div>'+
+        '<div class="sp-pct" id="pct-'+key+'">0%</div>'+
+      '</div>'+
+      '<div class="sp-desc">'+spec.desc+'</div>'+
+      '<div class="tog-row"><span class="tog-label">有効</span>'+
+        '<label class="tog"><input type="checkbox" id="en-'+key+'" checked><div class="tog-track"></div></label></div>'+
+      '<div class="sl-row"><div class="sl-head"><span class="sl-name">成長率</span><span class="sl-val" id="rateval-'+key+'">'+spec.rate+'</span></div>'+
+        '<input type="range" min="0.005" max="0.25" step="0.005" value="'+spec.rate+'" id="rate-'+key+'" '+
+        'oninput="document.getElementById(&quot;rateval-'+key+'&quot;).textContent=this.value">'+
+      '</div>'+
+      '<div class="sl-row"><div class="sl-head"><span class="sl-name">初期シード数</span><span class="sl-val" id="seedval-'+key+'">'+spec.seeds+'</span></div>'+
+        '<input type="range" min="0" max="20" step="1" value="'+spec.seeds+'" id="seed-'+key+'" '+
+        'oninput="document.getElementById(&quot;seedval-'+key+'&quot;).textContent=this.value">'+
+      '</div>'+
+      '<button class="paint-btn" id="paint-'+key+'" style="width:100%;font-size:10px;" onclick="setPaintSpecies(&quot;'+key+'&quot;)">クリックで植え付け: '+spec.name+'</button>';
+    wrapEl.appendChild(card);
+  });
+  document.getElementById('paint-coral').classList.add('on');
+}
+
+function setPaintSpecies(key){
+  paintSpecies=key;
+  Object.keys(SPECIES).forEach(k=>document.getElementById('paint-'+k).classList.toggle('on',k===key));
+}
+
+// ════════════════════════════════════════════════
+//  CONTROLS
+// ════════════════════════════════════════════════
+function togglePlay(){
+  running=!running;
+  const btn=document.getElementById('btnPlay');
+  btn.textContent=running?'■ pause':'▶ resume';
+  btn.classList.toggle('running',running);
+}
+window.addEventListener('keydown',e=>{
+  if(e.code==='Space'){e.preventDefault();togglePlay();}
+});
+window.addEventListener('resize',()=>rebuild());
+
+function paintAt(clientX,clientY){
+  const rect=canvas.getBoundingClientRect();
+  const x=clientX-rect.left, y=clientY-rect.top;
+  const c=Math.floor(x/CS), r=Math.floor(y/CS);
+  if(r<0||r>=ROWS||c<0||c>=COLS) return;
+  const i=idx(r,c);
+  if(grid[i]!==0) return;
+  const spec=SPECIES[paintSpecies];
+  grid[i]=spec.id;
+  age[i]=0;
+  hue[i]=randHue(spec);
+}
+canvas.addEventListener('mousedown',e=>{painting=true;paintAt(e.clientX,e.clientY);});
+canvas.addEventListener('mousemove',e=>{if(painting)paintAt(e.clientX,e.clientY);});
+document.addEventListener('mouseup',()=>painting=false);
+
+// ════════════════════════════════════════════════
+//  BOOT
+// ════════════════════════════════════════════════
+buildSpeciesCards();
+rebuild();
+setTPS();
+renderLoop();
+</script>
+</body>
+</html>

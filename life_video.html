@@ -1,0 +1,893 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Life × Video</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+JP:wght@300;400;500&display=swap');
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#0a0a0f;--surface:#10101a;--border:#1e1e30;
+  --accent:#7c6af7;--accent2:#4a3fcc;--accent3:#a89bff;
+  --red:#e05252;--green:#1fb885;--yellow:#e0a832;
+  --text:#d0ccff;--text2:#6a67a0;--text3:#2e2c50;
+  --font-mono:'IBM Plex Mono',monospace;--font-ui:'IBM Plex Sans JP',sans-serif;
+}
+body{background:var(--bg);color:var(--text);font-family:var(--font-ui);height:100vh;display:flex;flex-direction:column;overflow:hidden;user-select:none;}
+header{display:flex;align-items:center;gap:12px;padding:8px 16px;border-bottom:1px solid var(--border);background:var(--surface);flex-shrink:0;}
+.logo{font-family:var(--font-mono);font-size:12px;font-weight:500;color:var(--accent);letter-spacing:.08em;text-transform:uppercase;}
+.logo span{color:var(--text3);}
+.stats{margin-left:auto;display:flex;gap:18px;}
+.stat{display:flex;flex-direction:column;align-items:flex-end;}
+.stat-label{font-family:var(--font-mono);font-size:8px;color:var(--text3);letter-spacing:.1em;text-transform:uppercase;}
+.stat-val{font-family:var(--font-mono);font-size:13px;font-weight:500;color:var(--text);line-height:1.2;}
+/* Recording indicator */
+.rec-dot{width:8px;height:8px;border-radius:50%;background:var(--red);display:none;animation:blink 1s infinite;}
+.rec-dot.on{display:inline-block;}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:0.2}}
+.main{display:flex;flex:1;overflow:hidden;}
+.sidebar{width:244px;flex-shrink:0;background:var(--surface);border-right:1px solid var(--border);display:flex;flex-direction:column;overflow-y:auto;}
+.sidebar::-webkit-scrollbar{width:3px;}
+.sidebar::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px;}
+.sec{padding:11px 13px;border-bottom:1px solid var(--border);}
+.sec-title{font-family:var(--font-mono);font-size:8px;color:var(--text3);letter-spacing:.12em;text-transform:uppercase;margin-bottom:9px;}
+button{font-family:var(--font-mono);font-size:11px;font-weight:500;background:transparent;border:1px solid var(--border);color:var(--text2);padding:5px 10px;border-radius:3px;cursor:pointer;letter-spacing:.04em;transition:all .15s;white-space:nowrap;}
+button:hover{border-color:var(--accent2);color:var(--accent);background:rgba(124,106,247,.07);}
+button.on{border-color:var(--accent)!important;color:var(--accent)!important;background:rgba(124,106,247,.14)!important;}
+button.rec-btn{border-color:var(--red);color:var(--red);}
+button.rec-btn:hover{background:rgba(224,82,82,.1);}
+button.rec-btn.recording{background:rgba(224,82,82,.15);border-color:var(--red);}
+.play-btn{width:100%;padding:7px;font-size:12px;border-color:var(--accent2);color:var(--accent);}
+.play-btn.running{background:rgba(124,106,247,.1);}
+.sl-row{margin-bottom:8px;}
+.sl-head{display:flex;justify-content:space-between;margin-bottom:3px;}
+.sl-name{font-family:var(--font-mono);font-size:10px;color:var(--text2);}
+.sl-val{font-family:var(--font-mono);font-size:10px;color:var(--accent);}
+input[type=range]{-webkit-appearance:none;width:100%;height:2px;background:var(--border);border-radius:1px;outline:none;}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:11px;height:11px;background:var(--accent);border-radius:50%;cursor:pointer;}
+.rule-label{font-family:var(--font-mono);font-size:9px;color:var(--text3);letter-spacing:.1em;text-transform:uppercase;margin-bottom:4px;}
+.rtag{font-family:var(--font-mono);font-size:10px;background:transparent;border:1px solid var(--border);color:var(--text3);padding:3px 2px;border-radius:2px;cursor:pointer;text-align:center;min-width:19px;}
+.rtag.on{border-color:var(--accent);color:var(--accent);background:rgba(124,106,247,.13);}
+.rule-notation{font-family:var(--font-mono);font-size:11px;color:var(--accent2);margin-top:5px;}
+.canvas-wrap{flex:1;position:relative;overflow:hidden;background:#000;display:flex;flex-direction:column;}
+#lifeCanvas{display:block;flex:1;image-rendering:pixelated;min-height:0;}
+#hiddenVideo,#hiddenCanvas{display:none;}
+.drop-zone{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;z-index:10;transition:opacity .3s;}
+.drop-zone.hidden{opacity:0;pointer-events:none;}
+.drop-icon{font-size:40px;opacity:.3;}
+.drop-text{font-family:var(--font-mono);font-size:12px;color:var(--text3);text-align:center;line-height:2;}
+#fileInput{display:none;}
+.inject-bar{height:2px;background:var(--border);overflow:hidden;}
+.inject-fill{height:100%;background:var(--accent);width:0%;}
+
+/* ── TIMELINE ── */
+.timeline-wrap{flex-shrink:0;height:140px;background:var(--surface);border-top:1px solid var(--border);display:flex;flex-direction:column;}
+.tl-header{display:flex;align-items:center;gap:8px;padding:5px 10px;border-bottom:1px solid var(--border);}
+.tl-title{font-family:var(--font-mono);font-size:9px;color:var(--text2);letter-spacing:.1em;text-transform:uppercase;}
+.tl-dur-label{font-family:var(--font-mono);font-size:9px;color:var(--text3);}
+#tlDuration{font-family:var(--font-mono);font-size:11px;width:56px;background:var(--surface);border:1px solid var(--border);color:var(--text);padding:2px 6px;border-radius:3px;outline:none;}
+.tl-body{flex:1;position:relative;overflow:hidden;}
+#tlCanvas{display:block;width:100%;height:100%;cursor:crosshair;}
+
+/* Keyframe editor popup */
+.kf-popup{position:fixed;background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:14px;z-index:100;min-width:260px;box-shadow:0 8px 32px rgba(0,0,0,.6);display:none;}
+.kf-popup.show{display:block;}
+.kf-popup-title{font-family:var(--font-mono);font-size:10px;color:var(--accent);letter-spacing:.08em;text-transform:uppercase;margin-bottom:10px;}
+.kf-row{display:flex;align-items:center;justify-content:space-between;margin-bottom:7px;gap:8px;}
+.kf-label{font-family:var(--font-mono);font-size:10px;color:var(--text2);flex:1;}
+.kf-val{font-family:var(--font-mono);font-size:10px;color:var(--accent);width:36px;text-align:right;}
+.kf-popup input[type=range]{width:100px;}
+.kf-swatch{width:18px;height:18px;border-radius:3px;border:1px solid var(--border);cursor:pointer;flex-shrink:0;}
+.kf-popup input[type=color]{width:0;height:0;opacity:0;position:absolute;pointer-events:none;}
+.kf-close{margin-top:10px;width:100%;font-size:11px;}
+.kf-delete{font-size:10px;padding:3px 8px;border-color:var(--red);color:var(--red);}
+.kf-delete:hover{background:rgba(224,82,82,.1);}
+
+/* color pickers in sidebar */
+.color-row{display:flex;align-items:center;justify-content:space-between;margin-bottom:7px;}
+.color-label{font-family:var(--font-mono);font-size:10px;color:var(--text2);}
+.swatch{width:18px;height:18px;border-radius:3px;border:1px solid var(--border);cursor:pointer;}
+input[type=color]{width:0;height:0;opacity:0;position:absolute;pointer-events:none;}
+.hex-in{font-family:var(--font-mono);font-size:10px;width:56px;background:transparent;border:1px solid var(--border);border-radius:2px;padding:2px 4px;color:var(--text2);outline:none;}
+.thumb-wrap{margin-top:7px;border-radius:3px;overflow:hidden;border:1px solid var(--border);display:none;}
+#videoThumb{width:100%;display:block;}
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">Life <span>×</span> Video</div>
+  <span class="rec-dot" id="recDot"></span>
+  <div class="stats">
+    <div class="stat"><span class="stat-label">世代</span><span class="stat-val" id="genCnt">0</span></div>
+    <div class="stat"><span class="stat-label">fps</span><span class="stat-val" id="fpsCnt">—</span></div>
+    <div class="stat"><span class="stat-label">録画</span><span class="stat-val" id="recTime">—</span></div>
+  </div>
+</header>
+
+<div class="main">
+  <div class="sidebar">
+    <!-- PLAY -->
+    <div class="sec">
+      <button class="play-btn" id="btnPlay" onclick="togglePlay()" disabled>▶ スタート</button>
+      <div style="display:flex;gap:5px;margin-top:5px;">
+        <button style="flex:1" id="btnStep" onclick="doStep()" disabled>1ステップ</button>
+        <button style="flex:1" onclick="clearGrid()">クリア</button>
+      </div>
+    </div>
+
+    <!-- RECORD -->
+    <div class="sec">
+      <div class="sec-title">録画・書き出し</div>
+      <div style="display:flex;gap:5px;margin-bottom:6px;">
+        <button class="rec-btn" id="btnRec" onclick="toggleRecord()" style="flex:1;" disabled>● REC</button>
+        <button id="btnDownload" onclick="downloadVideo()" style="flex:1;" disabled>↓ DL</button>
+      </div>
+      <div class="sl-row">
+        <div class="sl-head"><span class="sl-name">録画fps</span><span class="sl-val" id="recFpsOut">30</span></div>
+        <input type="range" min="10" max="60" value="30" step="5" id="recFps" oninput="recFpsOut.textContent=this.value">
+      </div>
+      <div class="sl-row">
+        <div class="sl-head"><span class="sl-name">ビットレート(Mbps)</span><span class="sl-val" id="recBrOut">8</span></div>
+        <input type="range" min="1" max="20" value="8" step="1" id="recBr" oninput="recBrOut.textContent=this.value">
+      </div>
+      <div style="font-family:var(--font-mono);font-size:9px;color:var(--text3);margin-top:4px;">出力: WebM (VP9) — VLCやChrome等で再生可</div>
+    </div>
+
+    <!-- VIDEO -->
+    <div class="sec">
+      <div class="sec-title">ソース動画</div>
+      <button style="width:100%;border-color:var(--accent2);color:var(--accent);font-size:11px;" onclick="document.getElementById('fileInput').click()">動画を選択…</button>
+      <input type="file" id="fileInput" accept="video/*" onchange="loadVideoFile(this)">
+      <div class="thumb-wrap" id="thumbWrap"><canvas id="videoThumb"></canvas></div>
+      <div class="inject-bar" style="margin-top:6px;"><div class="inject-fill" id="injectFill"></div></div>
+    </div>
+
+    <!-- BASE PARAMS (overridden by keyframes) -->
+    <div class="sec">
+      <div class="sec-title">基本パラメータ（キーフレームで上書き可）</div>
+      <div class="sl-row">
+        <div class="sl-head"><span class="sl-name">注入強度</span><span class="sl-val" id="injStrOut">25%</span></div>
+        <input type="range" min="1" max="100" value="25" step="1" id="injStr" oninput="injStrOut.textContent=this.value+'%'">
+      </div>
+      <div class="sl-row">
+        <div class="sl-head"><span class="sl-name">注入頻度</span><span class="sl-val" id="injFreqOut">4</span></div>
+        <input type="range" min="1" max="30" value="4" step="1" id="injFreq" oninput="injFreqOut.textContent=this.value">
+      </div>
+      <div class="sl-row">
+        <div class="sl-head"><span class="sl-name">明度しきい値</span><span class="sl-val" id="thrOut">70</span></div>
+        <input type="range" min="10" max="220" value="70" step="5" id="threshold" oninput="thrOut.textContent=this.value">
+      </div>
+      <div class="sl-row">
+        <div class="sl-head"><span class="sl-name">最大密度</span><span class="sl-val" id="maxDensOut">40%</span></div>
+        <input type="range" min="5" max="100" value="40" step="5" id="maxDens" oninput="maxDensOut.textContent=this.value+'%'">
+      </div>
+      <div class="sl-row">
+        <div class="sl-head"><span class="sl-name">色の寿命</span><span class="sl-val" id="fadeOut">10</span></div>
+        <input type="range" min="1" max="40" value="10" step="1" id="fadeLife" oninput="fadeOut.textContent=this.value">
+      </div>
+      <div class="sl-row">
+        <div class="sl-head"><span class="sl-name">ライフ演算fps</span><span class="sl-val" id="lifeFpsOut">15</span></div>
+        <input type="range" min="1" max="60" value="15" step="1" id="lifeFps" oninput="lifeFpsOut.textContent=this.value">
+      </div>
+      <div class="sl-row">
+        <div class="sl-head"><span class="sl-name">セルサイズ</span><span class="sl-val" id="csOut">8</span></div>
+        <input type="range" min="4" max="20" value="8" step="1" id="cellSize" oninput="csOut.textContent=this.value;rebuildGrid()">
+      </div>
+    </div>
+
+    <!-- RULES -->
+    <div class="sec">
+      <div class="sec-title">ライフゲームルール</div>
+      <div class="rule-label">生存（S）</div>
+      <div id="survTags" style="display:flex;flex-wrap:wrap;gap:2px;margin-bottom:5px;"></div>
+      <div class="rule-label">誕生（B）</div>
+      <div id="bornTags" style="display:flex;flex-wrap:wrap;gap:2px;margin-bottom:4px;"></div>
+      <div class="rule-notation" id="ruleNotation">B3/S23</div>
+      <div style="display:flex;gap:3px;flex-wrap:wrap;margin-top:7px;">
+        <button onclick="applyRule('23','3')"   style="font-size:10px;padding:3px 6px;">Conway</button>
+        <button onclick="applyRule('23','36')"  style="font-size:10px;padding:3px 6px;">HighLife</button>
+        <button onclick="applyRule('12345','3')" style="font-size:10px;padding:3px 6px;">Maze</button>
+        <button onclick="applyRule('245','368')" style="font-size:10px;padding:3px 6px;">Morley</button>
+      </div>
+    </div>
+
+    <!-- COLORS -->
+    <div class="sec">
+      <div class="sec-title">アクセント色（キーフレームで変化可）</div>
+      <div class="color-row">
+        <span class="color-label">アクセント</span>
+        <div style="display:flex;gap:4px;align-items:center;">
+          <div class="swatch" id="swAccent" style="background:#7c6af7" onclick="openPick('pickAccent')"></div>
+          <input type="color" id="pickAccent" value="#7c6af7" oninput="setAccentColor(this.value)">
+          <input type="text" class="hex-in" id="hexAccent" value="#7c6af7" oninput="if(/^#[0-9a-fA-F]{6}$/.test(this.value))setAccentColor(this.value)" maxlength="7">
+        </div>
+      </div>
+    </div>
+
+    <div class="sec" style="font-family:var(--font-mono);font-size:9px;color:var(--text3);line-height:1.9;">
+      タイムラインをクリック: キーフレーム追加<br>
+      キーフレームをクリック: 編集/削除<br>
+      Space: 再生/停止
+    </div>
+  </div>
+
+  <!-- CANVAS + TIMELINE -->
+  <div class="canvas-wrap" id="canvasWrap">
+    <canvas id="lifeCanvas"></canvas>
+    <div class="drop-zone" id="dropZone">
+      <div class="drop-icon">🎬</div>
+      <div class="drop-text">動画をドロップ<br>またはサイドバーから選択</div>
+    </div>
+
+    <!-- TIMELINE -->
+    <div class="timeline-wrap" id="timelineWrap">
+      <div class="tl-header">
+        <span class="tl-title">タイムライン</span>
+        <span class="tl-dur-label">長さ(秒):</span>
+        <input type="number" id="tlDuration" value="30" min="5" max="300" oninput="tlDuration=+this.value;renderTimeline()">
+        <button style="font-size:9px;padding:3px 7px;margin-left:4px;" onclick="addKfAtPlayhead()">+ KF追加</button>
+        <button style="font-size:9px;padding:3px 7px;" onclick="clearKeyframes()">全KF削除</button>
+        <span style="font-family:var(--font-mono);font-size:9px;color:var(--text3);margin-left:8px;">クリックでKF追加 / KFクリックで編集</span>
+      </div>
+      <div class="tl-body">
+        <canvas id="tlCanvas"></canvas>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Keyframe editor popup -->
+<div class="kf-popup" id="kfPopup">
+  <div class="kf-popup-title" id="kfPopupTitle">キーフレーム編集</div>
+  <div class="kf-row">
+    <span class="kf-label">注入強度</span>
+    <input type="range" min="1" max="100" step="1" id="kfInjStr" oninput="kfInjStrV.textContent=this.value+'%'">
+    <span class="kf-val" id="kfInjStrV">25%</span>
+  </div>
+  <div class="kf-row">
+    <span class="kf-label">最大密度</span>
+    <input type="range" min="5" max="100" step="5" id="kfMaxDens" oninput="kfMaxDensV.textContent=this.value+'%'">
+    <span class="kf-val" id="kfMaxDensV">40%</span>
+  </div>
+  <div class="kf-row">
+    <span class="kf-label">明度しきい値</span>
+    <input type="range" min="10" max="220" step="5" id="kfThreshold" oninput="kfThresholdV.textContent=this.value">
+    <span class="kf-val" id="kfThresholdV">70</span>
+  </div>
+  <div class="kf-row">
+    <span class="kf-label">色の寿命</span>
+    <input type="range" min="1" max="40" step="1" id="kfFadeLife" oninput="kfFadeLifeV.textContent=this.value">
+    <span class="kf-val" id="kfFadeLifeV">10</span>
+  </div>
+  <div class="kf-row">
+    <span class="kf-label">アクセント色</span>
+    <div class="kf-swatch" id="kfSwAccent" onclick="openPick('kfPickAccent')" style="background:#7c6af7"></div>
+    <input type="color" id="kfPickAccent" value="#7c6af7" oninput="kfSwAccent.style.background=this.value;kfAccentVal=this.value">
+    <span class="kf-val" id="kfAccentLabel">#7c6af7</span>
+  </div>
+  <div class="kf-row">
+    <span class="kf-label">生存ルール S</span>
+    <input type="text" style="font-family:var(--font-mono);font-size:11px;width:80px;background:var(--surface);border:1px solid var(--border);color:var(--text);padding:2px 5px;border-radius:3px;outline:none;" id="kfSurvive" placeholder="例: 23">
+  </div>
+  <div class="kf-row">
+    <span class="kf-label">誕生ルール B</span>
+    <input type="text" style="font-family:var(--font-mono);font-size:11px;width:80px;background:var(--surface);border:1px solid var(--border);color:var(--text);padding:2px 5px;border-radius:3px;outline:none;" id="kfBorn" placeholder="例: 3">
+  </div>
+  <div style="display:flex;gap:5px;margin-top:8px;">
+    <button class="kf-close" style="flex:1;" onclick="saveKfAndClose()">保存して閉じる</button>
+    <button class="kf-delete" onclick="deleteCurrentKf()">削除</button>
+  </div>
+</div>
+
+<video id="hiddenVideo" loop muted playsinline></video>
+<canvas id="hiddenCanvas"></canvas>
+
+<script>
+// ═══════════════════════════════════════════════
+//  CORE STATE
+// ═══════════════════════════════════════════════
+const lifeCanvas=document.getElementById('lifeCanvas');
+const ctx=lifeCanvas.getContext('2d');
+const video=document.getElementById('hiddenVideo');
+const hCanvas=document.getElementById('hiddenCanvas');
+const hctx=hCanvas.getContext('2d',{willReadFrequently:true});
+const wrap=document.getElementById('canvasWrap');
+
+let CS=8,COLS=0,ROWS=0,N=0;
+let grid,nextGrid,colR,colG,colB,nColR,nColG,nColB,cellAge;
+let running=false,lifeTimer=null,rafId=null,gen=0;
+let videoReady=false;
+let survive=new Set([2,3]),born=new Set([3]);
+let fpsFrames=0,fpsLast=performance.now();
+let accentColor='#7c6af7';
+let accentRGB=[124,106,247];
+
+// ═══════════════════════════════════════════════
+//  KEYFRAME SYSTEM
+// ═══════════════════════════════════════════════
+let tlDuration=30; // seconds
+let keyframes=[]; // [{time, injStr, maxDens, threshold, fadeLife, accent, survive, born}]
+let playheadTime=0; // seconds
+let playheadStartWall=null; // wall clock when playback started
+let tlPlaying=false;
+
+// Current interpolated params (updated each frame)
+let curParams={
+  injStr:25, maxDens:40, threshold:70, fadeLife:10,
+  accent:'#7c6af7', survive:'23', born:'3'
+};
+
+function defaultKf(){
+  return {
+    time:0,
+    injStr:+document.getElementById('injStr').value,
+    maxDens:+document.getElementById('maxDens').value,
+    threshold:+document.getElementById('threshold').value,
+    fadeLife:+document.getElementById('fadeLife').value,
+    accent:accentColor,
+    survive:[...survive].sort((a,b)=>a-b).join(''),
+    born:[...born].sort((a,b)=>a-b).join('')
+  };
+}
+
+function addKfAtTime(t){
+  const kf={...defaultKf(), time:clamp(t,0,tlDuration)};
+  keyframes.push(kf);
+  keyframes.sort((a,b)=>a.time-b.time);
+  renderTimeline();
+  return kf;
+}
+function addKfAtPlayhead(){ addKfAtTime(playheadTime); }
+
+function clearKeyframes(){ keyframes=[]; renderTimeline(); }
+
+function interpolateParams(t){
+  if(keyframes.length===0) return null;
+  if(keyframes.length===1) return {...keyframes[0]};
+  if(t<=keyframes[0].time) return {...keyframes[0]};
+  if(t>=keyframes[keyframes.length-1].time) return {...keyframes[keyframes.length-1]};
+  let a=keyframes[0],b=keyframes[1];
+  for(let i=0;i<keyframes.length-1;i++){
+    if(t>=keyframes[i].time&&t<=keyframes[i+1].time){a=keyframes[i];b=keyframes[i+1];break;}
+  }
+  const f=(t-a.time)/(b.time-a.time||1);
+  return {
+    time:t,
+    injStr: Math.round(a.injStr+(b.injStr-a.injStr)*f),
+    maxDens: Math.round(a.maxDens+(b.maxDens-a.maxDens)*f),
+    threshold: Math.round(a.threshold+(b.threshold-a.threshold)*f),
+    fadeLife: Math.round(a.fadeLife+(b.fadeLife-a.fadeLife)*f),
+    accent: lerpHexColor(a.accent,b.accent,f),
+    survive: f<0.5?a.survive:b.survive,
+    born: f<0.5?a.born:b.born
+  };
+}
+
+function lerpHexColor(a,b,t){
+  const p=c=>[parseInt(c.slice(1,3),16),parseInt(c.slice(3,5),16),parseInt(c.slice(5,7),16)];
+  const [ar,ag,ab]=p(a||'#7c6af7');
+  const [br,bg,bb]=p(b||'#7c6af7');
+  return '#'+[ar+(br-ar)*t,ag+(bg-ag)*t,ab+(bb-ab)*t].map(v=>Math.round(v).toString(16).padStart(2,'0')).join('');
+}
+
+function applyInterpolatedParams(p){
+  if(!p) return;
+  curParams=p;
+  accentRGB=hexToRgb(p.accent||'#7c6af7');
+  // apply rule if changed
+  const ns=new Set(p.survive.split('').filter(Boolean).map(Number));
+  const nb=new Set(p.born.split('').filter(Boolean).map(Number));
+  if([...ns].sort().join('')!==[...survive].sort().join('') || [...nb].sort().join('')!==[...born].sort().join('')){
+    survive=ns; born=nb; buildRuleTags();
+  }
+}
+
+function hexToRgb(h){
+  return [parseInt(h.slice(1,3),16),parseInt(h.slice(3,5),16),parseInt(h.slice(5,7),16)];
+}
+function clamp(v,a,b){return Math.max(a,Math.min(b,v));}
+
+// ═══════════════════════════════════════════════
+//  TIMELINE CANVAS
+// ═══════════════════════════════════════════════
+const tlCanvas=document.getElementById('tlCanvas');
+const tlCtx=tlCanvas.getContext('2d');
+let tlW=0,tlH=0;
+let draggingPlayhead=false;
+let editingKfIdx=-1;
+
+const TRACK_LABELS=['injStr','maxDens','threshold','fadeLife','accent'];
+const TRACK_COLORS=['#7c6af7','#1fb885','#e0a832','#38c8e0','#e05252'];
+const TRACK_H=16;
+const RULER_H=18;
+const PH_Y=16; // playhead area height
+
+function renderTimeline(){
+  const wrap2=document.getElementById('timelineWrap');
+  tlW=wrap2.clientWidth; tlH=wrap2.querySelector('.tl-body').clientHeight;
+  tlCanvas.width=tlW; tlCanvas.height=tlH;
+  const tc=tlCtx;
+  tc.clearRect(0,0,tlW,tlH);
+
+  // background
+  tc.fillStyle='#0e0f1a'; tc.fillRect(0,0,tlW,tlH);
+
+  // ruler
+  tc.fillStyle='#13152a'; tc.fillRect(0,0,tlW,RULER_H);
+  tc.strokeStyle='#1c1e35'; tc.lineWidth=1;
+  const secW=tlW/tlDuration;
+  for(let s=0;s<=tlDuration;s++){
+    const x=s*secW;
+    tc.beginPath(); tc.moveTo(x,0); tc.lineTo(x,s%5===0?RULER_H:RULER_H*0.5);
+    tc.stroke();
+    if(s%5===0){
+      tc.fillStyle='#35324a'; tc.font='9px IBM Plex Mono,monospace';
+      tc.textAlign='center'; tc.fillText(s+'s',x,RULER_H-2);
+    }
+  }
+
+  // track rows
+  const trackY=i=>RULER_H+4+i*(TRACK_H+2);
+  TRACK_LABELS.forEach((label,i)=>{
+    tc.fillStyle='#13152a';
+    tc.fillRect(0,trackY(i),tlW,TRACK_H);
+    tc.fillStyle=TRACK_COLORS[i]+'44';
+    tc.fillRect(0,trackY(i),tlW,TRACK_H);
+  });
+
+  // draw keyframe values as mini curves per track
+  if(keyframes.length>=2){
+    TRACK_LABELS.forEach((key,ti)=>{
+      tc.beginPath();
+      tc.strokeStyle=TRACK_COLORS[ti]; tc.lineWidth=1.5;
+      for(let px=0;px<tlW;px++){
+        const t=(px/tlW)*tlDuration;
+        const p=interpolateParams(t);
+        if(!p) continue;
+        let v=0,vmin=0,vmax=1;
+        if(key==='injStr'){v=p.injStr;vmin=1;vmax=100;}
+        else if(key==='maxDens'){v=p.maxDens;vmin=5;vmax=100;}
+        else if(key==='threshold'){v=p.threshold;vmin=10;vmax=220;}
+        else if(key==='fadeLife'){v=p.fadeLife;vmin=1;vmax=40;}
+        else if(key==='accent'){
+          const rgb=hexToRgb(p.accent||'#7c6af7');
+          v=(rgb[0]+rgb[1]+rgb[2])/(3*255);vmin=0;vmax=1;
+        }
+        const norm=clamp((v-vmin)/(vmax-vmin),0,1);
+        const y=trackY(ti)+TRACK_H-(norm*TRACK_H*0.8+TRACK_H*0.1);
+        px===0?tc.moveTo(px,y):tc.lineTo(px,y);
+      }
+      tc.stroke();
+    });
+  }
+
+  // keyframe diamonds
+  keyframes.forEach((kf,i)=>{
+    const x=kf.time/tlDuration*tlW;
+    // diamond on each track
+    TRACK_LABELS.forEach((_,ti)=>{
+      const cy=trackY(ti)+TRACK_H/2;
+      tc.beginPath();
+      tc.moveTo(x,cy-5); tc.lineTo(x+4,cy); tc.lineTo(x,cy+5); tc.lineTo(x-4,cy);
+      tc.closePath();
+      tc.fillStyle=TRACK_COLORS[ti];
+      tc.fill();
+      tc.strokeStyle='#fff'; tc.lineWidth=0.5; tc.stroke();
+    });
+    // time label
+    tc.fillStyle='#7470a8'; tc.font='8px IBM Plex Mono,monospace'; tc.textAlign='center';
+    tc.fillText(kf.time.toFixed(1)+'s', x, RULER_H-2);
+  });
+
+  // playhead
+  const ph=playheadTime/tlDuration*tlW;
+  tc.strokeStyle='#fff'; tc.lineWidth=1.5;
+  tc.beginPath(); tc.moveTo(ph,0); tc.lineTo(ph,tlH); tc.stroke();
+  tc.fillStyle='#fff';
+  tc.beginPath(); tc.moveTo(ph-5,0); tc.lineTo(ph+5,0); tc.lineTo(ph,8); tc.closePath(); tc.fill();
+
+  // track labels on left
+  TRACK_LABELS.forEach((label,i)=>{
+    tc.fillStyle='#35324a'; tc.font='8px IBM Plex Mono,monospace'; tc.textAlign='left';
+    tc.fillText(label,3,trackY(i)+TRACK_H-4);
+  });
+}
+
+// Timeline mouse
+tlCanvas.addEventListener('mousedown',e=>{
+  const rect=tlCanvas.getBoundingClientRect();
+  const x=e.clientX-rect.left, y=e.clientY-rect.top;
+  const t=(x/tlW)*tlDuration;
+
+  // Check if clicking near a keyframe
+  const KF_HIT=8;
+  let hitKf=-1;
+  keyframes.forEach((kf,i)=>{
+    const kx=kf.time/tlDuration*tlW;
+    if(Math.abs(kx-x)<KF_HIT) hitKf=i;
+  });
+
+  if(hitKf>=0){
+    openKfPopup(hitKf,e.clientX,e.clientY);
+  } else if(y<RULER_H+4){
+    draggingPlayhead=true;
+    setPlayheadTime(t);
+  } else {
+    // Add keyframe
+    addKfAtTime(t);
+  }
+});
+tlCanvas.addEventListener('mousemove',e=>{
+  if(!draggingPlayhead) return;
+  const rect=tlCanvas.getBoundingClientRect();
+  const x=e.clientX-rect.left;
+  setPlayheadTime((x/tlW)*tlDuration);
+});
+document.addEventListener('mouseup',()=>{draggingPlayhead=false;});
+
+function setPlayheadTime(t){
+  playheadTime=clamp(t,0,tlDuration);
+  // Apply interpolated params at this time
+  const p=interpolateParams(playheadTime);
+  if(p) applyInterpolatedParams(p);
+  renderTimeline();
+}
+
+// ═══════════════════════════════════════════════
+//  KEYFRAME POPUP
+// ═══════════════════════════════════════════════
+let kfAccentVal='#7c6af7';
+
+function openKfPopup(idx,clientX,clientY){
+  editingKfIdx=idx;
+  const kf=keyframes[idx];
+  document.getElementById('kfPopupTitle').textContent=`KF @ ${kf.time.toFixed(2)}s`;
+  document.getElementById('kfInjStr').value=kf.injStr;
+  document.getElementById('kfInjStrV').textContent=kf.injStr+'%';
+  document.getElementById('kfMaxDens').value=kf.maxDens;
+  document.getElementById('kfMaxDensV').textContent=kf.maxDens+'%';
+  document.getElementById('kfThreshold').value=kf.threshold;
+  document.getElementById('kfThresholdV').textContent=kf.threshold;
+  document.getElementById('kfFadeLife').value=kf.fadeLife;
+  document.getElementById('kfFadeLifeV').textContent=kf.fadeLife;
+  kfAccentVal=kf.accent||'#7c6af7';
+  document.getElementById('kfSwAccent').style.background=kfAccentVal;
+  document.getElementById('kfPickAccent').value=kfAccentVal;
+  document.getElementById('kfAccentLabel').textContent=kfAccentVal;
+  document.getElementById('kfSurvive').value=kf.survive||'23';
+  document.getElementById('kfBorn').value=kf.born||'3';
+  const popup=document.getElementById('kfPopup');
+  popup.style.left=Math.min(clientX,window.innerWidth-280)+'px';
+  popup.style.top=Math.min(clientY,window.innerHeight-320)+'px';
+  popup.classList.add('show');
+}
+
+function saveKfAndClose(){
+  if(editingKfIdx<0) return;
+  const kf=keyframes[editingKfIdx];
+  kf.injStr=+document.getElementById('kfInjStr').value;
+  kf.maxDens=+document.getElementById('kfMaxDens').value;
+  kf.threshold=+document.getElementById('kfThreshold').value;
+  kf.fadeLife=+document.getElementById('kfFadeLife').value;
+  kf.accent=kfAccentVal;
+  document.getElementById('kfAccentLabel').textContent=kfAccentVal;
+  kf.survive=document.getElementById('kfSurvive').value.replace(/[^0-9]/g,'');
+  kf.born=document.getElementById('kfBorn').value.replace(/[^0-9]/g,'');
+  document.getElementById('kfPopup').classList.remove('show');
+  renderTimeline();
+}
+function deleteCurrentKf(){
+  if(editingKfIdx<0) return;
+  keyframes.splice(editingKfIdx,1);
+  document.getElementById('kfPopup').classList.remove('show');
+  editingKfIdx=-1;
+  renderTimeline();
+}
+document.addEventListener('keydown',e=>{ if(e.key==='Escape') document.getElementById('kfPopup').classList.remove('show'); });
+document.addEventListener('click',e=>{ if(!e.target.closest('#kfPopup')&&!e.target.closest('#tlCanvas')) document.getElementById('kfPopup').classList.remove('show'); });
+
+// ═══════════════════════════════════════════════
+//  PLAYHEAD AUTO-ADVANCE
+// ═══════════════════════════════════════════════
+function advancePlayhead(){
+  if(!running||!tlPlaying) return;
+  const now=performance.now();
+  if(!playheadStartWall) playheadStartWall=now-playheadTime*1000;
+  const elapsed=(now-playheadStartWall)/1000;
+  playheadTime=elapsed%tlDuration;
+  const p=interpolateParams(playheadTime);
+  if(p) applyInterpolatedParams(p);
+  renderTimeline();
+}
+
+// ═══════════════════════════════════════════════
+//  GRID
+// ═══════════════════════════════════════════════
+function allocGrid(){
+  N=ROWS*COLS;
+  grid=new Uint8Array(N); nextGrid=new Uint8Array(N);
+  colR=new Uint8Array(N); colG=new Uint8Array(N); colB=new Uint8Array(N);
+  nColR=new Uint8Array(N); nColG=new Uint8Array(N); nColB=new Uint8Array(N);
+  cellAge=new Uint16Array(N);
+}
+function rebuildGrid(){
+  CS=+document.getElementById('cellSize').value;
+  const cw=wrap.clientWidth; const ch=wrap.clientHeight-document.getElementById('timelineWrap').offsetHeight;
+  lifeCanvas.width=cw; lifeCanvas.height=Math.max(ch,100);
+  COLS=Math.floor(lifeCanvas.width/CS); ROWS=Math.floor(lifeCanvas.height/CS);
+  allocGrid();
+  hCanvas.width=COLS; hCanvas.height=ROWS;
+}
+
+// ═══════════════════════════════════════════════
+//  VIDEO
+// ═══════════════════════════════════════════════
+function loadVideoFile(input){
+  const file=input.files[0]; if(!file) return;
+  video.src=URL.createObjectURL(file); video.load();
+  video.onloadeddata=()=>{
+    videoReady=true;
+    hCanvas.width=COLS; hCanvas.height=ROWS;
+    document.getElementById('dropZone').classList.add('hidden');
+    document.getElementById('btnPlay').disabled=false;
+    document.getElementById('btnStep').disabled=false;
+    document.getElementById('btnRec').disabled=false;
+    video.currentTime=0.1;
+  };
+  video.onseeked=()=>{
+    const tw=document.getElementById('videoThumb');
+    const asp=video.videoHeight/Math.max(1,video.videoWidth);
+    tw.width=220; tw.height=Math.round(220*asp);
+    tw.getContext('2d').drawImage(video,0,0,tw.width,tw.height);
+    document.getElementById('thumbWrap').style.display='block';
+  };
+}
+const canvasWrapEl=document.getElementById('canvasWrap');
+canvasWrapEl.addEventListener('dragover',e=>{e.preventDefault();});
+canvasWrapEl.addEventListener('drop',e=>{
+  e.preventDefault();
+  const file=e.dataTransfer.files[0];
+  if(file&&file.type.startsWith('video/')){
+    const dt=new DataTransfer(); dt.items.add(file);
+    document.getElementById('fileInput').files=dt.files;
+    loadVideoFile(document.getElementById('fileInput'));
+  }
+});
+
+// ═══════════════════════════════════════════════
+//  INJECT
+// ═══════════════════════════════════════════════
+function injectFrame(){
+  if(!videoReady||video.readyState<2) return;
+  hctx.drawImage(video,0,0,COLS,ROWS);
+  const px=hctx.getImageData(0,0,COLS,ROWS).data;
+  const thr=curParams.threshold||+document.getElementById('threshold').value;
+  const str=(curParams.injStr||+document.getElementById('injStr').value)/100;
+  for(let i=0,p=0;i<N;i++,p+=4){
+    const r=px[p],g=px[p+1],b=px[p+2];
+    const luma=(r*77+g*150+b*29)>>8;
+    if(luma>thr&&Math.random()<str){grid[i]=1;colR[i]=r;colG[i]=g;colB[i]=b;cellAge[i]=0;}
+  }
+}
+
+function cullDensity(){
+  const maxDens=(curParams.maxDens||+document.getElementById('maxDens').value)/100;
+  let alive=0; for(let i=0;i<N;i++) if(grid[i]) alive++;
+  const density=alive/N;
+  if(density>maxDens){
+    const kill=1-maxDens/density;
+    for(let i=0;i<N;i++) if(grid[i]&&Math.random()<kill) grid[i]=0;
+  }
+}
+
+// ═══════════════════════════════════════════════
+//  LIFE STEP
+// ═══════════════════════════════════════════════
+function lifeStep(){
+  const injFreq=+document.getElementById('injFreq').value;
+  const fadeLife=curParams.fadeLife||+document.getElementById('fadeLife').value;
+  if(gen%injFreq===0){injectFrame();cullDensity();}
+  document.getElementById('injectFill').style.width=((gen%injFreq)/injFreq*100)+'%';
+
+  nextGrid.fill(0);
+  for(let r=0;r<ROWS;r++){
+    for(let c=0;c<COLS;c++){
+      const idx=r*COLS+c;
+      let nb=0,sR=0,sG=0,sB=0,nc=0;
+      const r0=(r-1+ROWS)%ROWS,r1=(r+1)%ROWS;
+      const c0=(c-1+COLS)%COLS,c1=(c+1)%COLS;
+      const ns=[r0*COLS+c0,r0*COLS+c,r0*COLS+c1,r*COLS+c0,r*COLS+c1,r1*COLS+c0,r1*COLS+c,r1*COLS+c1];
+      for(let k=0;k<8;k++){if(grid[ns[k]]){nb++;sR+=colR[ns[k]];sG+=colG[ns[k]];sB+=colB[ns[k]];nc++;}}
+      const alive=grid[idx];
+      const lives=alive?survive.has(nb):born.has(nb);
+      if(!lives){cellAge[idx]=0;nColR[idx]=0;nColG[idx]=0;nColB[idx]=0;continue;}
+      nextGrid[idx]=1;
+      if(alive){
+        const age=cellAge[idx]+1; cellAge[idx]=age;
+        const inv=Math.max(0.15,1-(age/fadeLife)*0.85);
+        nColR[idx]=colR[idx]*inv|0; nColG[idx]=colG[idx]*inv|0; nColB[idx]=colB[idx]*inv|0;
+      } else {
+        cellAge[idx]=0;
+        if(nc>0){nColR[idx]=sR/nc|0;nColG[idx]=sG/nc|0;nColB[idx]=sB/nc|0;}
+        else{nColR[idx]=accentRGB[0];nColG[idx]=accentRGB[1];nColB[idx]=accentRGB[2];}
+      }
+    }
+  }
+  const tg=grid;grid=nextGrid;nextGrid=tg;
+  const tR=colR;colR=nColR;nColR=tR;
+  const tG=colG;colG=nColG;nColG=tG;
+  const tB=colB;colB=nColB;nColB=tB;
+  gen++;
+}
+
+// ═══════════════════════════════════════════════
+//  RENDER
+// ═══════════════════════════════════════════════
+function renderLoop(){
+  rafId=requestAnimationFrame(renderLoop);
+  fpsFrames++;
+  const now=performance.now();
+  if(now-fpsLast>=1000){
+    document.getElementById('fpsCnt').textContent=fpsFrames;
+    document.getElementById('genCnt').textContent=gen.toLocaleString();
+    fpsFrames=0; fpsLast=now;
+  }
+  advancePlayhead();
+
+  const imgData=ctx.createImageData(lifeCanvas.width,lifeCanvas.height);
+  const d=imgData.data; const W=lifeCanvas.width;
+  for(let r=0;r<ROWS;r++) for(let c=0;c<COLS;c++){
+    const idx=r*COLS+c; if(!grid[idx]) continue;
+    const R=colR[idx],G=colG[idx],B=colB[idx];
+    const csm=CS-1;
+    for(let dy=0;dy<csm;dy++) for(let dx=0;dx<csm;dx++){
+      const px=((r*CS+dy)*W+(c*CS+dx))*4;
+      d[px]=R;d[px+1]=G;d[px+2]=B;d[px+3]=255;
+    }
+  }
+  ctx.fillStyle='#000'; ctx.fillRect(0,0,lifeCanvas.width,lifeCanvas.height);
+  ctx.putImageData(imgData,0,0);
+}
+
+// ═══════════════════════════════════════════════
+//  RECORDING
+// ═══════════════════════════════════════════════
+let mediaRecorder=null, recordedChunks=[], recordingStartTime=0, recInterval=null;
+
+function toggleRecord(){
+  if(!mediaRecorder||mediaRecorder.state==='inactive'){
+    startRecording();
+  } else {
+    stopRecording();
+  }
+}
+
+function startRecording(){
+  recordedChunks=[];
+  const fps=+document.getElementById('recFps').value;
+  const br=+document.getElementById('recBr').value*1000000;
+  // Capture from lifeCanvas
+  const stream=lifeCanvas.captureStream(fps);
+  const opts={mimeType:'video/webm;codecs=vp9',videoBitsPerSecond:br};
+  if(!MediaRecorder.isTypeSupported(opts.mimeType)){
+    opts.mimeType='video/webm';
+  }
+  try{
+    mediaRecorder=new MediaRecorder(stream,opts);
+  }catch(e){
+    mediaRecorder=new MediaRecorder(stream);
+  }
+  mediaRecorder.ondataavailable=e=>{if(e.data.size>0) recordedChunks.push(e.data);};
+  mediaRecorder.onstop=()=>{
+    document.getElementById('btnDownload').disabled=false;
+    clearInterval(recInterval);
+    document.getElementById('recDot').classList.remove('on');
+    document.getElementById('btnRec').classList.remove('recording');
+    document.getElementById('btnRec').textContent='● REC';
+  };
+  mediaRecorder.start(100); // collect every 100ms
+  recordingStartTime=performance.now();
+  document.getElementById('recDot').classList.add('on');
+  document.getElementById('btnRec').classList.add('recording');
+  document.getElementById('btnRec').textContent='■ STOP';
+  recInterval=setInterval(()=>{
+    const sec=((performance.now()-recordingStartTime)/1000).toFixed(1);
+    document.getElementById('recTime').textContent=sec+'s';
+  },200);
+
+  // Also start playback + timeline if not running
+  if(!running) togglePlay();
+  // Start timeline from current position
+  playheadStartWall=performance.now()-playheadTime*1000;
+  tlPlaying=true;
+}
+
+function stopRecording(){
+  if(mediaRecorder&&mediaRecorder.state!=='inactive'){
+    mediaRecorder.stop();
+    tlPlaying=false;
+  }
+}
+
+function downloadVideo(){
+  if(!recordedChunks.length) return;
+  const blob=new Blob(recordedChunks,{type:'video/webm'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');
+  a.href=url; a.download='life_video_'+Date.now()+'.webm';
+  a.click();
+  setTimeout(()=>URL.revokeObjectURL(url),5000);
+}
+
+// ═══════════════════════════════════════════════
+//  CONTROLS
+// ═══════════════════════════════════════════════
+function togglePlay(){
+  running=!running;
+  const btn=document.getElementById('btnPlay');
+  if(running){
+    video.play().catch(()=>{});
+    btn.textContent='■ ストップ'; btn.classList.add('running');
+    lifeTimer=setInterval(lifeStep,1000/+document.getElementById('lifeFps').value);
+    if(!rafId) renderLoop();
+    playheadStartWall=performance.now()-playheadTime*1000;
+    tlPlaying=true;
+  } else {
+    video.pause();
+    btn.textContent='▶ スタート'; btn.classList.remove('running');
+    clearInterval(lifeTimer); lifeTimer=null;
+    tlPlaying=false; playheadStartWall=null;
+    if(mediaRecorder&&mediaRecorder.state!=='inactive') stopRecording();
+  }
+}
+
+function doStep(){ lifeStep(); }
+
+function clearGrid(){
+  grid.fill(0); nextGrid.fill(0);
+  colR.fill(0); colG.fill(0); colB.fill(0); cellAge.fill(0);
+  gen=0; document.getElementById('genCnt').textContent='0';
+  ctx.fillStyle='#000'; ctx.fillRect(0,0,lifeCanvas.width,lifeCanvas.height);
+}
+
+function setAccentColor(v){
+  accentColor=v; accentRGB=hexToRgb(v);
+  document.getElementById('swAccent').style.background=v;
+  document.getElementById('hexAccent').value=v;
+  document.getElementById('pickAccent').value=v;
+}
+function openPick(id){const el=document.getElementById(id);el.style.pointerEvents='auto';el.click();setTimeout(()=>el.style.pointerEvents='none',100);}
+
+function applyRule(s,b){survive=new Set(s.split('').map(Number));born=new Set(b.split('').map(Number));buildRuleTags();}
+function buildRuleTags(){
+  ['surv','born'].forEach(type=>{
+    const el=document.getElementById(type+'Tags');el.innerHTML='';
+    const s=type==='surv'?survive:born;
+    for(let i=0;i<=8;i++){
+      const tag=document.createElement('button');tag.className='rtag'+(s.has(i)?' on':'');tag.textContent=i;
+      tag.onclick=()=>{s.has(i)?s.delete(i):s.add(i);buildRuleTags();updateRuleNotation();};el.appendChild(tag);
+    }
+  }); updateRuleNotation();
+}
+function updateRuleNotation(){
+  document.getElementById('ruleNotation').textContent='B'+[...born].sort((a,b)=>a-b).join('')+'/S'+[...survive].sort((a,b)=>a-b).join('');
+}
+
+window.addEventListener('keydown',e=>{
+  if(e.code==='Space'){e.preventDefault();if(!document.getElementById('btnPlay').disabled)togglePlay();}
+  else if(e.code==='ArrowRight') doStep();
+  else if(e.code==='KeyC') clearGrid();
+});
+window.addEventListener('resize',()=>{rebuildGrid();renderTimeline();});
+
+// ═══════════════════════════════════════════════
+//  INIT
+// ═══════════════════════════════════════════════
+rebuildGrid();
+buildRuleTags();
+renderLoop();
+setTimeout(()=>renderTimeline(),100);
+</script>
+</body>
+</html>

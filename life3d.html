@@ -1,0 +1,608 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Game of Life 3D</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+JP:wght@300;400;500&display=swap');
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --bg: #07090f;
+    --surface: #0d1018;
+    --border: #1a2035;
+    --accent: #4f8ef7;
+    --accent2: #2d5cc7;
+    --text: #c5d0ee;
+    --text2: #6a7aa0;
+    --text3: #303a55;
+    --font-mono: 'IBM Plex Mono', monospace;
+    --font-ui: 'IBM Plex Sans JP', sans-serif;
+  }
+  body { background: var(--bg); color: var(--text); font-family: var(--font-ui); height: 100vh; display: flex; flex-direction: column; overflow: hidden; user-select: none; }
+
+  header { display: flex; align-items: center; gap: 16px; padding: 10px 20px; border-bottom: 1px solid var(--border); background: var(--surface); flex-shrink: 0; z-index: 10; }
+  .logo { font-family: var(--font-mono); font-size: 13px; font-weight: 500; color: var(--accent); letter-spacing: 0.08em; text-transform: uppercase; }
+  .logo span { color: var(--text3); }
+  .badge { font-family: var(--font-mono); font-size: 9px; padding: 2px 6px; border: 1px solid var(--accent2); color: var(--accent); border-radius: 2px; letter-spacing: 0.1em; }
+  .stats { margin-left: auto; display: flex; gap: 24px; }
+  .stat { display: flex; flex-direction: column; align-items: flex-end; }
+  .stat-label { font-family: var(--font-mono); font-size: 9px; color: var(--text3); letter-spacing: 0.1em; text-transform: uppercase; }
+  .stat-val { font-family: var(--font-mono); font-size: 16px; font-weight: 500; color: var(--text); line-height: 1.2; }
+
+  .main { display: flex; flex: 1; overflow: hidden; }
+
+  .sidebar { width: 220px; flex-shrink: 0; background: var(--surface); border-right: 1px solid var(--border); display: flex; flex-direction: column; overflow-y: auto; z-index: 5; }
+  .sidebar::-webkit-scrollbar { width: 4px; }
+  .sidebar::-webkit-scrollbar-track { background: transparent; }
+  .sidebar::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+  .section { padding: 14px 16px; border-bottom: 1px solid var(--border); }
+  .section-title { font-family: var(--font-mono); font-size: 9px; color: var(--text3); letter-spacing: 0.12em; text-transform: uppercase; margin-bottom: 12px; }
+
+  button { font-family: var(--font-mono); font-size: 11px; font-weight: 500; background: transparent; border: 1px solid var(--border); color: var(--text2); padding: 6px 12px; border-radius: 3px; cursor: pointer; letter-spacing: 0.05em; transition: all 0.15s; white-space: nowrap; }
+  button:hover { border-color: var(--accent2); color: var(--accent); background: rgba(79,142,247,0.06); }
+  button.active { border-color: var(--accent); color: var(--accent); background: rgba(79,142,247,0.12); }
+  button.danger:hover { border-color: #c0392b; color: #e74c3c; background: rgba(231,76,60,0.06); }
+
+  .play-btn { width: 100%; padding: 8px; font-size: 12px; border-color: var(--accent2); color: var(--accent); letter-spacing: 0.1em; }
+  .play-btn.running { background: rgba(79,142,247,0.1); }
+
+  .slider-row { margin-bottom: 10px; }
+  .slider-header { display: flex; justify-content: space-between; margin-bottom: 5px; }
+  .slider-name { font-family: var(--font-mono); font-size: 10px; color: var(--text2); }
+  .slider-val { font-family: var(--font-mono); font-size: 10px; color: var(--accent); }
+  input[type=range] { -webkit-appearance: none; width: 100%; height: 2px; background: var(--border); border-radius: 1px; outline: none; }
+  input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 12px; height: 12px; background: var(--accent); border-radius: 50%; cursor: pointer; transition: transform 0.1s; }
+  input[type=range]::-webkit-slider-thumb:hover { transform: scale(1.3); }
+
+  .rule-grid { display: grid; grid-template-columns: repeat(9, 1fr); gap: 3px; margin-bottom: 8px; }
+  .rule-label { font-family: var(--font-mono); font-size: 9px; color: var(--text3); letter-spacing: 0.1em; text-transform: uppercase; margin-bottom: 5px; }
+  .rtag { font-family: var(--font-mono); font-size: 10px; background: transparent; border: 1px solid var(--border); color: var(--text3); padding: 4px 2px; border-radius: 2px; cursor: pointer; text-align: center; transition: all 0.1s; }
+  .rtag.on { border-color: var(--accent); color: var(--accent); background: rgba(79,142,247,0.12); }
+  .rule-notation { font-family: var(--font-mono); font-size: 11px; color: var(--accent2); margin-top: 6px; letter-spacing: 0.05em; }
+
+  .preset-list { display: flex; flex-direction: column; gap: 3px; }
+  .preset-btn { text-align: left; padding: 6px 10px; font-size: 11px; width: 100%; }
+
+  .color-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+  .color-label { font-family: var(--font-mono); font-size: 10px; color: var(--text2); }
+  .color-pick-wrap { display: flex; align-items: center; gap: 6px; }
+  .color-swatch { width: 22px; height: 22px; border-radius: 3px; border: 1px solid var(--border); cursor: pointer; display: block; }
+  input[type=color] { width: 0; height: 0; opacity: 0; position: absolute; pointer-events: none; }
+  .color-hex { font-family: var(--font-mono); font-size: 10px; width: 56px; background: transparent; border: 1px solid var(--border); border-radius: 2px; padding: 2px 4px; color: var(--text2); outline: none; }
+  .color-hex:focus { border-color: var(--accent2); }
+  .theme-chips { display: flex; gap: 4px; flex-wrap: wrap; margin-top: 2px; }
+  .theme-chip { display: flex; gap: 2px; padding: 4px 6px; border-radius: 3px; cursor: pointer; border: 1px solid var(--border); transition: border-color 0.1s; }
+  .theme-chip:hover { border-color: var(--accent2); }
+  .theme-chip span { display: inline-block; width: 10px; height: 10px; border-radius: 2px; }
+
+  #threeCanvas { display: block; width: 100%; height: 100%; }
+  .canvas-wrap { flex: 1; position: relative; overflow: hidden; background: var(--bg); }
+  .hint { position: absolute; bottom: 14px; left: 50%; transform: translateX(-50%); font-family: var(--font-mono); font-size: 10px; color: var(--text3); letter-spacing: 0.08em; pointer-events: none; white-space: nowrap; }
+  .loading { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-family: var(--font-mono); font-size: 12px; color: var(--text3); letter-spacing: 0.1em; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">Game <span>//</span> of Life</div>
+  <div class="badge">3D</div>
+  <div class="stats">
+    <div class="stat"><span class="stat-label">世代</span><span class="stat-val" id="genCnt">0</span></div>
+    <div class="stat"><span class="stat-label">生存</span><span class="stat-val" id="aliveCnt">0</span></div>
+    <div class="stat"><span class="stat-label">グリッド</span><span class="stat-val" id="gridSz">—</span></div>
+  </div>
+</header>
+
+<div class="main">
+  <div class="sidebar">
+
+    <div class="section">
+      <button class="play-btn" id="btnPlay" onclick="togglePlay()">▶ スタート</button>
+      <div style="display:flex;gap:6px;margin-top:6px;">
+        <button style="flex:1" onclick="stepSim()">1ステップ</button>
+        <button style="flex:1;color:var(--text3)" class="danger" onclick="clearGrid()">クリア</button>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-title">パラメータ</div>
+      <div class="slider-row">
+        <div class="slider-header"><span class="slider-name">速度</span><span class="slider-val" id="fpsOut">8</span></div>
+        <input type="range" min="1" max="20" value="8" step="1" id="speed" oninput="fpsOut.textContent=this.value;setFPS(+this.value)">
+      </div>
+      <div class="slider-row">
+        <div class="slider-header"><span class="slider-name">グリッドサイズ</span><span class="slider-val" id="gsOut">20</span></div>
+        <input type="range" min="8" max="30" value="20" step="1" id="gridSize" oninput="gsOut.textContent=this.value">
+      </div>
+      <div class="slider-row">
+        <div class="slider-header"><span class="slider-name">ランダム密度</span><span class="slider-val" id="densOut">15%</span></div>
+        <input type="range" min="3" max="40" value="15" step="1" id="density" oninput="densOut.textContent=this.value+'%'">
+      </div>
+      <button style="width:100%;margin-top:4px;font-size:11px;" onclick="rebuildGrid()">グリッド再構築</button>
+    </div>
+
+    <div class="section">
+      <div class="section-title">ルール（3D 26近傍）</div>
+      <div class="rule-label">生存（S）</div>
+      <div id="survTags" style="display:flex;flex-wrap:wrap;gap:3px;margin-bottom:8px;"></div>
+      <div class="rule-label">誕生（B）</div>
+      <div id="bornTags" style="display:flex;flex-wrap:wrap;gap:3px;margin-bottom:8px;"></div>
+      <div class="rule-notation" id="ruleNotation">B5-7/S4-6</div>
+      <div style="display:flex;gap:4px;margin-top:8px;flex-wrap:wrap;">
+        <button onclick="applyRule([5,6,7],[4,5,6])" style="font-size:10px;padding:4px 7px;">Stable</button>
+        <button onclick="applyRule([4,5,6],[5,6,7])" style="font-size:10px;padding:4px 7px;">Grow</button>
+        <button onclick="applyRule([5,6],[4,5])" style="font-size:10px;padding:4px 7px;">Sparse</button>
+        <button onclick="applyRule([2,3],[3,6])" style="font-size:10px;padding:4px 7px;">Chaos</button>
+        <button onclick="applyRule([4,5,6,7],[5,6,7,8])" style="font-size:10px;padding:4px 7px;">Dense</button>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-title">カラー</div>
+      <div class="color-row">
+        <span class="color-label">セル</span>
+        <div class="color-pick-wrap">
+          <div class="color-swatch" id="swAlive" style="background:#4f8ef7" onclick="openPicker('pickerAlive')"></div>
+          <input type="color" id="pickerAlive" value="#4f8ef7" oninput="setColor('alive',this.value)">
+          <input type="text" class="color-hex" id="hexAlive" value="#4f8ef7" oninput="onHexInput('alive',this.value)" maxlength="7">
+        </div>
+      </div>
+      <div class="color-row">
+        <span class="color-label">エミッシブ</span>
+        <div class="color-pick-wrap">
+          <div class="color-swatch" id="swEmit" style="background:#1a3a8f" onclick="openPicker('pickerEmit')"></div>
+          <input type="color" id="pickerEmit" value="#1a3a8f" oninput="setColor('emit',this.value)">
+          <input type="text" class="color-hex" id="hexEmit" value="#1a3a8f" oninput="onHexInput('emit',this.value)" maxlength="7">
+        </div>
+      </div>
+      <div class="color-row">
+        <span class="color-label">背景</span>
+        <div class="color-pick-wrap">
+          <div class="color-swatch" id="swBg" style="background:#07090f" onclick="openPicker('pickerBg')"></div>
+          <input type="color" id="pickerBg" value="#07090f" oninput="setColor('bg',this.value)">
+          <input type="text" class="color-hex" id="hexBg" value="#07090f" oninput="onHexInput('bg',this.value)" maxlength="7">
+        </div>
+      </div>
+      <div style="margin-top:6px;">
+        <div class="rule-label" style="margin-bottom:6px;">テーマ</div>
+        <div class="theme-chips" id="themeChips"></div>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-title">プリセット</div>
+      <div class="preset-list">
+        <button class="preset-btn" onclick="loadPreset('random')">ランダム</button>
+        <button class="preset-btn" onclick="loadPreset('sphere')">球体</button>
+        <button class="preset-btn" onclick="loadPreset('plane')">平面</button>
+        <button class="preset-btn" onclick="loadPreset('cross')">十字</button>
+        <button class="preset-btn" onclick="loadPreset('corners')">コーナー</button>
+      </div>
+    </div>
+
+    <div class="section" style="font-family:var(--font-mono);font-size:10px;color:var(--text3);line-height:1.9;">
+      左ドラッグ: 回転<br>
+      右ドラッグ / 2本指: 移動<br>
+      スクロール: ズーム
+    </div>
+
+  </div>
+
+  <div class="canvas-wrap" id="canvasWrap">
+    <div class="loading" id="loading">LOADING...</div>
+    <canvas id="threeCanvas"></canvas>
+    <div class="hint" id="hint"></div>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+// ── State ──────────────────────────────────────────────────────
+let N = 20;
+let grid, nextGrid;
+let survive = new Set([4,5,6]);
+let born = new Set([5,6,7]);
+let running = false, simInterval = null;
+let gen = 0;
+
+let colors = { alive: '#4f8ef7', emit: '#1a3a8f', bg: '#07090f' };
+
+const THEMES = [
+  { name:'Space',  alive:'#4f8ef7', emit:'#1a3a8f', bg:'#07090f' },
+  { name:'Lava',   alive:'#e24b4a', emit:'#7a1515', bg:'#0e0404' },
+  { name:'Forest', alive:'#1D9E75', emit:'#083d2a', bg:'#040e08' },
+  { name:'Gold',   alive:'#EF9F27', emit:'#7a4d08', bg:'#0e0a02' },
+  { name:'Void',   alive:'#d0d0d0', emit:'#505050', bg:'#050505' },
+  { name:'Neon',   alive:'#c084fc', emit:'#5b009e', bg:'#06000e' },
+];
+
+// ── Three.js setup ────────────────────────────────────────────
+const wrap = document.getElementById('canvasWrap');
+const canvas3d = document.getElementById('threeCanvas');
+
+const renderer = new THREE.WebGLRenderer({ canvas: canvas3d, antialias: true });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(colors.bg);
+scene.fog = new THREE.FogExp2(colors.bg, 0.015);
+
+const camera = new THREE.PerspectiveCamera(55, 1, 0.1, 500);
+camera.position.set(30, 25, 30);
+camera.lookAt(0, 0, 0);
+
+// Lights
+const ambient = new THREE.AmbientLight(0xffffff, 0.35);
+scene.add(ambient);
+const dirLight = new THREE.DirectionalLight(0xffffff, 0.9);
+dirLight.position.set(40, 60, 30);
+dirLight.castShadow = true;
+dirLight.shadow.mapSize.set(1024, 1024);
+scene.add(dirLight);
+const pointLight = new THREE.PointLight(0x4f8ef7, 1.2, 80);
+pointLight.position.set(0, 20, 0);
+scene.add(pointLight);
+
+// Grid bounding box
+const boxGeo = new THREE.BoxGeometry(1, 1, 1);
+const boxEdges = new THREE.EdgesGeometry(new THREE.BoxGeometry(N, N, N));
+let gridBox = new THREE.LineSegments(boxEdges, new THREE.LineBasicMaterial({ color: 0x1a2035, transparent: true, opacity: 0.5 }));
+scene.add(gridBox);
+
+// Instanced mesh for cells
+const cellGeo = new THREE.BoxGeometry(0.85, 0.85, 0.85);
+let cellMat = new THREE.MeshStandardMaterial({
+  color: new THREE.Color(colors.alive),
+  emissive: new THREE.Color(colors.emit),
+  emissiveIntensity: 0.4,
+  roughness: 0.3,
+  metalness: 0.5
+});
+let maxCells = N * N * N;
+let instancedMesh = new THREE.InstancedMesh(cellGeo, cellMat, maxCells);
+instancedMesh.castShadow = true;
+instancedMesh.receiveShadow = true;
+instancedMesh.count = 0;
+scene.add(instancedMesh);
+
+const dummy = new THREE.Object3D();
+
+// ── Grid logic ────────────────────────────────────────────────
+function makeGrid(size) {
+  return new Uint8Array(size * size * size);
+}
+
+function idx(x, y, z) { return x * N * N + y * N + z; }
+
+function countNeighbors3D(x, y, z) {
+  let n = 0;
+  for (let dx = -1; dx <= 1; dx++)
+  for (let dy = -1; dy <= 1; dy++)
+  for (let dz = -1; dz <= 1; dz++) {
+    if (dx === 0 && dy === 0 && dz === 0) continue;
+    const nx = (x + dx + N) % N;
+    const ny = (y + dy + N) % N;
+    const nz = (z + dz + N) % N;
+    n += grid[idx(nx, ny, nz)];
+  }
+  return n;
+}
+
+function stepSim() {
+  let aliveCount = 0;
+  for (let x = 0; x < N; x++)
+  for (let y = 0; y < N; y++)
+  for (let z = 0; z < N; z++) {
+    const n = countNeighbors3D(x, y, z);
+    const was = grid[idx(x, y, z)];
+    const now = was ? (survive.has(n) ? 1 : 0) : (born.has(n) ? 1 : 0);
+    nextGrid[idx(x, y, z)] = now;
+    if (now) aliveCount++;
+  }
+  [grid, nextGrid] = [nextGrid, grid];
+  gen++;
+  document.getElementById('genCnt').textContent = gen.toLocaleString();
+  document.getElementById('aliveCnt').textContent = aliveCount.toLocaleString();
+  updateMesh();
+}
+
+function updateMesh() {
+  let count = 0;
+  const half = (N - 1) / 2;
+  for (let x = 0; x < N; x++)
+  for (let y = 0; y < N; y++)
+  for (let z = 0; z < N; z++) {
+    if (grid[idx(x, y, z)]) {
+      dummy.position.set(x - half, y - half, z - half);
+      dummy.updateMatrix();
+      instancedMesh.setMatrixAt(count++, dummy.matrix);
+    }
+  }
+  instancedMesh.count = count;
+  instancedMesh.instanceMatrix.needsUpdate = true;
+}
+
+function clearGrid() {
+  grid.fill(0);
+  nextGrid.fill(0);
+  gen = 0;
+  document.getElementById('genCnt').textContent = '0';
+  document.getElementById('aliveCnt').textContent = '0';
+  updateMesh();
+}
+
+function rebuildGrid() {
+  N = +document.getElementById('gridSize').value;
+  document.getElementById('gridSz').textContent = N + '³';
+  maxCells = N * N * N;
+  grid = makeGrid(N);
+  nextGrid = makeGrid(N);
+
+  scene.remove(gridBox);
+  const newEdges = new THREE.EdgesGeometry(new THREE.BoxGeometry(N, N, N));
+  gridBox = new THREE.LineSegments(newEdges, new THREE.LineBasicMaterial({ color: 0x1a2035, transparent: true, opacity: 0.5 }));
+  scene.add(gridBox);
+
+  scene.remove(instancedMesh);
+  instancedMesh.geometry.dispose();
+  instancedMesh = new THREE.InstancedMesh(cellGeo, cellMat, maxCells);
+  instancedMesh.castShadow = true;
+  instancedMesh.count = 0;
+  scene.add(instancedMesh);
+
+  gen = 0;
+  document.getElementById('genCnt').textContent = '0';
+  document.getElementById('aliveCnt').textContent = '0';
+  document.getElementById('gridSz').textContent = N + '³';
+  loadPreset('random');
+}
+
+function loadPreset(name) {
+  clearGrid();
+  const half = Math.floor(N / 2);
+  const dens = +document.getElementById('density').value / 100;
+
+  if (name === 'random') {
+    for (let i = 0; i < grid.length; i++) grid[i] = Math.random() < dens ? 1 : 0;
+  } else if (name === 'sphere') {
+    const r = Math.floor(N * 0.3);
+    for (let x = 0; x < N; x++)
+    for (let y = 0; y < N; y++)
+    for (let z = 0; z < N; z++) {
+      const dx = x - half, dy = y - half, dz = z - half;
+      const d = Math.sqrt(dx*dx + dy*dy + dz*dz);
+      if (d >= r - 1.5 && d <= r + 1.5) grid[idx(x, y, z)] = 1;
+    }
+  } else if (name === 'plane') {
+    const y = half;
+    for (let x = 2; x < N-2; x++)
+    for (let z = 2; z < N-2; z++) grid[idx(x, y, z)] = Math.random() < 0.55 ? 1 : 0;
+  } else if (name === 'cross') {
+    for (let i = 2; i < N-2; i++) {
+      grid[idx(i, half, half)] = 1;
+      grid[idx(half, i, half)] = 1;
+      grid[idx(half, half, i)] = 1;
+    }
+  } else if (name === 'corners') {
+    const o = 3;
+    const pts = [[o,o,o],[N-1-o,o,o],[o,N-1-o,o],[o,o,N-1-o],[N-1-o,N-1-o,o],[N-1-o,o,N-1-o],[o,N-1-o,N-1-o],[N-1-o,N-1-o,N-1-o]];
+    pts.forEach(([x,y,z]) => {
+      for (let dx=-2;dx<=2;dx++) for (let dy=-2;dy<=2;dy++) for (let dz=-2;dz<=2;dz++)
+        if (x+dx>=0&&x+dx<N&&y+dy>=0&&y+dy<N&&z+dz>=0&&z+dz<N)
+          grid[idx(x+dx,y+dy,z+dz)] = 1;
+    });
+  }
+
+  let alive = 0;
+  for (let i = 0; i < grid.length; i++) if (grid[i]) alive++;
+  document.getElementById('aliveCnt').textContent = alive.toLocaleString();
+  gen = 0;
+  document.getElementById('genCnt').textContent = '0';
+  updateMesh();
+}
+
+// ── Controls (orbit) ──────────────────────────────────────────
+let isDragging = false, isRightDrag = false;
+let lastX = 0, lastY = 0;
+let spherical = { theta: Math.PI / 4, phi: Math.PI / 3.5, radius: 45 };
+let target = new THREE.Vector3(0, 0, 0);
+
+function updateCamera() {
+  camera.position.x = target.x + spherical.radius * Math.sin(spherical.phi) * Math.sin(spherical.theta);
+  camera.position.y = target.y + spherical.radius * Math.cos(spherical.phi);
+  camera.position.z = target.z + spherical.radius * Math.sin(spherical.phi) * Math.cos(spherical.theta);
+  camera.lookAt(target);
+}
+
+canvas3d.addEventListener('mousedown', e => {
+  isDragging = true;
+  isRightDrag = e.button === 2;
+  lastX = e.clientX; lastY = e.clientY;
+});
+canvas3d.addEventListener('contextmenu', e => e.preventDefault());
+document.addEventListener('mouseup', () => { isDragging = false; });
+document.addEventListener('mousemove', e => {
+  if (!isDragging) return;
+  const dx = e.clientX - lastX, dy = e.clientY - lastY;
+  if (isRightDrag) {
+    const right = new THREE.Vector3();
+    const up = new THREE.Vector3();
+    camera.getWorldDirection(right);
+    right.cross(camera.up).normalize().multiplyScalar(-dx * 0.04);
+    up.copy(camera.up).multiplyScalar(dy * 0.04);
+    target.add(right).add(up);
+  } else {
+    spherical.theta -= dx * 0.008;
+    spherical.phi = Math.max(0.1, Math.min(Math.PI - 0.1, spherical.phi + dy * 0.008));
+  }
+  lastX = e.clientX; lastY = e.clientY;
+  updateCamera();
+});
+canvas3d.addEventListener('wheel', e => {
+  e.preventDefault();
+  spherical.radius = Math.max(5, Math.min(120, spherical.radius + e.deltaY * 0.05));
+  updateCamera();
+}, { passive: false });
+
+// touch
+let lastTouchDist = 0;
+canvas3d.addEventListener('touchstart', e => {
+  if (e.touches.length === 1) { isDragging = true; isRightDrag = false; lastX = e.touches[0].clientX; lastY = e.touches[0].clientY; }
+  if (e.touches.length === 2) { lastTouchDist = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY); }
+}, { passive: true });
+canvas3d.addEventListener('touchmove', e => {
+  e.preventDefault();
+  if (e.touches.length === 1 && isDragging) {
+    const dx = e.touches[0].clientX - lastX, dy = e.touches[0].clientY - lastY;
+    spherical.theta -= dx * 0.008;
+    spherical.phi = Math.max(0.1, Math.min(Math.PI - 0.1, spherical.phi + dy * 0.008));
+    lastX = e.touches[0].clientX; lastY = e.touches[0].clientY;
+    updateCamera();
+  }
+  if (e.touches.length === 2) {
+    const dist = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
+    spherical.radius = Math.max(5, Math.min(120, spherical.radius - (dist - lastTouchDist) * 0.08));
+    lastTouchDist = dist;
+    updateCamera();
+  }
+}, { passive: false });
+canvas3d.addEventListener('touchend', () => { isDragging = false; }, { passive: true });
+
+// ── Playback ───────────────────────────────────────────────────
+function togglePlay() {
+  running = !running;
+  const btn = document.getElementById('btnPlay');
+  if (running) {
+    btn.textContent = '■ ストップ'; btn.classList.add('running');
+    setFPS(+document.getElementById('speed').value);
+  } else {
+    btn.textContent = '▶ スタート'; btn.classList.remove('running');
+    clearInterval(simInterval);
+  }
+}
+function setFPS(fps) {
+  clearInterval(simInterval);
+  if (running) simInterval = setInterval(stepSim, 1000 / fps);
+}
+
+// ── Rules ──────────────────────────────────────────────────────
+function applyRule(s, b) {
+  survive = new Set(s); born = new Set(b);
+  buildRuleTags();
+}
+
+function buildRuleTags() {
+  ['surv','born'].forEach(type => {
+    const el = document.getElementById(type + 'Tags');
+    el.innerHTML = '';
+    const s = type === 'surv' ? survive : born;
+    for (let i = 0; i <= 26; i++) {
+      const tag = document.createElement('button');
+      tag.className = 'rtag' + (s.has(i) ? ' on' : '');
+      tag.textContent = i;
+      tag.style.cssText = 'font-size:9px;padding:3px 1px;min-width:18px;';
+      tag.onclick = () => { s.has(i) ? s.delete(i) : s.add(i); buildRuleTags(); };
+      el.appendChild(tag);
+    }
+  });
+  const sArr = [...survive].sort((a,b)=>a-b);
+  const bArr = [...born].sort((a,b)=>a-b);
+  const fmt = arr => arr.length === 0 ? '∅' : arr.join(',');
+  document.getElementById('ruleNotation').textContent = 'B' + fmt(bArr) + '/S' + fmt(sArr);
+}
+
+// ── Color ──────────────────────────────────────────────────────
+function openPicker(id) {
+  const el = document.getElementById(id);
+  el.style.pointerEvents = 'auto';
+  el.click();
+  setTimeout(() => el.style.pointerEvents = 'none', 100);
+}
+
+function setColor(key, val) {
+  colors[key] = val;
+  const cap = key.charAt(0).toUpperCase() + key.slice(1);
+  document.getElementById('sw' + cap).style.background = val;
+  document.getElementById('hex' + cap).value = val;
+  if (key === 'alive') { cellMat.color.set(val); pointLight.color.set(val); }
+  else if (key === 'emit') { cellMat.emissive.set(val); }
+  else if (key === 'bg') { scene.background.set(val); scene.fog.color.set(val); document.querySelector('.canvas-wrap').style.background = val; }
+}
+
+function onHexInput(key, val) {
+  if (/^#[0-9a-fA-F]{6}$/.test(val)) {
+    document.getElementById('picker' + key.charAt(0).toUpperCase() + key.slice(1)).value = val;
+    setColor(key, val);
+  }
+}
+
+function applyTheme(t) {
+  Object.keys(t).filter(k => k !== 'name').forEach(k => {
+    colors[k] = t[k];
+    const cap = k.charAt(0).toUpperCase() + k.slice(1);
+    document.getElementById('sw' + cap).style.background = t[k];
+    document.getElementById('hex' + cap).value = t[k];
+    document.getElementById('picker' + cap).value = t[k];
+  });
+  cellMat.color.set(t.alive);
+  cellMat.emissive.set(t.emit);
+  pointLight.color.set(t.alive);
+  scene.background.set(t.bg);
+  scene.fog.color.set(t.bg);
+  document.querySelector('.canvas-wrap').style.background = t.bg;
+}
+
+function buildThemeChips() {
+  const wrap2 = document.getElementById('themeChips');
+  THEMES.forEach(t => {
+    const chip = document.createElement('div');
+    chip.className = 'theme-chip';
+    chip.title = t.name;
+    chip.innerHTML = `<span style="background:${t.bg};border:1px solid #444"></span><span style="background:${t.alive}"></span>`;
+    chip.onclick = () => applyTheme(t);
+    wrap2.appendChild(chip);
+  });
+}
+
+// ── Resize ────────────────────────────────────────────────────
+function onResize() {
+  const w = wrap.clientWidth, h = wrap.clientHeight;
+  renderer.setSize(w, h);
+  camera.aspect = w / h;
+  camera.updateProjectionMatrix();
+}
+window.addEventListener('resize', onResize);
+onResize();
+
+// ── Render loop ───────────────────────────────────────────────
+let frameId;
+function animate() {
+  frameId = requestAnimationFrame(animate);
+  renderer.render(scene, camera);
+}
+
+// ── Keyboard ──────────────────────────────────────────────────
+window.addEventListener('keydown', e => {
+  if (e.code === 'Space') { e.preventDefault(); togglePlay(); }
+  else if (e.code === 'ArrowRight') stepSim();
+  else if (e.code === 'KeyC') clearGrid();
+  else if (e.code === 'KeyR') loadPreset('random');
+});
+
+// ── Init ──────────────────────────────────────────────────────
+grid = makeGrid(N);
+nextGrid = makeGrid(N);
+document.getElementById('gridSz').textContent = N + '³';
+buildRuleTags();
+buildThemeChips();
+updateCamera();
+loadPreset('random');
+document.getElementById('loading').style.display = 'none';
+animate();
+</script>
+</body>
+</html>

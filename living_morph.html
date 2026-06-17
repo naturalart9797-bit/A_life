@@ -1,0 +1,492 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Living Morph</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+JP:wght@300;400;500&display=swap');
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#06070d;--surface:#0c0e16;--border:#181b28;--border2:#23283a;
+  --accent:#6ad0c0;--accent2:#2f8a7a;
+  --text:#cfeae4;--text2:#5f7c76;--text3:#243038;
+  --font-mono:'IBM Plex Mono',monospace;--font-ui:'IBM Plex Sans JP',sans-serif;
+}
+body{background:var(--bg);color:var(--text);font-family:var(--font-ui);height:100vh;display:flex;flex-direction:column;overflow:hidden;user-select:none;}
+header{display:flex;align-items:center;gap:14px;padding:8px 18px;border-bottom:1px solid var(--border);background:var(--surface);flex-shrink:0;}
+.logo{font-family:var(--font-mono);font-size:12px;font-weight:500;color:var(--accent);letter-spacing:.1em;text-transform:uppercase;}
+.logo em{color:var(--text3);font-style:normal;}
+.stats{margin-left:auto;display:flex;gap:16px;}
+.stat{display:flex;flex-direction:column;align-items:flex-end;}
+.stat-label{font-family:var(--font-mono);font-size:8px;color:var(--text3);letter-spacing:.1em;text-transform:uppercase;}
+.stat-val{font-family:var(--font-mono);font-size:13px;font-weight:500;color:var(--text);line-height:1.2;}
+.rec-dot{width:7px;height:7px;border-radius:50%;background:#e05252;display:none;animation:blink 1s infinite;}
+.rec-dot.on{display:inline-block;}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.15}}
+.main{display:flex;flex:1;overflow:hidden;}
+.sidebar{width:256px;flex-shrink:0;background:var(--surface);border-right:1px solid var(--border);display:flex;flex-direction:column;overflow-y:auto;}
+.sidebar::-webkit-scrollbar{width:3px;}
+.sidebar::-webkit-scrollbar-thumb{background:var(--border2);border-radius:2px;}
+.sec{padding:11px 13px;border-bottom:1px solid var(--border);}
+.sec-title{font-family:var(--font-mono);font-size:8px;color:var(--text3);letter-spacing:.14em;text-transform:uppercase;margin-bottom:9px;}
+button{font-family:var(--font-mono);font-size:11px;font-weight:500;background:transparent;border:1px solid var(--border);color:var(--text2);padding:5px 10px;border-radius:3px;cursor:pointer;transition:all .15s;white-space:nowrap;}
+button:hover{border-color:var(--accent2);color:var(--accent);background:rgba(106,208,192,.07);}
+button.on{border-color:var(--accent)!important;color:var(--accent)!important;background:rgba(106,208,192,.14)!important;}
+.play-btn{width:100%;padding:7px;font-size:12px;border-color:var(--accent2);color:var(--accent);}
+.play-btn.running{background:rgba(106,208,192,.1);}
+.rec-btn{border-color:#e05252;color:#e05252;}
+.rec-btn:hover,.rec-btn.recording{background:rgba(224,82,82,.1);}
+.sl-row{margin-bottom:8px;}
+.sl-head{display:flex;justify-content:space-between;margin-bottom:3px;}
+.sl-name{font-family:var(--font-mono);font-size:10px;color:var(--text2);}
+.sl-val{font-family:var(--font-mono);font-size:10px;color:var(--accent);}
+input[type=range]{-webkit-appearance:none;width:100%;height:2px;background:var(--border);border-radius:1px;outline:none;}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:11px;height:11px;background:var(--accent);border-radius:50%;cursor:pointer;}
+.tog-row{display:flex;align-items:center;justify-content:space-between;margin-bottom:7px;}
+.tog-label{font-family:var(--font-mono);font-size:10px;color:var(--text2);}
+.tog{position:relative;width:28px;height:14px;flex-shrink:0;}
+.tog input{opacity:0;width:0;height:0;position:absolute;}
+.tog-track{position:absolute;inset:0;background:var(--border);border-radius:8px;cursor:pointer;transition:background .2s;}
+.tog input:checked+.tog-track{background:var(--accent2);}
+.tog-track::after{content:'';position:absolute;width:10px;height:10px;left:2px;top:2px;background:var(--text3);border-radius:50%;transition:transform .2s,background .2s;}
+.tog input:checked+.tog-track::after{transform:translateX(14px);background:var(--accent);}
+.canvas-wrap{flex:1;position:relative;overflow:hidden;background:#000;}
+canvas{display:block;width:100%;height:100%;}
+.img-slots{display:flex;gap:6px;}
+.img-slot{flex:1;aspect-ratio:1;border:1px dashed var(--border2);border-radius:5px;display:flex;flex-direction:column;align-items:center;justify-content:center;cursor:pointer;overflow:hidden;position:relative;transition:border-color .15s;}
+.img-slot:hover{border-color:var(--accent2);}
+.img-slot img{width:100%;height:100%;object-fit:cover;}
+.img-slot .ph{font-family:var(--font-mono);font-size:9px;color:var(--text3);text-align:center;line-height:1.5;}
+.img-slot .badge{position:absolute;top:3px;left:4px;font-family:var(--font-mono);font-size:9px;color:var(--accent);background:rgba(6,7,13,.7);padding:1px 5px;border-radius:3px;}
+.hint{position:absolute;bottom:10px;left:50%;transform:translateX(-50%);font-family:var(--font-mono);font-size:9px;color:var(--text3);pointer-events:none;white-space:nowrap;}
+.morph-bar{position:absolute;bottom:0;left:0;right:0;height:3px;background:var(--border);}
+.morph-fill{height:100%;background:var(--accent);width:0%;}
+.mode-grid{display:grid;grid-template-columns:1fr 1fr;gap:4px;}
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">Living <em>//</em> Morph</div>
+  <span class="rec-dot" id="recDot"></span>
+  <div class="stats">
+    <div class="stat"><span class="stat-label">粒子</span><span class="stat-val" id="statN">0</span></div>
+    <div class="stat"><span class="stat-label">補間</span><span class="stat-val" id="statMorph">A</span></div>
+    <div class="stat"><span class="stat-label">fps</span><span class="stat-val" id="statFps">—</span></div>
+  </div>
+</header>
+
+<div class="main">
+  <div class="sidebar">
+
+    <div class="sec">
+      <button class="play-btn running" id="btnPlay" onclick="togglePlay()">■ pause</button>
+      <div style="display:flex;gap:5px;margin-top:5px;">
+        <button style="flex:1" onclick="resampleTargets()">再サンプル</button>
+        <button class="rec-btn" id="btnRec" onclick="toggleRec()">● rec</button>
+        <button id="btnDL" onclick="downloadVid()" disabled>↓</button>
+      </div>
+    </div>
+
+    <div class="sec">
+      <div class="sec-title">画像（2枚）</div>
+      <div class="img-slots">
+        <div class="img-slot" id="slotA" onclick="document.getElementById('fileA').click()">
+          <div class="ph">画像A<br>クリック</div>
+        </div>
+        <div class="img-slot" id="slotB" onclick="document.getElementById('fileB').click()">
+          <div class="ph">画像B<br>クリック</div>
+        </div>
+      </div>
+      <input type="file" id="fileA" accept="image/*" style="display:none" onchange="loadImg(this,'A')">
+      <input type="file" id="fileB" accept="image/*" style="display:none" onchange="loadImg(this,'B')">
+      <div style="font-family:var(--font-mono);font-size:9px;color:var(--text3);margin-top:6px;line-height:1.6;">明るい部分に粒子が集まります。コントラストの高い画像が綺麗です</div>
+    </div>
+
+    <div class="sec">
+      <div class="sec-title">補間（A↔B ループ）</div>
+      <div class="sl-row">
+        <div class="sl-head"><span class="sl-name">遷移の速さ</span><span class="sl-val" id="vMorphSpd">0.006</span></div>
+        <input type="range" min="0.001" max="0.03" value="0.006" step="0.001" id="sMorphSpd" oninput="vMorphSpd.textContent=(+this.value).toFixed(3)">
+      </div>
+      <div class="sl-row">
+        <div class="sl-head"><span class="sl-name">停留時間（端で待つ）</span><span class="sl-val" id="vHold">80</span></div>
+        <input type="range" min="0" max="300" value="80" step="10" id="sHold" oninput="vHold.textContent=this.value">
+      </div>
+      <div class="tog-row"><span class="tog-label">イージング（緩急）</span>
+        <label class="tog"><input type="checkbox" id="togEase" checked><div class="tog-track"></div></label>
+      </div>
+    </div>
+
+    <div class="sec">
+      <div class="sec-title">生命の動き</div>
+      <div class="sl-row">
+        <div class="sl-head"><span class="sl-name">粒子数</span><span class="sl-val" id="vN">12000</span></div>
+        <input type="range" min="1000" max="40000" value="12000" step="1000" id="sN" oninput="vN.textContent=this.value">
+      </div>
+      <div class="sl-row">
+        <div class="sl-head"><span class="sl-name">追従の強さ</span><span class="sl-val" id="vAttract">0.08</span></div>
+        <input type="range" min="0.01" max="0.3" value="0.08" step="0.01" id="sAttract" oninput="vAttract.textContent=(+this.value).toFixed(2)">
+      </div>
+      <div class="sl-row">
+        <div class="sl-head"><span class="sl-name">うねり（ノイズ流）</span><span class="sl-val" id="vSwirl">1.2</span></div>
+        <input type="range" min="0" max="4" value="1.2" step="0.1" id="sSwirl" oninput="vSwirl.textContent=(+this.value).toFixed(1)">
+      </div>
+      <div class="sl-row">
+        <div class="sl-head"><span class="sl-name">摩擦</span><span class="sl-val" id="vFrict">0.86</span></div>
+        <input type="range" min="0.6" max="0.98" value="0.86" step="0.01" id="sFrict" oninput="vFrict.textContent=(+this.value).toFixed(2)">
+      </div>
+      <div class="sl-row">
+        <div class="sl-head"><span class="sl-name">移動中の拡散</span><span class="sl-val" id="vScatter">0.5</span></div>
+        <input type="range" min="0" max="2" value="0.5" step="0.1" id="sScatter" oninput="vScatter.textContent=(+this.value).toFixed(1)">
+      </div>
+    </div>
+
+    <div class="sec">
+      <div class="sec-title">表示モード</div>
+      <div class="mode-grid">
+        <button id="m-dots" class="on" onclick="setMode('dots')">粒子</button>
+        <button id="m-slime" onclick="setMode('slime')">粘菌トレイル</button>
+        <button id="m-ribbon" onclick="setMode('ribbon')">リボン</button>
+        <button id="m-glow" onclick="setMode('glow')">グロー</button>
+      </div>
+      <div class="sl-row" style="margin-top:8px;">
+        <div class="sl-head"><span class="sl-name">残像（トレイル）</span><span class="sl-val" id="vTrail">0.12</span></div>
+        <input type="range" min="0.02" max="0.6" value="0.12" step="0.01" id="sTrail" oninput="vTrail.textContent=(+this.value).toFixed(2)">
+      </div>
+      <div class="tog-row"><span class="tog-label">画像の色を使う</span>
+        <label class="tog"><input type="checkbox" id="togImgColor" checked><div class="tog-track"></div></label>
+      </div>
+      <div class="sl-row" style="margin-top:4px;">
+        <div class="sl-head"><span class="sl-name">粒子サイズ</span><span class="sl-val" id="vSize">1.4</span></div>
+        <input type="range" min="0.5" max="4" value="1.4" step="0.1" id="sSize" oninput="vSize.textContent=(+this.value).toFixed(1)">
+      </div>
+    </div>
+
+    <div class="sec" style="font-family:var(--font-mono);font-size:9px;color:var(--text3);line-height:1.9;">
+      Space: 一時停止<br>
+      2枚の画像をアップロードすると、粒子が<br>
+      Aの形→Bの形→Aの形…と往復します。<br>
+      移動の途中が生命的な動きになります
+    </div>
+  </div>
+
+  <div class="canvas-wrap" id="canvasWrap">
+    <canvas id="c"></canvas>
+    <div class="hint">2枚の画像をアップロードしてください</div>
+    <div class="morph-bar"><div class="morph-fill" id="morphFill"></div></div>
+  </div>
+</div>
+
+<!-- offscreen for sampling -->
+<canvas id="sampleCanvas" style="display:none;"></canvas>
+
+<script>
+const canvas=document.getElementById('c');
+const ctx=canvas.getContext('2d');
+const wrap=document.getElementById('canvasWrap');
+const sampleCanvas=document.getElementById('sampleCanvas');
+const sctx=sampleCanvas.getContext('2d',{willReadFrequently:true});
+
+let W=0,H=0;
+let particles=null; // Float32Array: x,y,vx,vy per particle (4 each)
+let targetA=null, targetB=null; // Float32Array x,y,r,g,b per slot (5 each)
+let nParticles=0;
+let imgA=null, imgB=null;
+let morph=0;       // 0..1
+let morphDir=1;
+let holdTimer=0;
+let running=true, tick=0;
+let mode='dots';
+let fpsFrames=0,fpsLast=performance.now();
+
+// ── Image loading ──
+function loadImg(input, slot){
+  const f=input.files[0]; if(!f) return;
+  const img=new Image();
+  img.onload=()=>{
+    if(slot==='A'){ imgA=img; showThumb('slotA',img,'A'); }
+    else { imgB=img; showThumb('slotB',img,'B'); }
+    resampleTargets();
+  };
+  img.src=URL.createObjectURL(f);
+}
+function showThumb(slotId,img,label){
+  const slot=document.getElementById(slotId);
+  slot.innerHTML='<div class="badge">'+label+'</div>';
+  const im=document.createElement('img'); im.src=img.src; slot.appendChild(im);
+}
+
+// ── Sampling: pick bright pixels as targets ──
+function sampleImage(img){
+  if(!img) return null;
+  // Fit image into canvas aspect, sample on a grid
+  const sw=180, sh=Math.round(180*img.height/img.width);
+  sampleCanvas.width=sw; sampleCanvas.height=sh;
+  sctx.clearRect(0,0,sw,sh);
+  sctx.drawImage(img,0,0,sw,sh);
+  const data=sctx.getImageData(0,0,sw,sh).data;
+
+  // Compute display rect (contain) in canvas
+  const scale=Math.min(W/img.width, H/img.height)*0.92;
+  const dw=img.width*scale, dh=img.height*scale;
+  const ox=(W-dw)/2, oy=(H-dh)/2;
+
+  // Collect candidate pixels weighted by brightness
+  const candidates=[];
+  for(let y=0;y<sh;y++) for(let x=0;x<sw;x++){
+    const i=(y*sw+x)*4;
+    const r=data[i],g=data[i+1],b=data[i+2];
+    const lum=(r*0.299+g*0.587+b*0.114)/255;
+    if(lum<0.12) continue; // skip dark
+    candidates.push({
+      x:ox+(x/sw)*dw, y:oy+(y/sh)*dh,
+      r,g,b, w:lum
+    });
+  }
+  return candidates;
+}
+
+function buildTargets(candidates, n){
+  // Weighted sampling of n target points from candidates
+  const out=new Float32Array(n*5);
+  if(!candidates||candidates.length===0){
+    // fallback: random in center
+    for(let i=0;i<n;i++){
+      out[i*5]=W/2+(Math.random()-0.5)*100;
+      out[i*5+1]=H/2+(Math.random()-0.5)*100;
+      out[i*5+2]=106;out[i*5+3]=208;out[i*5+4]=192;
+    }
+    return out;
+  }
+  // Build cumulative weights
+  let total=0; for(const c of candidates) total+=c.w;
+  for(let i=0;i<n;i++){
+    let r=Math.random()*total, acc=0, pick=candidates[0];
+    for(const c of candidates){ acc+=c.w; if(acc>=r){pick=c;break;} }
+    out[i*5]=pick.x+(Math.random()-0.5)*3;
+    out[i*5+1]=pick.y+(Math.random()-0.5)*3;
+    out[i*5+2]=pick.r; out[i*5+3]=pick.g; out[i*5+4]=pick.b;
+  }
+  return out;
+}
+
+function resampleTargets(){
+  nParticles=+document.getElementById('sN').value;
+  const candA=sampleImage(imgA);
+  const candB=sampleImage(imgB);
+  targetA=buildTargets(candA, nParticles);
+  targetB=buildTargets(candB, nParticles);
+
+  // (Re)allocate particles
+  if(!particles || particles.length!==nParticles*4){
+    particles=new Float32Array(nParticles*4);
+    for(let i=0;i<nParticles;i++){
+      // start at A target (or random)
+      particles[i*4]= targetA? targetA[i*5] : Math.random()*W;
+      particles[i*4+1]= targetA? targetA[i*5+1] : Math.random()*H;
+      particles[i*4+2]=0; particles[i*4+3]=0;
+    }
+  }
+  document.getElementById('statN').textContent=nParticles.toLocaleString();
+  const hint=document.querySelector('.hint');
+  if(imgA&&imgB) hint.style.display='none'; else hint.style.display='';
+}
+
+// ── Noise flow for organic movement ──
+function noiseFlow(x,y,t){
+  // cheap pseudo-curl
+  const a=Math.sin(x*0.01+t*0.7)+Math.cos(y*0.013-t*0.5);
+  const b=Math.cos(x*0.012-t*0.6)+Math.sin(y*0.011+t*0.4);
+  return Math.atan2(b,a);
+}
+
+// ── Step ──
+function step(){
+  tick++;
+  if(!particles||!targetA||!targetB) return;
+
+  const ease=document.getElementById('togEase').checked;
+  const morphSpd=+document.getElementById('sMorphSpd').value;
+  const hold=+document.getElementById('sHold').value;
+  const attract=+document.getElementById('sAttract').value;
+  const swirl=+document.getElementById('sSwirl').value;
+  const frict=+document.getElementById('sFrict').value;
+  const scatter=+document.getElementById('sScatter').value;
+
+  // Advance morph with hold at ends
+  if(holdTimer>0){ holdTimer--; }
+  else {
+    morph+=morphDir*morphSpd;
+    if(morph>=1){morph=1;morphDir=-1;holdTimer=hold;}
+    else if(morph<=0){morph=0;morphDir=1;holdTimer=hold;}
+  }
+  // eased interpolation factor
+  let m=morph;
+  if(ease) m=m*m*(3-2*m); // smoothstep
+
+  // "scatter" peaks mid-transition (when m near 0.5)
+  const transScatter=scatter*Math.sin(m*Math.PI); // 0 at ends, max mid
+
+  const t=tick*0.01;
+  for(let i=0;i<nParticles;i++){
+    const px=particles[i*4], py=particles[i*4+1];
+    let vx=particles[i*4+2], vy=particles[i*4+3];
+
+    // Interpolated target between A and B
+    const tx=targetA[i*5]*(1-m)+targetB[i*5]*m;
+    const ty=targetA[i*5+1]*(1-m)+targetB[i*5+1]*m;
+
+    // Attraction to target
+    vx+=(tx-px)*attract;
+    vy+=(ty-py)*attract;
+
+    // Organic noise flow
+    if(swirl>0){
+      const ang=noiseFlow(px,py,t);
+      vx+=Math.cos(ang)*swirl;
+      vy+=Math.sin(ang)*swirl;
+    }
+    // Mid-transition scatter
+    if(transScatter>0){
+      vx+=(Math.random()-0.5)*transScatter;
+      vy+=(Math.random()-0.5)*transScatter;
+    }
+
+    vx*=frict; vy*=frict;
+    particles[i*4]=px+vx;
+    particles[i*4+1]=py+vy;
+    particles[i*4+2]=vx;
+    particles[i*4+3]=vy;
+  }
+
+  // UI
+  document.getElementById('morphFill').style.width=(m*100)+'%';
+  document.getElementById('statMorph').textContent= m<0.5? 'A→B' : 'B→A';
+}
+
+// ── Render ──
+function render(){
+  const trail=+document.getElementById('sTrail').value;
+  const useImgColor=document.getElementById('togImgColor').checked;
+  const size=+document.getElementById('sSize').value;
+  const m = document.getElementById('togEase').checked ? morph*morph*(3-2*morph) : morph;
+
+  // Trail fade
+  ctx.fillStyle=`rgba(6,7,13,${mode==='slime'?trail*0.6:trail})`;
+  ctx.fillRect(0,0,W,H);
+
+  if(!particles||!targetA||!targetB) return;
+
+  if(mode==='glow'){ ctx.globalCompositeOperation='lighter'; }
+
+  for(let i=0;i<nParticles;i++){
+    const px=particles[i*4], py=particles[i*4+1];
+    let r,g,b;
+    if(useImgColor){
+      r=targetA[i*5+2]*(1-m)+targetB[i*5+2]*m;
+      g=targetA[i*5+3]*(1-m)+targetB[i*5+3]*m;
+      b=targetA[i*5+4]*(1-m)+targetB[i*5+4]*m;
+    } else { r=106;g=208;b=192; }
+
+    if(mode==='dots'||mode==='slime'){
+      ctx.fillStyle=`rgb(${r|0},${g|0},${b|0})`;
+      ctx.fillRect(px-size/2,py-size/2,size,size);
+    } else if(mode==='glow'){
+      ctx.fillStyle=`rgba(${r|0},${g|0},${b|0},0.5)`;
+      ctx.beginPath();ctx.arc(px,py,size*1.3,0,Math.PI*2);ctx.fill();
+    } else if(mode==='ribbon'){
+      // draw short line in velocity direction
+      const vx=particles[i*4+2], vy=particles[i*4+3];
+      ctx.strokeStyle=`rgba(${r|0},${g|0},${b|0},0.6)`;
+      ctx.lineWidth=size*0.8;
+      ctx.beginPath();ctx.moveTo(px,py);ctx.lineTo(px-vx*1.5,py-vy*1.5);ctx.stroke();
+    }
+  }
+  ctx.globalCompositeOperation='source-over';
+}
+
+// ── Loop ──
+function loop(){
+  requestAnimationFrame(loop);
+  fpsFrames++;
+  const now=performance.now();
+  if(now-fpsLast>=1000){
+    document.getElementById('statFps').textContent=fpsFrames;
+    fpsFrames=0; fpsLast=now;
+  }
+  if(running) step();
+  render();
+}
+
+// ── Mode ──
+function setMode(mm){
+  mode=mm;
+  ['dots','slime','ribbon','glow'].forEach(k=>document.getElementById('m-'+k).classList.toggle('on',k===mm));
+  // clear once on mode switch
+  ctx.fillStyle='#06070d'; ctx.fillRect(0,0,W,H);
+}
+
+// ── Controls ──
+function togglePlay(){
+  running=!running;
+  const btn=document.getElementById('btnPlay');
+  btn.textContent=running?'■ pause':'▶ resume';
+  btn.classList.toggle('running',running);
+}
+window.addEventListener('keydown',e=>{if(e.code==='Space'){e.preventDefault();togglePlay();}});
+function resize(){
+  W=canvas.width=wrap.clientWidth;
+  H=canvas.height=wrap.clientHeight;
+  ctx.fillStyle='#06070d'; ctx.fillRect(0,0,W,H);
+}
+window.addEventListener('resize',()=>{resize();resampleTargets();});
+
+// Drag&drop images
+wrap.addEventListener('dragover',e=>e.preventDefault());
+wrap.addEventListener('drop',e=>{
+  e.preventDefault();
+  const files=[...e.dataTransfer.files].filter(f=>f.type.startsWith('image/'));
+  if(files[0]){const dt=new DataTransfer();dt.items.add(files[0]);document.getElementById('fileA').files=dt.files;loadImg(document.getElementById('fileA'),'A');}
+  if(files[1]){const dt=new DataTransfer();dt.items.add(files[1]);document.getElementById('fileB').files=dt.files;loadImg(document.getElementById('fileB'),'B');}
+});
+
+// ── Recording ──
+let mediaRecorder=null,recChunks=[];
+function toggleRec(){
+  if(!mediaRecorder||mediaRecorder.state==='inactive') startRec();
+  else stopRec();
+}
+function startRec(){
+  recChunks=[];
+  const stream=canvas.captureStream(30);
+  const opts={mimeType:'video/webm;codecs=vp9',videoBitsPerSecond:8000000};
+  if(!MediaRecorder.isTypeSupported(opts.mimeType)) opts.mimeType='video/webm';
+  try{mediaRecorder=new MediaRecorder(stream,opts);}catch(e){mediaRecorder=new MediaRecorder(stream);}
+  mediaRecorder.ondataavailable=e=>{if(e.data.size>0)recChunks.push(e.data);};
+  mediaRecorder.onstop=()=>{
+    document.getElementById('btnDL').disabled=false;
+    document.getElementById('recDot').classList.remove('on');
+    document.getElementById('btnRec').textContent='● rec';
+    document.getElementById('btnRec').classList.remove('recording');
+  };
+  mediaRecorder.start(100);
+  document.getElementById('recDot').classList.add('on');
+  document.getElementById('btnRec').textContent='■ stop';
+  document.getElementById('btnRec').classList.add('recording');
+}
+function stopRec(){if(mediaRecorder&&mediaRecorder.state!=='inactive')mediaRecorder.stop();}
+function downloadVid(){
+  if(!recChunks.length) return;
+  const blob=new Blob(recChunks,{type:'video/webm'});
+  const a=document.createElement('a');a.href=URL.createObjectURL(blob);
+  a.download='living_morph_'+Date.now()+'.webm';a.click();
+}
+
+// ── Boot ──
+resize();
+resampleTargets();
+loop();
+</script>
+</body>
+</html>

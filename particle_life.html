@@ -1,0 +1,633 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Particle Life — Colony</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&display=swap');
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#05060c;--surface:#0b0c16;--border:#171828;--border2:#22243a;
+  --accent:#7c6af7;--accent2:#4a3fcc;
+  --text:#cccaff;--text2:#6a67a0;--text3:#2a2840;
+  --font:'IBM Plex Mono',monospace;
+}
+body{background:var(--bg);color:var(--text);font-family:var(--font);height:100vh;display:flex;flex-direction:column;overflow:hidden;user-select:none;}
+header{display:flex;align-items:center;gap:14px;padding:7px 16px;border-bottom:1px solid var(--border);background:var(--surface);flex-shrink:0;}
+.logo{font-size:12px;font-weight:500;color:var(--accent);letter-spacing:.1em;text-transform:uppercase;}
+.logo em{color:var(--text3);font-style:normal;}
+.stats{margin-left:auto;display:flex;gap:16px;}
+.stat{display:flex;flex-direction:column;align-items:flex-end;}
+.stat-label{font-size:8px;color:var(--text3);letter-spacing:.1em;text-transform:uppercase;}
+.stat-val{font-size:13px;font-weight:500;color:var(--text);line-height:1.2;}
+.main{display:flex;flex:1;overflow:hidden;}
+.sidebar{width:244px;flex-shrink:0;background:var(--surface);border-right:1px solid var(--border);display:flex;flex-direction:column;overflow-y:auto;}
+.sidebar::-webkit-scrollbar{width:3px;}
+.sidebar::-webkit-scrollbar-thumb{background:var(--border2);border-radius:2px;}
+.sec{padding:11px 13px;border-bottom:1px solid var(--border);}
+.sec-title{font-size:8px;color:var(--text3);letter-spacing:.14em;text-transform:uppercase;margin-bottom:9px;}
+button{font-family:var(--font);font-size:11px;font-weight:500;background:transparent;border:1px solid var(--border);color:var(--text2);padding:5px 10px;border-radius:3px;cursor:pointer;transition:all .15s;white-space:nowrap;}
+button:hover{border-color:var(--accent2);color:var(--accent);background:rgba(124,106,247,.07);}
+button.on{border-color:var(--accent)!important;color:var(--accent)!important;background:rgba(124,106,247,.14)!important;}
+.play-btn{width:100%;padding:7px;font-size:12px;border-color:var(--accent2);color:var(--accent);}
+.play-btn.running{background:rgba(124,106,247,.1);}
+.sl-row{margin-bottom:8px;}
+.sl-head{display:flex;justify-content:space-between;margin-bottom:3px;}
+.sl-name{font-size:10px;color:var(--text2);}
+.sl-val{font-size:10px;color:var(--accent);}
+input[type=range]{-webkit-appearance:none;width:100%;height:2px;background:var(--border);border-radius:1px;outline:none;}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:11px;height:11px;background:var(--accent);border-radius:50%;cursor:pointer;}
+.tog-row{display:flex;align-items:center;justify-content:space-between;margin-bottom:7px;}
+.tog-label{font-size:10px;color:var(--text2);}
+.tog{position:relative;width:28px;height:14px;flex-shrink:0;}
+.tog input{opacity:0;width:0;height:0;position:absolute;}
+.tog-track{position:absolute;inset:0;background:var(--border);border-radius:8px;cursor:pointer;transition:background .2s;}
+.tog input:checked+.tog-track{background:var(--accent2);}
+.tog-track::after{content:'';position:absolute;width:10px;height:10px;left:2px;top:2px;background:var(--text3);border-radius:50%;transition:transform .2s,background .2s;}
+.tog input:checked+.tog-track::after{transform:translateX(14px);background:var(--accent);}
+.canvas-wrap{flex:1;position:relative;overflow:hidden;background:#000;}
+canvas{display:block;}
+.hint{position:absolute;bottom:10px;left:50%;transform:translateX(-50%);font-size:9px;color:var(--text3);pointer-events:none;white-space:nowrap;}
+.matrix-wrap{overflow-x:auto;}
+.matrix-table{border-collapse:collapse;font-size:9px;}
+.matrix-table th{padding:1px 3px;text-align:center;}
+.m-cell{width:22px;height:22px;border-radius:3px;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:8px;font-weight:500;border:1px solid rgba(255,255,255,.04);transition:transform .1s;}
+.m-cell:hover{transform:scale(1.15);}
+.preset-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:3px;margin-top:6px;}
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">Particle Life <em>//</em> colony</div>
+  <div class="stats">
+    <div class="stat"><span class="stat-label">particles</span><span class="stat-val" id="statN">0</span></div>
+    <div class="stat"><span class="stat-label">species</span><span class="stat-val" id="statK">6</span></div>
+    <div class="stat"><span class="stat-label">fps</span><span class="stat-val" id="statFps">—</span></div>
+  </div>
+</header>
+<div class="main">
+  <div class="sidebar">
+
+    <div class="sec">
+      <button class="play-btn running" id="btnPlay" onclick="togglePlay()">■ pause</button>
+      <div style="display:flex;gap:4px;margin-top:5px;">
+        <button style="flex:1" onclick="scatter()">scatter</button>
+        <button style="flex:1" onclick="respawn()">respawn</button>
+        <button style="flex:1" onclick="randomize()">random</button>
+      </div>
+    </div>
+
+    <!-- PRESETS -->
+    <div class="sec">
+      <div class="sec-title">colony presets</div>
+      <div class="preset-grid">
+        <button id="pre-colony"   onclick="applyPreset('colony')"   class="on" style="font-size:10px;padding:5px;">colony</button>
+        <button id="pre-cells"    onclick="applyPreset('cells')"    style="font-size:10px;padding:5px;">cells</button>
+        <button id="pre-predator" onclick="applyPreset('predator')" style="font-size:10px;padding:5px;">predator</button>
+        <button id="pre-worms"    onclick="applyPreset('worms')"    style="font-size:10px;padding:5px;">worms</button>
+        <button id="pre-crystal"  onclick="applyPreset('crystal')"  style="font-size:10px;padding:5px;">crystal</button>
+        <button id="pre-chaos"    onclick="applyPreset('chaos')"    style="font-size:10px;padding:5px;">chaos</button>
+      </div>
+    </div>
+
+    <!-- SPECIES -->
+    <div class="sec">
+      <div class="sec-title">species</div>
+      <div class="sl-row">
+        <div class="sl-head"><span class="sl-name">種の数 K</span><span class="sl-val" id="vK">6</span></div>
+        <input type="range" min="2" max="9" value="6" id="sK" oninput="vK.textContent=this.value;setK(+this.value)">
+      </div>
+      <div class="sl-row">
+        <div class="sl-head"><span class="sl-name">各種の粒子数</span><span class="sl-val" id="vN">300</span></div>
+        <input type="range" min="50" max="800" value="300" step="10" id="sN" oninput="vN.textContent=this.value">
+      </div>
+    </div>
+
+    <!-- PHYSICS -->
+    <div class="sec">
+      <div class="sec-title">physics</div>
+      <div class="sl-row">
+        <div class="sl-head"><span class="sl-name">引力半径 rMax</span><span class="sl-val" id="vRmax">100</span></div>
+        <input type="range" min="20" max="300" value="100" id="sRmax" oninput="vRmax.textContent=this.value">
+      </div>
+      <div class="sl-row">
+        <div class="sl-head"><span class="sl-name">斥力半径 rMin</span><span class="sl-val" id="vRmin">14</span></div>
+        <input type="range" min="3" max="50" value="14" id="sRmin" oninput="vRmin.textContent=this.value">
+      </div>
+      <div class="sl-row">
+        <div class="sl-head"><span class="sl-name">摩擦</span><span class="sl-val" id="vFrict">0.80</span></div>
+        <input type="range" min="0.4" max="0.99" value="0.80" step="0.01" id="sFrict" oninput="vFrict.textContent=(+this.value).toFixed(2)">
+      </div>
+      <div class="sl-row">
+        <div class="sl-head"><span class="sl-name">力の強さ</span><span class="sl-val" id="vForce">1.2</span></div>
+        <input type="range" min="0.1" max="5" value="1.2" step="0.1" id="sForce" oninput="vForce.textContent=this.value">
+      </div>
+      <div class="sl-row">
+        <div class="sl-head"><span class="sl-name">dt</span><span class="sl-val" id="vDt">0.4</span></div>
+        <input type="range" min="0.05" max="1.5" value="0.4" step="0.05" id="sDt" oninput="vDt.textContent=this.value">
+      </div>
+      <div class="tog-row"><span class="tog-label">境界折り返し（wrap）</span>
+        <label class="tog"><input type="checkbox" id="togWrap" checked><div class="tog-track"></div></label>
+      </div>
+    </div>
+
+    <!-- MATRIX -->
+    <div class="sec">
+      <div class="sec-title">interaction matrix</div>
+      <div style="font-size:9px;color:var(--text3);margin-bottom:5px;">クリックで値を変更　<span style="color:#38c8e0">■</span>引力 <span style="color:#e05252">■</span>斥力</div>
+      <div class="matrix-wrap"><table class="matrix-table" id="matrixTable"></table></div>
+    </div>
+
+    <!-- DISPLAY -->
+    <div class="sec">
+      <div class="sec-title">display</div>
+      <div class="sl-row">
+        <div class="sl-head"><span class="sl-name">粒子サイズ</span><span class="sl-val" id="vSz">3.5</span></div>
+        <input type="range" min="1" max="10" value="3.5" step="0.5" id="sSz" oninput="vSz.textContent=this.value">
+      </div>
+      <div class="sl-row">
+        <div class="sl-head"><span class="sl-name">トレイル</span><span class="sl-val" id="vTr">0.12</span></div>
+        <input type="range" min="0.02" max="0.8" value="0.12" step="0.01" id="sTr" oninput="vTr.textContent=(+this.value).toFixed(2)">
+      </div>
+      <div class="tog-row"><span class="tog-label">グロー</span>
+        <label class="tog"><input type="checkbox" id="togGlow" checked><div class="tog-track"></div></label>
+      </div>
+      <div class="tog-row"><span class="tog-label">コロニー輪郭（αブレンド）</span>
+        <label class="tog"><input type="checkbox" id="togBlob" checked><div class="tog-track"></div></label>
+      </div>
+      <div class="tog-row"><span class="tog-label">接続ライン</span>
+        <label class="tog"><input type="checkbox" id="togLines"><div class="tog-track"></div></label>
+      </div>
+    </div>
+
+    <div class="sec" style="font-size:9px;color:var(--text3);line-height:2.0;">
+      Space: 一時停止<br>
+      R: ランダム化<br>
+      クリック: 粒子を引き寄せる
+    </div>
+  </div>
+
+  <div class="canvas-wrap" id="canvasWrap">
+    <canvas id="c"></canvas>
+    <!-- offscreen blob canvas -->
+    <canvas id="blobC" style="display:none;"></canvas>
+    <div class="hint">Space: pause / R: random / click: attract</div>
+  </div>
+</div>
+
+<script>
+const canvas = document.getElementById('c');
+const ctx    = canvas.getContext('2d');
+const blobC  = document.getElementById('blobC');
+const blobCtx= blobC.getContext('2d');
+const wrap   = document.getElementById('canvasWrap');
+
+// ── Species colors ───────────────────────────
+const BASE_COLORS = [
+  [224,82,82],   // red
+  [249,148,65],  // orange
+  [240,220,50],  // yellow
+  [31,184,133],  // green
+  [56,200,224],  // cyan
+  [124,106,247], // purple
+  [212,83,126],  // pink
+  [130,200,80],  // lime
+  [80,160,220],  // blue
+];
+
+let K = 6;
+let matrix = [];
+
+// Particles: flat arrays for speed
+let px=[], py=[], pvx=[], pvy=[], ptype=[];
+let N = 0;
+let running = true;
+let mouseX=-9999, mouseY=-9999, mouseDown=false;
+let fpsFrames=0, fpsLast=performance.now();
+
+// ── Spatial hash ─────────────────────────────
+const CELL = 80;
+let hashCells=[], hashW=0, hashH=0;
+
+function buildHash(){
+  hashW = Math.ceil(canvas.width/CELL)+1;
+  hashH = Math.ceil(canvas.height/CELL)+1;
+  hashCells = new Array(hashW*hashH).fill(null).map(()=>[]);
+  for(let i=0;i<N;i++){
+    const cx=Math.floor(px[i]/CELL), cy=Math.floor(py[i]/CELL);
+    if(cx>=0&&cx<hashW&&cy>=0&&cy<hashH) hashCells[cy*hashW+cx].push(i);
+  }
+}
+function nearby(x,y,r){
+  const r2=Math.ceil(r/CELL);
+  const cx0=Math.floor(x/CELL)-r2, cy0=Math.floor(y/CELL)-r2;
+  const out=[];
+  for(let cy=cy0;cy<=cy0+r2*2+1;cy++) for(let cx=cx0;cx<=cx0+r2*2+1;cx++){
+    if(cx<0||cy<0||cx>=hashW||cy>=hashH) continue;
+    const c=hashCells[cy*hashW+cx];
+    for(let k=0;k<c.length;k++) out.push(c[k]);
+  }
+  return out;
+}
+
+// ── Physics ──────────────────────────────────
+function step(){
+  const W=canvas.width, H=canvas.height;
+  const rMax  = +document.getElementById('sRmax').value;
+  const rMin  = +document.getElementById('sRmin').value;
+  const frict = +document.getElementById('sFrict').value;
+  const force = +document.getElementById('sForce').value;
+  const dt    = +document.getElementById('sDt').value;
+  const doWrap= document.getElementById('togWrap').checked;
+
+  buildHash();
+
+  for(let i=0;i<N;i++){
+    const ti = ptype[i];
+    let fx=0, fy=0;
+    const nb = nearby(px[i],py[i],rMax);
+    for(let ki=0;ki<nb.length;ki++){
+      const j=nb[ki]; if(j===i) continue;
+      let dx=px[j]-px[i], dy=py[j]-py[i];
+      if(doWrap){
+        if(dx> W/2) dx-=W; else if(dx<-W/2) dx+=W;
+        if(dy> H/2) dy-=H; else if(dy<-H/2) dy+=H;
+      }
+      const d2=dx*dx+dy*dy;
+      if(d2===0||d2>rMax*rMax) continue;
+      const d=Math.sqrt(d2);
+      const nx=dx/d, ny=dy/d;
+      let f=0;
+      if(d < rMin){
+        // Core repulsion — always push away
+        f = -(1-(d/rMin)) * 3;
+      } else {
+        // Interaction bell: peaks midway between rMin and rMax
+        const t=(d-rMin)/(rMax-rMin); // 0→1
+        const bell = 1-Math.abs(2*t-1);
+        f = matrix[ti][ptype[j]] * bell * force;
+      }
+      fx+=nx*f; fy+=ny*f;
+    }
+    // Mouse
+    if(mouseDown){
+      const dx=mouseX-px[i], dy=mouseY-py[i];
+      const d=Math.sqrt(dx*dx+dy*dy);
+      if(d>1&&d<250){ fx+=dx/d*3; fy+=dy/d*3; }
+    }
+    pvx[i]=(pvx[i]+fx*dt)*frict;
+    pvy[i]=(pvy[i]+fy*dt)*frict;
+  }
+  for(let i=0;i<N;i++){
+    px[i]+=pvx[i]*dt;
+    py[i]+=pvy[i]*dt;
+    if(doWrap){
+      px[i]=((px[i]%W)+W)%W;
+      py[i]=((py[i]%H)+H)%H;
+    } else {
+      if(px[i]<0){px[i]=0;pvx[i]*=-0.5;}
+      if(px[i]>W){px[i]=W;pvx[i]*=-0.5;}
+      if(py[i]<0){py[i]=0;pvy[i]*=-0.5;}
+      if(py[i]>H){py[i]=H;pvy[i]*=-0.5;}
+    }
+  }
+}
+
+// ── Render ───────────────────────────────────
+// Per-species offscreen canvases for blob rendering
+let speciesCanvases=[];
+
+function ensureSpeciesCanvases(){
+  while(speciesCanvases.length < K){
+    const c=document.createElement('canvas');
+    speciesCanvases.push({c, ctx:c.getContext('2d')});
+  }
+  speciesCanvases.forEach(sc=>{
+    if(sc.c.width!==canvas.width||sc.c.height!==canvas.height){
+      sc.c.width=canvas.width; sc.c.height=canvas.height;
+    }
+  });
+}
+
+function render(){
+  const W=canvas.width, H=canvas.height;
+  const trail  = +document.getElementById('sTr').value;
+  const sz     = +document.getElementById('sSz').value;
+  const glow   = document.getElementById('togGlow').checked;
+  const blob   = document.getElementById('togBlob').checked;
+  const lines  = document.getElementById('togLines').checked;
+  const rMax   = +document.getElementById('sRmax').value;
+
+  // Trail fade
+  ctx.globalAlpha = trail;
+  ctx.fillStyle   = '#05060c';
+  ctx.fillRect(0,0,W,H);
+  ctx.globalAlpha = 1;
+
+  // Connection lines (nearest 1 neighbor per particle, same species only)
+  if(lines){
+    // Group by species
+    const byType = Array.from({length:K},()=>[]);
+    for(let i=0;i<N;i++) byType[ptype[i]].push(i);
+    ctx.lineWidth=0.4;
+    for(let s=0;s<K;s++){
+      const col=BASE_COLORS[s];
+      ctx.strokeStyle=`rgba(${col[0]},${col[1]},${col[2]},0.25)`;
+      const pts=byType[s];
+      for(let a=0;a<pts.length;a++){
+        const i=pts[a];
+        let near=-1, nd=Infinity;
+        for(let b=0;b<pts.length;b++){
+          if(a===b) continue;
+          const j=pts[b];
+          const d=Math.hypot(px[j]-px[i],py[j]-py[i]);
+          if(d<nd&&d<rMax*0.6){nd=d;near=j;}
+        }
+        if(near<0) continue;
+        ctx.beginPath();ctx.moveTo(px[i],py[i]);ctx.lineTo(px[near],py[near]);ctx.stroke();
+      }
+    }
+  }
+
+  // Blob: draw each species as soft metaball-like blobs
+  if(blob){
+    ensureSpeciesCanvases();
+    for(let s=0;s<K;s++){
+      const sc=speciesCanvases[s];
+      const col=BASE_COLORS[s];
+      // Clear
+      sc.ctx.clearRect(0,0,W,H);
+      // Draw radial gradients for each particle
+      const blobR=sz*5;
+      for(let i=0;i<N;i++){
+        if(ptype[i]!==s) continue;
+        const grd=sc.ctx.createRadialGradient(px[i],py[i],0,px[i],py[i],blobR);
+        grd.addColorStop(0,`rgba(${col[0]},${col[1]},${col[2]},0.18)`);
+        grd.addColorStop(1,`rgba(${col[0]},${col[1]},${col[2]},0)`);
+        sc.ctx.fillStyle=grd;
+        sc.ctx.beginPath();sc.ctx.arc(px[i],py[i],blobR,0,Math.PI*2);sc.ctx.fill();
+      }
+      ctx.drawImage(sc.c,0,0);
+    }
+  }
+
+  // Particles (core dots)
+  for(let i=0;i<N;i++){
+    const col=BASE_COLORS[ptype[i]];
+    if(glow){
+      ctx.shadowColor=`rgb(${col[0]},${col[1]},${col[2]})`;
+      ctx.shadowBlur=sz*3;
+    }
+    ctx.fillStyle=`rgb(${col[0]},${col[1]},${col[2]})`;
+    ctx.beginPath();ctx.arc(px[i],py[i],sz,0,Math.PI*2);ctx.fill();
+  }
+  ctx.shadowBlur=0;
+}
+
+// ── Loop ─────────────────────────────────────
+function loop(){
+  requestAnimationFrame(loop);
+  fpsFrames++;
+  const now=performance.now();
+  if(now-fpsLast>=1000){
+    document.getElementById('statFps').textContent=fpsFrames;
+    fpsFrames=0; fpsLast=now;
+  }
+  if(running) step();
+  render();
+}
+
+// ── Spawn / scatter ──────────────────────────
+function respawn(){
+  const nPS=+document.getElementById('sN').value;
+  px=[]; py=[]; pvx=[]; pvy=[]; ptype=[];
+  const W=canvas.width, H=canvas.height;
+  // Spawn in loose clusters per species
+  for(let s=0;s<K;s++){
+    // Random cluster center
+    const cx=W*0.1+Math.random()*(W*0.8);
+    const cy=H*0.1+Math.random()*(H*0.8);
+    const spread=Math.min(W,H)*0.12;
+    for(let i=0;i<nPS;i++){
+      const a=Math.random()*Math.PI*2, r=Math.random()*spread;
+      px.push(cx+Math.cos(a)*r);
+      py.push(cy+Math.sin(a)*r);
+      pvx.push((Math.random()-0.5)*2);
+      pvy.push((Math.random()-0.5)*2);
+      ptype.push(s);
+    }
+  }
+  N=px.length;
+  document.getElementById('statN').textContent=N;
+}
+
+function scatter(){
+  const W=canvas.width, H=canvas.height;
+  for(let i=0;i<N;i++){
+    px[i]=Math.random()*W; py[i]=Math.random()*H;
+    pvx[i]=(Math.random()-0.5)*4; pvy[i]=(Math.random()-0.5)*4;
+  }
+}
+
+// ── Matrix ───────────────────────────────────
+function initMatrix(){
+  matrix=[];
+  for(let i=0;i<K;i++){matrix[i]=[];for(let j=0;j<K;j++) matrix[i][j]=0;}
+}
+
+function setK(k){
+  const old=matrix.map(r=>[...r]);
+  K=k;
+  initMatrix();
+  for(let i=0;i<Math.min(k,old.length);i++)
+    for(let j=0;j<Math.min(k,old[i].length);j++) matrix[i][j]=old[i][j];
+  document.getElementById('statK').textContent=K;
+  buildMatrix();
+  respawn();
+}
+
+function randomize(){
+  for(let i=0;i<K;i++) for(let j=0;j<K;j++)
+    matrix[i][j]=+((Math.random()*2-1).toFixed(2));
+  buildMatrix();
+  scatter();
+}
+
+// ── Presets ──────────────────────────────────
+const PRESETS = {
+  // Colony: tight self-groups, slight cross-species attraction → visible colonies
+  colony:{
+    K:6, nPS:300, rMax:100, rMin:14, frict:0.80, force:1.2, dt:0.4,
+    matrix:(k)=>{
+      const m=[];
+      for(let i=0;i<k;i++){m[i]=[];for(let j=0;j<k;j++){
+        if(i===j) m[i][j]=0.9;         // strong self-attract
+        else if((j-i+k)%k===1) m[i][j]=0.3;  // slight attraction to next species
+        else m[i][j]=-0.2;             // mild repulsion from others
+      }}
+      return m;
+    }
+  },
+  // Cells: blobs that stay together and drift
+  cells:{
+    K:4, nPS:400, rMax:80, rMin:18, frict:0.88, force:0.9, dt:0.35,
+    matrix:(k)=>{
+      const m=[];
+      for(let i=0;i<k;i++){m[i]=[];for(let j=0;j<k;j++){
+        m[i][j]=(i===j)?1.0:-0.5;
+      }}
+      return m;
+    }
+  },
+  // Predator-prey chains: A chases B, B chases C, ...
+  predator:{
+    K:5, nPS:280, rMax:120, rMin:12, frict:0.78, force:1.5, dt:0.45,
+    matrix:(k)=>{
+      const m=[];
+      for(let i=0;i<k;i++){m[i]=[];for(let j=0;j<k;j++){
+        const prey=(i+1)%k, pred=(i-1+k)%k;
+        if(j===prey)      m[i][j]= 0.8;
+        else if(j===pred) m[i][j]=-0.9;
+        else if(j===i)    m[i][j]= 0.4;
+        else              m[i][j]= 0.0;
+      }}
+      return m;
+    }
+  },
+  // Worms: chains that follow next species, forming long strands
+  worms:{
+    K:6, nPS:250, rMax:60, rMin:10, frict:0.85, force:1.8, dt:0.4,
+    matrix:(k)=>{
+      const m=[];
+      for(let i=0;i<k;i++){m[i]=[];for(let j=0;j<k;j++){
+        if(j===(i+1)%k) m[i][j]=1.0;
+        else if(j===i)  m[i][j]=0.6;
+        else            m[i][j]=-0.1;
+      }}
+      return m;
+    }
+  },
+  // Crystal: symmetric mutual attraction, very ordered
+  crystal:{
+    K:3, nPS:500, rMax:90, rMin:16, frict:0.92, force:0.8, dt:0.3,
+    matrix:(k)=>{
+      const m=[];
+      for(let i=0;i<k;i++){m[i]=[];for(let j=0;j<k;j++){
+        m[i][j]=(i===j)?0.7:0.4;
+      }}
+      return m;
+    }
+  },
+  // Chaos: completely random
+  chaos:{
+    K:7, nPS:220, rMax:110, rMin:12, frict:0.76, force:1.4, dt:0.5,
+    matrix:(k)=>{
+      const m=[];
+      for(let i=0;i<k;i++){m[i]=[];for(let j=0;j<k;j++) m[i][j]=+((Math.random()*2-1).toFixed(2));}
+      return m;
+    }
+  }
+};
+
+function applyPreset(name){
+  const p=PRESETS[name];
+  if(!p) return;
+  // Update sliders
+  document.getElementById('sK').value=p.K; document.getElementById('vK').textContent=p.K;
+  document.getElementById('sN').value=p.nPS; document.getElementById('vN').textContent=p.nPS;
+  document.getElementById('sRmax').value=p.rMax; document.getElementById('vRmax').textContent=p.rMax;
+  document.getElementById('sRmin').value=p.rMin; document.getElementById('vRmin').textContent=p.rMin;
+  document.getElementById('sFrict').value=p.frict; document.getElementById('vFrict').textContent=p.frict.toFixed(2);
+  document.getElementById('sForce').value=p.force; document.getElementById('vForce').textContent=p.force;
+  document.getElementById('sDt').value=p.dt; document.getElementById('vDt').textContent=p.dt;
+  K=p.K;
+  matrix=p.matrix(K);
+  document.getElementById('statK').textContent=K;
+  // highlight active preset
+  Object.keys(PRESETS).forEach(k=>document.getElementById('pre-'+k)?.classList.remove('on'));
+  document.getElementById('pre-'+name)?.classList.add('on');
+  buildMatrix();
+  respawn();
+}
+
+// Build matrix UI
+function buildMatrix(){
+  const tbl=document.getElementById('matrixTable');
+  tbl.innerHTML='';
+  const thead=document.createElement('thead');
+  const hr=document.createElement('tr');
+  const th0=document.createElement('th'); th0.textContent=''; hr.appendChild(th0);
+  for(let j=0;j<K;j++){
+    const th=document.createElement('th');
+    const [r,g,b]=BASE_COLORS[j];
+    th.style.cssText=`color:rgb(${r},${g},${b});padding:1px 2px;`;
+    th.textContent='●'; hr.appendChild(th);
+  }
+  thead.appendChild(hr); tbl.appendChild(thead);
+  const tbody=document.createElement('tbody');
+  for(let i=0;i<K;i++){
+    const tr=document.createElement('tr');
+    const th=document.createElement('th');
+    const [r,g,b]=BASE_COLORS[i];
+    th.style.cssText=`color:rgb(${r},${g},${b});padding:1px 3px;`;
+    th.textContent='●'; tr.appendChild(th);
+    for(let j=0;j<K;j++){
+      const td=document.createElement('td');
+      const v=matrix[i][j];
+      const cell=document.createElement('div');
+      cell.className='m-cell';
+      cell.textContent=v>=0?'+'+v.toFixed(1):v.toFixed(1);
+      const abs=Math.min(1,Math.abs(v));
+      if(v>0.05)       cell.style.cssText=`background:rgba(56,200,224,${0.1+abs*0.55});color:#38c8e0;`;
+      else if(v<-0.05) cell.style.cssText=`background:rgba(224,82,82,${0.1+abs*0.55});color:#e05252;`;
+      else             cell.style.cssText=`background:rgba(255,255,255,0.04);color:#2a2840;`;
+      const ci=i,cj=j;
+      cell.onclick=()=>{
+        const steps=[-1,-0.8,-0.6,-0.4,-0.2,0,0.2,0.4,0.6,0.8,1];
+        const cur=matrix[ci][cj];
+        let idx=steps.findIndex(s=>Math.abs(s-cur)<0.06);
+        if(idx<0) idx=5;
+        matrix[ci][cj]=steps[(idx+1)%steps.length];
+        buildMatrix();
+      };
+      td.appendChild(cell); tr.appendChild(td);
+    }
+    tbody.appendChild(tr);
+  }
+  tbl.appendChild(tbody);
+}
+
+// ── Controls ─────────────────────────────────
+function togglePlay(){
+  running=!running;
+  const btn=document.getElementById('btnPlay');
+  btn.textContent=running?'■ pause':'▶ resume';
+  btn.classList.toggle('running',running);
+}
+
+canvas.addEventListener('mousedown',e=>{mouseDown=true;mouseX=e.offsetX;mouseY=e.offsetY;});
+canvas.addEventListener('mousemove',e=>{mouseX=e.offsetX;mouseY=e.offsetY;});
+document.addEventListener('mouseup',()=>mouseDown=false);
+window.addEventListener('keydown',e=>{
+  if(e.code==='Space'){e.preventDefault();togglePlay();}
+  else if(e.code==='KeyR') randomize();
+  else if(e.code==='KeyS') scatter();
+});
+
+function resize(){
+  canvas.width=wrap.clientWidth;
+  canvas.height=wrap.clientHeight;
+  blobC.width=canvas.width; blobC.height=canvas.height;
+  speciesCanvases=[];
+  ctx.fillStyle='#05060c'; ctx.fillRect(0,0,canvas.width,canvas.height);
+}
+window.addEventListener('resize',()=>{resize();respawn();});
+
+// ── Boot ─────────────────────────────────────
+resize();
+applyPreset('colony');
+loop();
+</script>
+</body>
+</html>

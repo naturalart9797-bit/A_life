@@ -1,0 +1,569 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Organism</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&display=swap');
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#060608;--surface:#0c0c12;--border:#18182a;
+  --accent:#8b7fff;--accent2:#5248d4;
+  --text:#c8c4ff;--text2:#5a5880;--text3:#28263a;
+  --font-mono:'IBM Plex Mono',monospace;
+}
+body{background:var(--bg);color:var(--text);font-family:var(--font-mono);height:100vh;display:flex;flex-direction:column;overflow:hidden;user-select:none;}
+header{display:flex;align-items:center;gap:14px;padding:8px 18px;border-bottom:1px solid var(--border);background:var(--surface);flex-shrink:0;}
+.logo{font-size:12px;font-weight:500;color:var(--accent);letter-spacing:.12em;text-transform:uppercase;}
+.logo em{color:var(--text3);font-style:normal;}
+.stats{margin-left:auto;display:flex;gap:20px;}
+.stat{display:flex;flex-direction:column;align-items:flex-end;}
+.stat-label{font-size:8px;color:var(--text3);letter-spacing:.1em;text-transform:uppercase;}
+.stat-val{font-size:13px;font-weight:500;color:var(--text);line-height:1.2;}
+.rec-dot{width:7px;height:7px;border-radius:50%;background:#e05252;display:none;animation:blink 1s infinite;}
+.rec-dot.on{display:inline-block;}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.15}}
+.main{display:flex;flex:1;overflow:hidden;}
+.sidebar{width:230px;flex-shrink:0;background:var(--surface);border-right:1px solid var(--border);display:flex;flex-direction:column;overflow-y:auto;}
+.sidebar::-webkit-scrollbar{width:3px;}
+.sidebar::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px;}
+.sec{padding:11px 13px;border-bottom:1px solid var(--border);}
+.sec-title{font-size:8px;color:var(--text3);letter-spacing:.14em;text-transform:uppercase;margin-bottom:9px;}
+button{font-family:var(--font-mono);font-size:11px;font-weight:500;background:transparent;border:1px solid var(--border);color:var(--text2);padding:5px 10px;border-radius:3px;cursor:pointer;transition:all .15s;white-space:nowrap;}
+button:hover{border-color:var(--accent2);color:var(--accent);background:rgba(139,127,255,.07);}
+button.on{border-color:var(--accent)!important;color:var(--accent)!important;background:rgba(139,127,255,.14)!important;}
+.play-btn{width:100%;padding:7px;font-size:12px;border-color:var(--accent2);color:var(--accent);}
+.play-btn.running{background:rgba(139,127,255,.1);}
+.rec-btn{border-color:#e05252;color:#e05252;}
+.rec-btn:hover,.rec-btn.recording{background:rgba(224,82,82,.1);}
+.sl-row{margin-bottom:8px;}
+.sl-head{display:flex;justify-content:space-between;margin-bottom:3px;}
+.sl-name{font-size:10px;color:var(--text2);}
+.sl-val{font-size:10px;color:var(--accent);}
+input[type=range]{-webkit-appearance:none;width:100%;height:2px;background:var(--border);border-radius:1px;outline:none;}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:11px;height:11px;background:var(--accent);border-radius:50%;cursor:pointer;}
+.tog-row{display:flex;align-items:center;justify-content:space-between;margin-bottom:7px;}
+.tog-label{font-size:10px;color:var(--text2);}
+.tog{position:relative;width:28px;height:14px;flex-shrink:0;}
+.tog input{opacity:0;width:0;height:0;position:absolute;}
+.tog-track{position:absolute;inset:0;background:var(--border);border-radius:8px;cursor:pointer;transition:background .2s;}
+.tog input:checked+.tog-track{background:var(--accent2);}
+.tog-track::after{content:'';position:absolute;width:10px;height:10px;left:2px;top:2px;background:var(--text3);border-radius:50%;transition:transform .2s,background .2s;}
+.tog input:checked+.tog-track::after{transform:translateX(14px);background:var(--accent);}
+.canvas-wrap{flex:1;position:relative;overflow:hidden;background:#000;}
+#mainCanvas{display:block;width:100%;height:100%;image-rendering:pixelated;}
+#hiddenVideo,#hC,#prevC,#bgC{display:none;}
+.drop-zone{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;z-index:10;background:rgba(6,6,8,.9);}
+.drop-zone.hidden{display:none;}
+.drop-icon{font-size:44px;opacity:.2;}
+.drop-text{font-size:12px;color:var(--text3);text-align:center;line-height:2.2;letter-spacing:.06em;}
+#fileInput{display:none;}
+.rule-label{font-size:8px;color:var(--text3);letter-spacing:.1em;text-transform:uppercase;margin-bottom:4px;margin-top:6px;}
+.rtag{font-size:10px;background:transparent;border:1px solid var(--border);color:var(--text3);padding:3px 2px;border-radius:2px;cursor:pointer;text-align:center;min-width:19px;}
+.rtag.on{border-color:var(--accent);color:var(--accent);background:rgba(139,127,255,.13);}
+.rule-notation{font-size:11px;color:var(--accent2);margin-top:5px;}
+.hint{font-size:9px;color:var(--text3);line-height:1.8;margin-top:4px;}
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">Organism <em>//</em> life × video</div>
+  <span class="rec-dot" id="recDot"></span>
+  <div class="stats">
+    <div class="stat"><span class="stat-label">Gen</span><span class="stat-val" id="statGen">0</span></div>
+    <div class="stat"><span class="stat-label">Alive</span><span class="stat-val" id="statAlive">0</span></div>
+    <div class="stat"><span class="stat-label">Motion</span><span class="stat-val" id="statMotion">0%</span></div>
+  </div>
+</header>
+
+<div class="main">
+  <div class="sidebar">
+
+    <div class="sec">
+      <button class="play-btn" id="btnPlay" onclick="togglePlay()" disabled>▶ start</button>
+      <div style="display:flex;gap:5px;margin-top:5px;">
+        <button style="flex:1" onclick="clearGrid()">clear</button>
+        <button class="rec-btn" id="btnRec" onclick="toggleRecord()" disabled>● rec</button>
+        <button id="btnDL" onclick="downloadVid()" disabled>↓ dl</button>
+      </div>
+    </div>
+
+    <div class="sec">
+      <div class="sec-title">source</div>
+      <div style="display:flex;gap:5px;">
+        <button style="flex:1;font-size:10px;" onclick="document.getElementById('fileInput').click()">video file</button>
+        <button style="flex:1;font-size:10px;" id="btnCam" onclick="startCamera()">webcam</button>
+      </div>
+      <input type="file" id="fileInput" accept="video/*" onchange="loadFile(this)">
+    </div>
+
+    <!-- INJECTION -->
+    <div class="sec">
+      <div class="sec-title">injection</div>
+      <div class="sl-row">
+        <div class="sl-head"><span class="sl-name">luma threshold</span><span class="sl-val" id="vThr">60</span></div>
+        <input type="range" min="10" max="220" value="60" id="sThr" oninput="vThr.textContent=this.value">
+      </div>
+      <div class="sl-row">
+        <div class="sl-head"><span class="sl-name">inject strength</span><span class="sl-val" id="vInjStr">40%</span></div>
+        <input type="range" min="1" max="100" value="40" id="sInjStr" oninput="vInjStr.textContent=this.value+'%'">
+      </div>
+      <div class="sl-row">
+        <div class="sl-head"><span class="sl-name">CA spawn rate</span><span class="sl-val" id="vSpawn">20%</span></div>
+        <input type="range" min="0" max="100" value="20" id="sSpawn" oninput="vSpawn.textContent=this.value+'%'">
+      </div>
+      <div class="sl-row">
+        <div class="sl-head"><span class="sl-name">max density</span><span class="sl-val" id="vDens">40%</span></div>
+        <input type="range" min="5" max="100" value="40" id="sDens" oninput="vDens.textContent=this.value+'%'">
+      </div>
+      <div class="hint">threshold: どの明るさまで拾うか<br>inject strength: 拾った中の密度<br>CA spawn rate: CAとして発生させる割合</div>
+    </div>
+
+    <!-- COLOR -->
+    <div class="sec">
+      <div class="sec-title">color</div>
+      <div class="sl-row">
+        <div class="sl-head"><span class="sl-name">saturation boost</span><span class="sl-val" id="vSat">1.8×</span></div>
+        <input type="range" min="0.5" max="4" value="1.8" step="0.1" id="sSat" oninput="vSat.textContent=this.value+'×'">
+      </div>
+      <div class="sl-row">
+        <div class="sl-head"><span class="sl-name">lightness target</span><span class="sl-val" id="vLgt">60%</span></div>
+        <input type="range" min="20" max="90" value="60" id="sLgt" oninput="vLgt.textContent=this.value+'%'">
+      </div>
+      <div class="sl-row">
+        <div class="sl-head"><span class="sl-name">hue shift</span><span class="sl-val" id="vHue">0°</span></div>
+        <input type="range" min="-180" max="180" value="0" id="sHue" oninput="vHue.textContent=this.value+'°'">
+      </div>
+      <div class="sl-row">
+        <div class="sl-head"><span class="sl-name">color lifetime (gen)</span><span class="sl-val" id="vFade">12</span></div>
+        <input type="range" min="1" max="60" value="12" id="sFade" oninput="vFade.textContent=this.value">
+      </div>
+      <div class="hint">色は動画ピクセルから取得し、彩度・明度を維持しながら経年変化します</div>
+    </div>
+
+    <!-- OPTICAL FLOW -->
+    <div class="sec">
+      <div class="sec-title">optical flow</div>
+      <div class="tog-row"><span class="tog-label">enable</span>
+        <label class="tog"><input type="checkbox" id="togFlow"><div class="tog-track"></div></label>
+      </div>
+      <div class="sl-row">
+        <div class="sl-head"><span class="sl-name">motion boost</span><span class="sl-val" id="vFlow">3×</span></div>
+        <input type="range" min="0.5" max="8" value="3" step="0.5" id="sFlow" oninput="vFlow.textContent=this.value+'×'">
+      </div>
+    </div>
+
+    <!-- DISPLAY -->
+    <div class="sec">
+      <div class="sec-title">display</div>
+      <div class="tog-row"><span class="tog-label">show video background</span>
+        <label class="tog"><input type="checkbox" id="togBg" checked><div class="tog-track"></div></label>
+      </div>
+      <div class="sl-row">
+        <div class="sl-head"><span class="sl-name">bg opacity</span><span class="sl-val" id="vBgAlpha">60%</span></div>
+        <input type="range" min="0" max="100" value="60" id="sBgAlpha" oninput="vBgAlpha.textContent=this.value+'%'">
+      </div>
+      <div class="sl-row">
+        <div class="sl-head"><span class="sl-name">cell opacity</span><span class="sl-val" id="vCellAlpha">100%</span></div>
+        <input type="range" min="20" max="100" value="100" id="sCellAlpha" oninput="vCellAlpha.textContent=this.value+'%'">
+      </div>
+      <div class="sl-row">
+        <div class="sl-head"><span class="sl-name">cell size</span><span class="sl-val" id="vCS">7</span></div>
+        <input type="range" min="3" max="20" value="7" id="sCS" oninput="vCS.textContent=this.value;rebuildGrid()">
+      </div>
+      <div class="sl-row">
+        <div class="sl-head"><span class="sl-name">life fps</span><span class="sl-val" id="vFPS">15</span></div>
+        <input type="range" min="1" max="60" value="15" id="sFPS" oninput="vFPS.textContent=this.value">
+      </div>
+    </div>
+
+    <!-- RULES -->
+    <div class="sec">
+      <div class="sec-title">life rules</div>
+      <div class="rule-label">survive S</div>
+      <div id="survTags" style="display:flex;flex-wrap:wrap;gap:2px;margin-bottom:4px;"></div>
+      <div class="rule-label">born B</div>
+      <div id="bornTags" style="display:flex;flex-wrap:wrap;gap:2px;margin-bottom:4px;"></div>
+      <div class="rule-notation" id="ruleNotation">B3/S23</div>
+      <div style="display:flex;gap:3px;flex-wrap:wrap;margin-top:6px;">
+        <button style="font-size:10px;padding:3px 5px;" onclick="setRule('23','3')">Conway</button>
+        <button style="font-size:10px;padding:3px 5px;" onclick="setRule('23','36')">HighLife</button>
+        <button style="font-size:10px;padding:3px 5px;" onclick="setRule('12345','3')">Maze</button>
+        <button style="font-size:10px;padding:3px 5px;" onclick="setRule('245','368')">Morley</button>
+      </div>
+    </div>
+
+  </div>
+
+  <div class="canvas-wrap" id="canvasWrap">
+    <canvas id="mainCanvas"></canvas>
+    <div class="drop-zone" id="dropZone">
+      <div class="drop-icon">◎</div>
+      <div class="drop-text">drop video here<br>or use the sidebar</div>
+    </div>
+  </div>
+</div>
+
+<video id="hiddenVideo" loop muted playsinline></video>
+<canvas id="hC"></canvas>
+<canvas id="prevC"></canvas>
+<canvas id="bgC"></canvas>
+
+<script>
+const mainC=document.getElementById('mainCanvas');
+const ctx=mainC.getContext('2d');
+const video=document.getElementById('hiddenVideo');
+const hC=document.getElementById('hC');
+const hctx=hC.getContext('2d',{willReadFrequently:true});
+const prevC=document.getElementById('prevC');
+const pctx=prevC.getContext('2d',{willReadFrequently:true});
+const bgC=document.getElementById('bgC');
+const bgCtx=bgC.getContext('2d');
+const wrap=document.getElementById('canvasWrap');
+
+// Offscreen CA overlay canvas (persistent)
+const offC=document.createElement('canvas');
+const offCtx=offC.getContext('2d');
+
+let CS=7,COLS=0,ROWS=0,N=0;
+let grid,nextGrid,colR,colG,colB,nColR,nColG,nColB,cellAge;
+// Per-cell: store hue(0-359) and luma from video for color-preservation
+let cellHue,cellSat;
+
+let motionBuf;
+let running=false,lifeTimer=null,rafId=null,gen=0;
+let videoReady=false;
+let survive=new Set([2,3]),born=new Set([3]);
+let fpsFrames=0,fpsLast=performance.now();
+let motionPct=0;
+
+// Recording
+let mediaRecorder=null,recChunks=[];
+
+// ── Grid ────────────────────────────────
+function allocGrid(){
+  N=ROWS*COLS;
+  grid=new Uint8Array(N); nextGrid=new Uint8Array(N);
+  colR=new Uint8Array(N); colG=new Uint8Array(N); colB=new Uint8Array(N);
+  nColR=new Uint8Array(N); nColG=new Uint8Array(N); nColB=new Uint8Array(N);
+  cellAge=new Uint16Array(N);
+  cellHue=new Uint16Array(N);  // 0-359
+  cellSat=new Uint8Array(N);   // 0-100
+  motionBuf=new Float32Array(N);
+}
+function rebuildGrid(){
+  CS=+document.getElementById('sCS').value;
+  const cw=wrap.clientWidth,ch=wrap.clientHeight;
+  mainC.width=cw; mainC.height=ch;
+  offC.width=cw; offC.height=ch;
+  COLS=Math.floor(cw/CS); ROWS=Math.floor(ch/CS);
+  allocGrid();
+  hC.width=COLS; hC.height=ROWS;
+  prevC.width=COLS; prevC.height=ROWS;
+  bgC.width=COLS; bgC.height=ROWS;
+}
+function clearGrid(){
+  grid.fill(0); nextGrid.fill(0);
+  colR.fill(0); colG.fill(0); colB.fill(0);
+  cellAge.fill(0); motionBuf.fill(0);
+  gen=0; document.getElementById('statGen').textContent='0';
+  ctx.fillStyle='#000'; ctx.fillRect(0,0,mainC.width,mainC.height);
+}
+
+// ── Video ────────────────────────────────
+function loadFile(inp){
+  const f=inp.files[0]; if(!f) return;
+  video.src=URL.createObjectURL(f); video.load();
+  video.onloadeddata=onReady;
+}
+function startCamera(){
+  navigator.mediaDevices.getUserMedia({video:true,audio:false})
+    .then(s=>{video.srcObject=s;video.muted=true;video.onloadeddata=onReady;video.play();})
+    .catch(e=>alert('カメラアクセスを許可してください: '+e.message));
+}
+function onReady(){
+  videoReady=true;
+  hC.width=COLS; hC.height=ROWS;
+  prevC.width=COLS; prevC.height=ROWS;
+  bgC.width=COLS; bgC.height=ROWS;
+  document.getElementById('dropZone').classList.add('hidden');
+  document.getElementById('btnPlay').disabled=false;
+  document.getElementById('btnRec').disabled=false;
+}
+wrap.addEventListener('dragover',e=>e.preventDefault());
+wrap.addEventListener('drop',e=>{
+  e.preventDefault();
+  const f=e.dataTransfer.files[0];
+  if(f&&f.type.startsWith('video/')){
+    const dt=new DataTransfer(); dt.items.add(f);
+    document.getElementById('fileInput').files=dt.files;
+    loadFile(document.getElementById('fileInput'));
+  }
+});
+
+// ── Color utils ──────────────────────────
+function rgbToHsl(r,g,b){
+  r/=255;g/=255;b/=255;
+  const max=Math.max(r,g,b),min=Math.min(r,g,b),l=(max+min)/2;
+  if(max===min) return [0,0,l*100];
+  const d=max-min,s=l>0.5?d/(2-max-min):d/(max+min);
+  let h;
+  switch(max){case r:h=(g-b)/d+(g<b?6:0);break;case g:h=(b-r)/d+2;break;default:h=(r-g)/d+4;}
+  return [h*60,s*100,l*100];
+}
+function hslToRgb(h,s,l){
+  h=((h%360)+360)%360; s/=100; l/=100;
+  const c=(1-Math.abs(2*l-1))*s,x=c*(1-Math.abs((h/60)%2-1)),m=l-c/2;
+  let r=0,g=0,b=0;
+  if(h<60){r=c;g=x;}else if(h<120){r=x;g=c;}else if(h<180){g=c;b=x;}
+  else if(h<240){g=x;b=c;}else if(h<300){r=x;b=c;}else{r=c;b=x;}
+  return [(r+m)*255|0,(g+m)*255|0,(b+m)*255|0];
+}
+
+// ── Optical flow ─────────────────────────
+function computeFlow(curPx){
+  if(!document.getElementById('togFlow').checked) return;
+  const prevPx=pctx.getImageData(0,0,COLS,ROWS).data;
+  const boost=+document.getElementById('sFlow').value;
+  let total=0;
+  for(let i=0,p=0;i<N;i++,p+=4){
+    const dr=curPx[p]-prevPx[p],dg=curPx[p+1]-prevPx[p+1],db=curPx[p+2]-prevPx[p+2];
+    const mag=Math.sqrt(dr*dr+dg*dg+db*db)/441;
+    motionBuf[i]=motionBuf[i]*0.7+mag*0.3*boost;
+    total+=motionBuf[i];
+  }
+  motionPct=Math.round(total/N*100);
+  document.getElementById('statMotion').textContent=motionPct+'%';
+}
+
+// ── Inject ───────────────────────────────
+function injectFrame(){
+  if(!videoReady||video.readyState<2) return;
+  hctx.drawImage(video,0,0,COLS,ROWS);
+  const px=hctx.getImageData(0,0,COLS,ROWS).data;
+  computeFlow(px);
+
+  const thr=+document.getElementById('sThr').value;
+  const str=+document.getElementById('sInjStr').value/100;
+  const spawn=+document.getElementById('sSpawn').value/100;
+  const satBoost=+document.getElementById('sSat').value;
+  const lgtTarget=+document.getElementById('sLgt').value;
+  const hueShift=+document.getElementById('sHue').value;
+  const useFlow=document.getElementById('togFlow').checked;
+
+  for(let r=0;r<ROWS;r++) for(let c=0;c<COLS;c++){
+    const i=r*COLS+c;
+    const p=i*4;
+    const R=px[p],G=px[p+1],B=px[p+2];
+    const luma=(R*77+G*150+B*29)>>8;
+    if(luma<=thr) continue;
+
+    let prob=str;
+    if(useFlow) prob=Math.min(1,prob+motionBuf[i]*str);
+    if(Math.random()>=prob) continue;
+    if(Math.random()>=spawn) continue;
+
+    // Store hue+sat from video, boosted
+    const [h,s,l]=rgbToHsl(R,G,B);
+    const boostedS=Math.min(100,s*satBoost);
+    // Build display color: keep hue, boost sat, target lightness
+    const [nr,ng,nb]=hslToRgb(h+hueShift,boostedS,lgtTarget);
+    grid[i]=1; colR[i]=nr; colG[i]=ng; colB[i]=nb; cellAge[i]=0;
+    cellHue[i]=(h+hueShift+360)%360;
+    cellSat[i]=Math.min(100,boostedS);
+  }
+  pctx.drawImage(hC,0,0);
+}
+
+function cullDensity(){
+  const maxD=+document.getElementById('sDens').value/100;
+  let alive=0; for(let i=0;i<N;i++) if(grid[i]) alive++;
+  if(alive/N<=maxD) return;
+  const kill=1-maxD/(alive/N);
+  for(let i=0;i<N;i++) if(grid[i]&&Math.random()<kill) grid[i]=0;
+}
+
+// ── Life step ────────────────────────────
+function lifeStep(){
+  injectFrame(); cullDensity();
+
+  const fade=+document.getElementById('sFade').value;
+  const satBoost=+document.getElementById('sSat').value;
+  const lgtTarget=+document.getElementById('sLgt').value;
+  const hueShift=+document.getElementById('sHue').value;
+
+  nextGrid.fill(0);
+  for(let r=0;r<ROWS;r++) for(let c=0;c<COLS;c++){
+    const idx=r*COLS+c;
+    let nb=0,sumH=0,sumS=0,nc=0;
+    const r0=(r-1+ROWS)%ROWS,r1=(r+1)%ROWS;
+    const c0=(c-1+COLS)%COLS,c1=(c+1)%COLS;
+    const ns=[r0*COLS+c0,r0*COLS+c,r0*COLS+c1,r*COLS+c0,r*COLS+c1,r1*COLS+c0,r1*COLS+c,r1*COLS+c1];
+    for(let k=0;k<8;k++){
+      if(grid[ns[k]]){nb++;sumH+=cellHue[ns[k]];sumS+=cellSat[ns[k]];nc++;}
+    }
+    const alive=grid[idx];
+    const lives=alive?survive.has(nb):born.has(nb);
+    if(!lives){cellAge[idx]=0;nColR[idx]=0;nColG[idx]=0;nColB[idx]=0;continue;}
+
+    nextGrid[idx]=1;
+    const age=alive?cellAge[idx]+1:0;
+    cellAge[idx]=age;
+
+    // Color: maintain hue from video source, gently shift lightness with age
+    // Born cell inherits average hue/sat of neighbors
+    let h,s;
+    if(!alive&&nc>0){
+      // Inherit neighbor hue (circular mean approx)
+      h=sumH/nc; s=Math.min(100,sumS/nc);
+    } else {
+      h=cellHue[idx]; s=cellSat[idx];
+    }
+    cellHue[idx]=h; cellSat[idx]=s;
+
+    // Lightness: starts at lgtTarget, gradually shifts to a complementary tone
+    // rather than going to black/white
+    const ageRatio=Math.min(1,age/fade);
+    // Oscillate lightness slightly so old cells look "older" not "darker"
+    const lgt=lgtTarget*(1-ageRatio*0.3)+20*ageRatio;
+    // Hue slowly drifts as cell ages (adds life-like color evolution)
+    const agedH=(h+ageRatio*30)%360;
+    const [nr,ng,nb2]=hslToRgb(agedH,Math.max(30,s*(1-ageRatio*0.3)),lgt);
+    nColR[idx]=nr; nColG[idx]=ng; nColB[idx]=nb2;
+  }
+  const tg=grid;grid=nextGrid;nextGrid=tg;
+  const tR=colR;colR=nColR;nColR=tR;
+  const tG=colG;colG=nColG;nColG=tG;
+  const tB=colB;colB=nColB;nColB=tB;
+  gen++;
+}
+
+// ── Render ───────────────────────────────
+function renderLoop(){
+  rafId=requestAnimationFrame(renderLoop);
+  fpsFrames++;
+  const now=performance.now();
+  if(now-fpsLast>=1000){
+    document.getElementById('statGen').textContent=gen.toLocaleString();
+    let alive=0; for(let i=0;i<N;i++) if(grid[i]) alive++;
+    document.getElementById('statAlive').textContent=alive.toLocaleString();
+    fpsFrames=0; fpsLast=now;
+  }
+
+  const W=mainC.width,H=mainC.height;
+  const showBg=document.getElementById('togBg').checked;
+  const bgAlpha=+document.getElementById('sBgAlpha').value/100;
+  const cellAlpha=+document.getElementById('sCellAlpha').value/100;
+
+  ctx.fillStyle='#000';
+  ctx.fillRect(0,0,W,H);
+
+  // 1. Background: pixelated video at grid resolution
+  if(showBg&&videoReady&&video.readyState>=2){
+    bgCtx.drawImage(video,0,0,COLS,ROWS);
+    ctx.globalAlpha=bgAlpha;
+    ctx.imageSmoothingEnabled=false;
+    ctx.drawImage(bgC,0,0,COLS,ROWS,0,0,W,H);
+    ctx.globalAlpha=1;
+    ctx.imageSmoothingEnabled=true;
+  }
+
+  // 2. CA cells: draw via ImageData for sharp pixel-perfect blocks
+  const img=offCtx.createImageData(W,H);
+  const d=img.data;
+  const alpha255=Math.round(cellAlpha*255);
+
+  for(let r=0;r<ROWS;r++) for(let c=0;c<COLS;c++){
+    const idx=r*COLS+c;
+    if(!grid[idx]) continue;
+    const R=colR[idx],G=colG[idx],B=colB[idx];
+    const csm=CS-1;
+    for(let dy=0;dy<csm;dy++) for(let dx=0;dx<csm;dx++){
+      const px=((r*CS+dy)*W+(c*CS+dx))*4;
+      d[px]=R; d[px+1]=G; d[px+2]=B; d[px+3]=alpha255;
+    }
+  }
+  offCtx.putImageData(img,0,0);
+  ctx.drawImage(offC,0,0);
+}
+
+// ── Controls ─────────────────────────────
+function togglePlay(){
+  running=!running;
+  const btn=document.getElementById('btnPlay');
+  if(running){
+    if(!video.srcObject) video.play().catch(()=>{});
+    btn.textContent='■ stop'; btn.classList.add('running');
+    lifeTimer=setInterval(lifeStep,1000/+document.getElementById('sFPS').value);
+    if(!rafId) renderLoop();
+  } else {
+    if(!video.srcObject) video.pause();
+    btn.textContent='▶ start'; btn.classList.remove('running');
+    clearInterval(lifeTimer); lifeTimer=null;
+    if(mediaRecorder&&mediaRecorder.state!=='inactive') stopRec();
+  }
+}
+
+function toggleRecord(){
+  if(!mediaRecorder||mediaRecorder.state==='inactive') startRec();
+  else stopRec();
+}
+function startRec(){
+  recChunks=[];
+  const stream=mainC.captureStream(30);
+  const opts={mimeType:'video/webm;codecs=vp9',videoBitsPerSecond:8000000};
+  if(!MediaRecorder.isTypeSupported(opts.mimeType)) opts.mimeType='video/webm';
+  try{mediaRecorder=new MediaRecorder(stream,opts);}catch(e){mediaRecorder=new MediaRecorder(stream);}
+  mediaRecorder.ondataavailable=e=>{if(e.data.size>0)recChunks.push(e.data);};
+  mediaRecorder.onstop=()=>{
+    document.getElementById('btnDL').disabled=false;
+    document.getElementById('recDot').classList.remove('on');
+    document.getElementById('btnRec').textContent='● rec';
+    document.getElementById('btnRec').classList.remove('recording');
+  };
+  mediaRecorder.start(100);
+  document.getElementById('recDot').classList.add('on');
+  document.getElementById('btnRec').textContent='■ stop';
+  document.getElementById('btnRec').classList.add('recording');
+  if(!running) togglePlay();
+}
+function stopRec(){if(mediaRecorder&&mediaRecorder.state!=='inactive')mediaRecorder.stop();}
+function downloadVid(){
+  if(!recChunks.length) return;
+  const blob=new Blob(recChunks,{type:'video/webm'});
+  const a=document.createElement('a'); a.href=URL.createObjectURL(blob);
+  a.download='organism_'+Date.now()+'.webm'; a.click();
+}
+
+function setRule(s,b){survive=new Set(s.split('').map(Number));born=new Set(b.split('').map(Number));buildRuleTags();}
+function buildRuleTags(){
+  ['surv','born'].forEach(type=>{
+    const el=document.getElementById(type+'Tags'); el.innerHTML='';
+    const s=type==='surv'?survive:born;
+    for(let i=0;i<=8;i++){
+      const t=document.createElement('button'); t.className='rtag'+(s.has(i)?' on':''); t.textContent=i;
+      t.onclick=()=>{s.has(i)?s.delete(i):s.add(i);buildRuleTags();
+        document.getElementById('ruleNotation').textContent='B'+[...born].sort((a,b)=>a-b).join('')+'/S'+[...survive].sort((a,b)=>a-b).join('');};
+      el.appendChild(t);
+    }
+  });
+  document.getElementById('ruleNotation').textContent='B'+[...born].sort((a,b)=>a-b).join('')+'/S'+[...survive].sort((a,b)=>a-b).join('');
+}
+
+window.addEventListener('keydown',e=>{
+  if(e.code==='Space'){e.preventDefault();if(!document.getElementById('btnPlay').disabled)togglePlay();}
+  else if(e.code==='KeyC') clearGrid();
+  else if(e.code==='Digit1') setRule('23','3');
+  else if(e.code==='Digit2') setRule('23','36');
+  else if(e.code==='Digit3') setRule('12345','3');
+  else if(e.code==='Digit4') setRule('245','368');
+});
+window.addEventListener('resize',()=>rebuildGrid());
+
+rebuildGrid();
+buildRuleTags();
+renderLoop();
+</script>
+</body>
+</html>

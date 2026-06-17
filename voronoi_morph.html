@@ -1,0 +1,405 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Voronoi Morph</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+JP:wght@300;400;500&display=swap');
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#0b070d;--surface:#130d16;--border:#241828;--border2:#33243a;
+  --accent:#d96ad0;--accent2:#a02f96;
+  --text:#f0d4ee;--text2:#8a6a88;--text3:#332438;
+  --font-mono:'IBM Plex Mono',monospace;--font-ui:'IBM Plex Sans JP',sans-serif;
+}
+body{background:var(--bg);color:var(--text);font-family:var(--font-ui);height:100vh;display:flex;flex-direction:column;overflow:hidden;user-select:none;}
+header{display:flex;align-items:center;gap:14px;padding:8px 18px;border-bottom:1px solid var(--border);background:var(--surface);flex-shrink:0;}
+.logo{font-family:var(--font-mono);font-size:12px;font-weight:500;color:var(--accent);letter-spacing:.1em;text-transform:uppercase;}
+.logo em{color:var(--text3);font-style:normal;}
+.stats{margin-left:auto;display:flex;gap:16px;}
+.stat{display:flex;flex-direction:column;align-items:flex-end;}
+.stat-label{font-family:var(--font-mono);font-size:8px;color:var(--text3);letter-spacing:.1em;text-transform:uppercase;}
+.stat-val{font-family:var(--font-mono);font-size:13px;font-weight:500;color:var(--text);line-height:1.2;}
+.rec-dot{width:7px;height:7px;border-radius:50%;background:#e05252;display:none;animation:blink 1s infinite;}
+.rec-dot.on{display:inline-block;}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.15}}
+.main{display:flex;flex:1;overflow:hidden;}
+.sidebar{width:256px;flex-shrink:0;background:var(--surface);border-right:1px solid var(--border);display:flex;flex-direction:column;overflow-y:auto;}
+.sidebar::-webkit-scrollbar{width:3px;}
+.sidebar::-webkit-scrollbar-thumb{background:var(--border2);border-radius:2px;}
+.sec{padding:11px 13px;border-bottom:1px solid var(--border);}
+.sec-title{font-family:var(--font-mono);font-size:8px;color:var(--text3);letter-spacing:.14em;text-transform:uppercase;margin-bottom:9px;}
+button{font-family:var(--font-mono);font-size:11px;font-weight:500;background:transparent;border:1px solid var(--border);color:var(--text2);padding:5px 10px;border-radius:3px;cursor:pointer;transition:all .15s;white-space:nowrap;}
+button:hover{border-color:var(--accent2);color:var(--accent);background:rgba(217,106,208,.07);}
+button.on{border-color:var(--accent)!important;color:var(--accent)!important;background:rgba(217,106,208,.14)!important;}
+.play-btn{width:100%;padding:7px;font-size:12px;border-color:var(--accent2);color:var(--accent);}
+.play-btn.running{background:rgba(217,106,208,.1);}
+.rec-btn{border-color:#e05252;color:#e05252;}
+.rec-btn:hover,.rec-btn.recording{background:rgba(224,82,82,.1);}
+.sl-row{margin-bottom:8px;}
+.sl-head{display:flex;justify-content:space-between;margin-bottom:3px;}
+.sl-name{font-family:var(--font-mono);font-size:10px;color:var(--text2);}
+.sl-val{font-family:var(--font-mono);font-size:10px;color:var(--accent);}
+input[type=range]{-webkit-appearance:none;width:100%;height:2px;background:var(--border);border-radius:1px;outline:none;}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:11px;height:11px;background:var(--accent);border-radius:50%;cursor:pointer;}
+.tog-row{display:flex;align-items:center;justify-content:space-between;margin-bottom:7px;}
+.tog-label{font-family:var(--font-mono);font-size:10px;color:var(--text2);}
+.tog{position:relative;width:28px;height:14px;flex-shrink:0;}
+.tog input{opacity:0;width:0;height:0;position:absolute;}
+.tog-track{position:absolute;inset:0;background:var(--border);border-radius:8px;cursor:pointer;transition:background .2s;}
+.tog input:checked+.tog-track{background:var(--accent2);}
+.tog-track::after{content:'';position:absolute;width:10px;height:10px;left:2px;top:2px;background:var(--text3);border-radius:50%;transition:transform .2s,background .2s;}
+.tog input:checked+.tog-track::after{transform:translateX(14px);background:var(--accent);}
+.canvas-wrap{flex:1;position:relative;overflow:hidden;background:#000;}
+canvas{display:block;width:100%;height:100%;}
+.img-slots{display:flex;gap:6px;}
+.img-slot{flex:1;aspect-ratio:1;border:1px dashed var(--border2);border-radius:5px;display:flex;align-items:center;justify-content:center;cursor:pointer;overflow:hidden;position:relative;}
+.img-slot:hover{border-color:var(--accent2);}
+.img-slot img{width:100%;height:100%;object-fit:cover;}
+.img-slot .ph{font-family:var(--font-mono);font-size:9px;color:var(--text3);text-align:center;line-height:1.5;}
+.img-slot .badge{position:absolute;top:3px;left:4px;font-family:var(--font-mono);font-size:9px;color:var(--accent);background:rgba(11,7,13,.7);padding:1px 5px;border-radius:3px;}
+.hint{position:absolute;bottom:10px;left:50%;transform:translateX(-50%);font-family:var(--font-mono);font-size:9px;color:var(--text3);pointer-events:none;white-space:nowrap;}
+.morph-bar{position:absolute;bottom:0;left:0;right:0;height:3px;background:var(--border);}
+.morph-fill{height:100%;background:var(--accent);width:0%;}
+.cmap-grid{display:grid;grid-template-columns:1fr 1fr;gap:4px;}
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">Voronoi <em>//</em> Morph</div>
+  <span class="rec-dot" id="recDot"></span>
+  <div class="stats">
+    <div class="stat"><span class="stat-label">セル</span><span class="stat-val" id="statN">0</span></div>
+    <div class="stat"><span class="stat-label">補間</span><span class="stat-val" id="statMorph">A</span></div>
+    <div class="stat"><span class="stat-label">fps</span><span class="stat-val" id="statFps">—</span></div>
+  </div>
+</header>
+
+<div class="main">
+  <div class="sidebar">
+
+    <div class="sec">
+      <button class="play-btn running" id="btnPlay" onclick="togglePlay()">■ pause</button>
+      <div style="display:flex;gap:5px;margin-top:5px;">
+        <button style="flex:1" onclick="resample()">再サンプル</button>
+        <button class="rec-btn" id="btnRec" onclick="toggleRec()">● rec</button>
+        <button id="btnDL" onclick="downloadVid()" disabled>↓</button>
+      </div>
+    </div>
+
+    <div class="sec">
+      <div class="sec-title">ロゴ（2枚）</div>
+      <div class="img-slots">
+        <div class="img-slot" id="slotA" onclick="document.getElementById('fileA').click()"><div class="ph">ロゴA</div></div>
+        <div class="img-slot" id="slotB" onclick="document.getElementById('fileB').click()"><div class="ph">ロゴB</div></div>
+      </div>
+      <input type="file" id="fileA" accept="image/*" style="display:none" onchange="loadImg(this,'A')">
+      <input type="file" id="fileB" accept="image/*" style="display:none" onchange="loadImg(this,'B')">
+    </div>
+
+    <div class="sec">
+      <div class="sec-title">セル（ボロノイ種点）</div>
+      <div class="sl-row">
+        <div class="sl-head"><span class="sl-name">セル数</span><span class="sl-val" id="vN">1400</span></div>
+        <input type="range" min="200" max="4000" value="1400" step="100" id="sN" oninput="vN.textContent=this.value">
+      </div>
+      <div class="sl-row">
+        <div class="sl-head"><span class="sl-name">明るさしきい値</span><span class="sl-val" id="vLum">0.4</span></div>
+        <input type="range" min="0.1" max="0.9" value="0.4" step="0.05" id="sLum" oninput="vLum.textContent=(+this.value).toFixed(2);resample()">
+      </div>
+      <div class="tog-row"><span class="tog-label">明暗を反転</span>
+        <label class="tog"><input type="checkbox" id="togInvert" onchange="resample()"><div class="tog-track"></div></label>
+      </div>
+      <div class="tog-row"><span class="tog-label">セルの縁を描く</span>
+        <label class="tog"><input type="checkbox" id="togEdge" checked><div class="tog-track"></div></label>
+      </div>
+    </div>
+
+    <div class="sec">
+      <div class="sec-title">補間（A↔B ループ）</div>
+      <div class="sl-row">
+        <div class="sl-head"><span class="sl-name">遷移の速さ</span><span class="sl-val" id="vSpd">0.005</span></div>
+        <input type="range" min="0.001" max="0.025" value="0.005" step="0.001" id="sSpd" oninput="vSpd.textContent=(+this.value).toFixed(3)">
+      </div>
+      <div class="sl-row">
+        <div class="sl-head"><span class="sl-name">端での停留</span><span class="sl-val" id="vHold">100</span></div>
+        <input type="range" min="0" max="400" value="100" step="10" id="sHold" oninput="vHold.textContent=this.value">
+      </div>
+      <div class="sl-row">
+        <div class="sl-head"><span class="sl-name">遷移の渦巻き</span><span class="sl-val" id="vSwirl">40</span></div>
+        <input type="range" min="0" max="150" value="40" step="5" id="sSwirl" oninput="vSwirl.textContent=this.value">
+      </div>
+      <div class="tog-row"><span class="tog-label">イージング</span>
+        <label class="tog"><input type="checkbox" id="togEase" checked><div class="tog-track"></div></label>
+      </div>
+    </div>
+
+    <div class="sec">
+      <div class="sec-title">表示</div>
+      <div class="cmap-grid">
+        <button class="on" id="cm-img" onclick="setCmap('img')">ロゴの色</button>
+        <button id="cm-glass" onclick="setCmap('glass')">ステンドグラス</button>
+        <button id="cm-scale" onclick="setCmap('scale')">鱗</button>
+        <button id="cm-mono" onclick="setCmap('mono')">モノ</button>
+      </div>
+      <div class="sl-row" style="margin-top:8px;">
+        <div class="sl-head"><span class="sl-name">縁の太さ</span><span class="sl-val" id="vEdgeW">1.0</span></div>
+        <input type="range" min="0" max="3" value="1.0" step="0.1" id="sEdgeW" oninput="vEdgeW.textContent=(+this.value).toFixed(1)">
+      </div>
+    </div>
+
+    <div class="sec" style="font-family:var(--font-mono);font-size:9px;color:var(--text3);line-height:1.9;">
+      Space: 一時停止<br>
+      画面がセル（区画）に分割され、種点が<br>
+      ロゴA→Bへ動くと区画が再結晶します。<br>
+      ステンドグラスや鱗のような質感に
+    </div>
+  </div>
+
+  <div class="canvas-wrap" id="canvasWrap">
+    <canvas id="c"></canvas>
+    <div class="hint">2枚のロゴをアップロードしてください</div>
+    <div class="morph-bar"><div class="morph-fill" id="morphFill"></div></div>
+  </div>
+</div>
+
+<canvas id="sampleCanvas" style="display:none;"></canvas>
+
+<script>
+const canvas=document.getElementById('c');
+const ctx=canvas.getContext('2d');
+const wrap=document.getElementById('canvasWrap');
+const sampleCanvas=document.getElementById('sampleCanvas');
+const sctx=sampleCanvas.getContext('2d',{willReadFrequently:true});
+
+let W=0,H=0,GW=0,GH=0;
+const GSCALE=4; // voronoi computed at lower res for speed
+let cells=null;  // {ax,ay,bx,by, ar,ag,ab, br,bg,bb, phase}
+let nCells=0;
+let imgA=null,imgB=null;
+let morph=0,morphDir=1,holdTimer=0;
+let running=true,tick=0;
+let cmap='img';
+let labelImg,lbuf;
+let fpsFrames=0,fpsLast=performance.now();
+
+// current interpolated seed positions/colors
+let sx,sy,sr,sg,sb;
+
+function loadImg(input,slot){
+  const f=input.files[0];if(!f)return;
+  const img=new Image();
+  img.onload=()=>{if(slot==='A'){imgA=img;showThumb('slotA',img,'A');}else{imgB=img;showThumb('slotB',img,'B');}resample();};
+  img.src=URL.createObjectURL(f);
+}
+function showThumb(id,img,label){const slot=document.getElementById(id);slot.innerHTML='<div class="badge">'+label+'</div>';const im=document.createElement('img');im.src=img.src;slot.appendChild(im);}
+function setCmap(c){cmap=c;['img','glass','scale','mono'].forEach(k=>document.getElementById('cm-'+k).classList.toggle('on',k===c));}
+
+function imgPoints(img){
+  if(!img)return[];
+  const sw=150,sh=Math.round(150*img.height/img.width);
+  sampleCanvas.width=sw;sampleCanvas.height=sh;
+  sctx.fillStyle='#000';sctx.fillRect(0,0,sw,sh);
+  sctx.drawImage(img,0,0,sw,sh);
+  const data=sctx.getImageData(0,0,sw,sh).data;
+  const lumThr=+document.getElementById('sLum').value;
+  const invert=document.getElementById('togInvert').checked;
+  const scale=Math.min(W/img.width,H/img.height)*0.85;
+  const dw=img.width*scale,dh=img.height*scale;
+  const ox=(W-dw)/2,oy=(H-dh)/2;
+  const out=[];
+  for(let y=0;y<sh;y++)for(let x=0;x<sw;x++){
+    const i=(y*sw+x)*4;
+    let l=(data[i]*0.299+data[i+1]*0.587+data[i+2]*0.114)/255;
+    if(invert)l=1-l;
+    if(l>lumThr)out.push({x:ox+(x/sw)*dw,y:oy+(y/sh)*dh,r:data[i],g:data[i+1],b:data[i+2]});
+  }
+  return out;
+}
+
+function resample(){
+  if(W===0)return;
+  nCells=+document.getElementById('sN').value;
+  const ptsA=imgPoints(imgA), ptsB=imgPoints(imgB);
+  cells=new Array(nCells);
+  for(let i=0;i<nCells;i++){
+    const a=ptsA.length?ptsA[(Math.random()*ptsA.length)|0]:{x:Math.random()*W,y:Math.random()*H,r:200,g:120,b:200};
+    const b=ptsB.length?ptsB[(Math.random()*ptsB.length)|0]:{x:Math.random()*W,y:Math.random()*H,r:200,g:120,b:200};
+    cells[i]={ax:a.x,ay:a.y,bx:b.x,by:b.y,ar:a.r,ag:a.g,ab:a.b,br:b.r,bg:b.g,bb:b.b,phase:Math.random()*Math.PI*2};
+  }
+  sx=new Float32Array(nCells);sy=new Float32Array(nCells);
+  sr=new Float32Array(nCells);sg=new Float32Array(nCells);sb=new Float32Array(nCells);
+  document.getElementById('statN').textContent=nCells.toLocaleString();
+  if(imgA&&imgB)document.querySelector('.hint').style.display='none';
+}
+
+function step(){
+  tick++;
+  if(!cells)return;
+  const ease=document.getElementById('togEase').checked;
+  const spd=+document.getElementById('sSpd').value;
+  const hold=+document.getElementById('sHold').value;
+  const swirl=+document.getElementById('sSwirl').value;
+
+  if(holdTimer>0)holdTimer--;
+  else{
+    morph+=morphDir*spd;
+    if(morph>=1){morph=1;morphDir=-1;holdTimer=hold;}
+    else if(morph<=0){morph=0;morphDir=1;holdTimer=hold;}
+  }
+  let m=morph;if(ease)m=m*m*(3-2*m);
+  const trans=Math.sin(m*Math.PI);
+  const swAmt=swirl*trans;
+
+  // interpolate seed positions, add swirl arc mid-transition
+  for(let i=0;i<nCells;i++){
+    const c=cells[i];
+    let x=c.ax*(1-m)+c.bx*m;
+    let y=c.ay*(1-m)+c.by*m;
+    if(swAmt>0){
+      const ang=c.phase+tick*0.02;
+      x+=Math.cos(ang)*swAmt;
+      y+=Math.sin(ang)*swAmt;
+    }
+    sx[i]=x;sy[i]=y;
+    sr[i]=c.ar*(1-m)+c.br*m;
+    sg[i]=c.ag*(1-m)+c.bg*m;
+    sb[i]=c.ab*(1-m)+c.bb*m;
+  }
+  document.getElementById('morphFill').style.width=(m*100)+'%';
+  document.getElementById('statMorph').textContent=morphDir>0?'A→B':'B→A';
+}
+
+function colorFor(i,m){
+  if(cmap==='img') return [sr[i],sg[i],sb[i]];
+  if(cmap==='mono'){const v=120+((i*37)%100);return[v,v*0.6,v*0.95];}
+  if(cmap==='glass'){
+    // vivid jewel tones by index
+    const h=(i*47)%360; return hsl(h,70,55);
+  }
+  if(cmap==='scale'){
+    const h=(i*23)%60+260; return hsl(h,55,45+((i*13)%25));
+  }
+  return [sr[i],sg[i],sb[i]];
+}
+function hsl(h,s,l){h=((h%360)+360)%360;s/=100;l/=100;const c=(1-Math.abs(2*l-1))*s,x=c*(1-Math.abs((h/60)%2-1)),mm=l-c/2;let r=0,g=0,b=0;if(h<60){r=c;g=x;}else if(h<120){r=x;g=c;}else if(h<180){g=c;b=x;}else if(h<240){g=x;b=c;}else if(h<300){r=x;b=c;}else{r=c;b=x;}return[(r+mm)*255|0,(g+mm)*255|0,(b+mm)*255|0];}
+
+function render(){
+  if(!cells||!sx){ctx.fillStyle='#0b070d';ctx.fillRect(0,0,W,H);return;}
+  const m=document.getElementById('togEase').checked?morph*morph*(3-2*morph):morph;
+  const drawEdge=document.getElementById('togEdge').checked;
+  const edgeW=+document.getElementById('sEdgeW').value;
+
+  // assign each low-res pixel to nearest seed (brute force with spatial hashing)
+  // Build a coarse grid bucket for seeds
+  const cell=80;
+  const bw=Math.ceil(W/cell), bh=Math.ceil(H/cell);
+  const buckets=new Array(bw*bh);
+  for(let i=0;i<buckets.length;i++)buckets[i]=[];
+  for(let i=0;i<nCells;i++){
+    const bx=Math.min(bw-1,Math.max(0,Math.floor(sx[i]/cell)));
+    const by=Math.min(bh-1,Math.max(0,Math.floor(sy[i]/cell)));
+    buckets[by*bw+bx].push(i);
+  }
+
+  const label=new Int32Array(GW*GH);
+  for(let gy=0;gy<GH;gy++){
+    for(let gx=0;gx<GW;gx++){
+      const wx=gx*GSCALE, wy=gy*GSCALE;
+      const bx=Math.min(bw-1,Math.max(0,Math.floor(wx/cell)));
+      const by=Math.min(bh-1,Math.max(0,Math.floor(wy/cell)));
+      let best=-1,bd=Infinity;
+      for(let oy=-1;oy<=1;oy++)for(let ox=-1;ox<=1;ox++){
+        const nbx=bx+ox,nby=by+oy;
+        if(nbx<0||nby<0||nbx>=bw||nby>=bh)continue;
+        const arr=buckets[nby*bw+nbx];
+        for(let k=0;k<arr.length;k++){
+          const si=arr[k];
+          const dx=sx[si]-wx,dy=sy[si]-wy;
+          const d=dx*dx+dy*dy;
+          if(d<bd){bd=d;best=si;}
+        }
+      }
+      // fallback: if no seed nearby, brute force a sparse search
+      if(best<0){
+        for(let si=0;si<nCells;si+=3){
+          const dx=sx[si]-wx,dy=sy[si]-wy;const d=dx*dx+dy*dy;
+          if(d<bd){bd=d;best=si;}
+        }
+      }
+      label[gy*GW+gx]=best;
+    }
+  }
+
+  // paint
+  const d=lbuf;
+  for(let gy=0;gy<GH;gy++){
+    for(let gx=0;gx<GW;gx++){
+      const li=label[gy*GW+gx];
+      let r,g,b;
+      if(li<0){r=11;g=7;b=13;}
+      else {
+        const col=colorFor(li,m);
+        r=col[0];g=col[1];b=col[2];
+        // edge detection: neighbor label differs
+        if(drawEdge&&edgeW>0){
+          const right=gx<GW-1?label[gy*GW+gx+1]:li;
+          const down=gy<GH-1?label[(gy+1)*GW+gx]:li;
+          if(right!==li||down!==li){
+            const dk=0.45;
+            r*=dk;g*=dk;b*=dk;
+          }
+        }
+      }
+      const p=(gy*GW+gx)*4;
+      d[p]=r;d[p+1]=g;d[p+2]=b;d[p+3]=255;
+    }
+  }
+  // upscale to canvas
+  // put into small canvas then drawImage scaled
+  fieldPut();
+}
+
+let fieldCanvas2,fctx2;
+function fieldPut(){
+  if(!fieldCanvas2){fieldCanvas2=document.createElement('canvas');fctx2=fieldCanvas2.getContext('2d');}
+  if(fieldCanvas2.width!==GW||fieldCanvas2.height!==GH){fieldCanvas2.width=GW;fieldCanvas2.height=GH;}
+  fctx2.putImageData(labelImg,0,0);
+  ctx.imageSmoothingEnabled=false;
+  ctx.drawImage(fieldCanvas2,0,0,GW,GH,0,0,W,H);
+}
+
+function loop(){
+  requestAnimationFrame(loop);
+  fpsFrames++;
+  const now=performance.now();
+  if(now-fpsLast>=1000){document.getElementById('statFps').textContent=fpsFrames;fpsFrames=0;fpsLast=now;}
+  if(running)step();
+  render();
+}
+
+function togglePlay(){running=!running;const btn=document.getElementById('btnPlay');btn.textContent=running?'■ pause':'▶ resume';btn.classList.toggle('running',running);}
+window.addEventListener('keydown',e=>{if(e.code==='Space'){e.preventDefault();togglePlay();}});
+function resize(){
+  W=canvas.width=wrap.clientWidth;H=canvas.height=wrap.clientHeight;
+  GW=Math.floor(W/GSCALE);GH=Math.floor(H/GSCALE);
+  labelImg=ctx.createImageData(GW,GH);lbuf=labelImg.data;
+  fieldCanvas2=null;
+}
+window.addEventListener('resize',()=>{resize();resample();});
+wrap.addEventListener('dragover',e=>e.preventDefault());
+wrap.addEventListener('drop',e=>{e.preventDefault();const files=[...e.dataTransfer.files].filter(f=>f.type.startsWith('image/'));if(files[0]){const dt=new DataTransfer();dt.items.add(files[0]);document.getElementById('fileA').files=dt.files;loadImg(document.getElementById('fileA'),'A');}if(files[1]){const dt=new DataTransfer();dt.items.add(files[1]);document.getElementById('fileB').files=dt.files;loadImg(document.getElementById('fileB'),'B');}});
+
+let mediaRecorder=null,recChunks=[];
+function toggleRec(){if(!mediaRecorder||mediaRecorder.state==='inactive')startRec();else stopRec();}
+function startRec(){recChunks=[];const stream=canvas.captureStream(30);const opts={mimeType:'video/webm;codecs=vp9',videoBitsPerSecond:9000000};if(!MediaRecorder.isTypeSupported(opts.mimeType))opts.mimeType='video/webm';try{mediaRecorder=new MediaRecorder(stream,opts);}catch(e){mediaRecorder=new MediaRecorder(stream);}mediaRecorder.ondataavailable=e=>{if(e.data.size>0)recChunks.push(e.data);};mediaRecorder.onstop=()=>{document.getElementById('btnDL').disabled=false;document.getElementById('recDot').classList.remove('on');document.getElementById('btnRec').textContent='● rec';document.getElementById('btnRec').classList.remove('recording');};mediaRecorder.start(100);document.getElementById('recDot').classList.add('on');document.getElementById('btnRec').textContent='■ stop';document.getElementById('btnRec').classList.add('recording');}
+function stopRec(){if(mediaRecorder&&mediaRecorder.state!=='inactive')mediaRecorder.stop();}
+function downloadVid(){if(!recChunks.length)return;const blob=new Blob(recChunks,{type:'video/webm'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='voronoi_morph_'+Date.now()+'.webm';a.click();}
+
+resize();
+resample();
+loop();
+</script>
+</body>
+</html>

@@ -1,0 +1,410 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Coral Bleaching</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+JP:wght@300;400;500&display=swap');
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#04070d;--surface:#090e16;--border:#152230;--border2:#1f3043;
+  --accent:#e08a5a;--accent2:#a85f33;
+  --text:#f0e0d4;--text2:#8a7866;--text3:#2a3340;
+  --font-mono:'IBM Plex Mono',monospace;--font-ui:'IBM Plex Sans JP',sans-serif;
+}
+body{background:var(--bg);color:var(--text);font-family:var(--font-ui);height:100vh;display:flex;flex-direction:column;overflow:hidden;user-select:none;}
+header{display:flex;align-items:center;gap:14px;padding:8px 18px;border-bottom:1px solid var(--border);background:var(--surface);flex-shrink:0;}
+.logo{font-family:var(--font-mono);font-size:12px;font-weight:500;color:var(--accent);letter-spacing:.1em;text-transform:uppercase;}
+.logo em{color:var(--text3);font-style:normal;}
+.stats{margin-left:auto;display:flex;gap:16px;}
+.stat{display:flex;flex-direction:column;align-items:flex-end;}
+.stat-label{font-family:var(--font-mono);font-size:8px;color:var(--text3);letter-spacing:.1em;text-transform:uppercase;}
+.stat-val{font-family:var(--font-mono);font-size:13px;font-weight:500;color:var(--text);line-height:1.2;}
+.main{display:flex;flex:1;overflow:hidden;}
+.sidebar{width:258px;flex-shrink:0;background:var(--surface);border-right:1px solid var(--border);display:flex;flex-direction:column;overflow-y:auto;}
+.sidebar::-webkit-scrollbar{width:3px;}
+.sidebar::-webkit-scrollbar-thumb{background:var(--border2);border-radius:2px;}
+.sec{padding:11px 13px;border-bottom:1px solid var(--border);}
+.sec-title{font-family:var(--font-mono);font-size:8px;color:var(--text3);letter-spacing:.14em;text-transform:uppercase;margin-bottom:9px;}
+button{font-family:var(--font-mono);font-size:11px;font-weight:500;background:transparent;border:1px solid var(--border);color:var(--text2);padding:5px 10px;border-radius:3px;cursor:pointer;transition:all .15s;white-space:nowrap;}
+button:hover{border-color:var(--accent2);color:var(--accent);background:rgba(224,138,90,.07);}
+button.on{border-color:var(--accent)!important;color:var(--accent)!important;background:rgba(224,138,90,.14)!important;}
+.play-btn{width:100%;padding:7px;font-size:12px;border-color:var(--accent2);color:var(--accent);}
+.play-btn.running{background:rgba(224,138,90,.1);}
+.sl-row{margin-bottom:8px;}
+.sl-head{display:flex;justify-content:space-between;margin-bottom:3px;}
+.sl-name{font-family:var(--font-mono);font-size:10px;color:var(--text2);}
+.sl-val{font-family:var(--font-mono);font-size:10px;color:var(--accent);}
+input[type=range]{-webkit-appearance:none;width:100%;height:2px;background:var(--border);border-radius:1px;outline:none;}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:11px;height:11px;background:var(--accent);border-radius:50%;cursor:pointer;}
+.tog-row{display:flex;align-items:center;justify-content:space-between;margin-bottom:7px;}
+.tog-label{font-family:var(--font-mono);font-size:10px;color:var(--text2);}
+.tog{position:relative;width:28px;height:14px;flex-shrink:0;}
+.tog input{opacity:0;width:0;height:0;position:absolute;}
+.tog-track{position:absolute;inset:0;background:var(--border);border-radius:8px;cursor:pointer;transition:background .2s;}
+.tog input:checked+.tog-track{background:var(--accent2);}
+.tog-track::after{content:'';position:absolute;width:10px;height:10px;left:2px;top:2px;background:var(--text3);border-radius:50%;transition:transform .2s,background .2s;}
+.tog input:checked+.tog-track::after{transform:translateX(14px);background:var(--accent);}
+.canvas-wrap{flex:1;position:relative;overflow:hidden;background:#000;display:flex;flex-direction:column;}
+#reefCanvas{display:block;width:100%;flex:1;image-rendering:pixelated;min-height:0;}
+.temp-panel{flex-shrink:0;height:96px;border-top:1px solid var(--border);background:var(--surface);position:relative;}
+#tempCanvas{display:block;width:100%;height:100%;}
+.hint{position:absolute;top:8px;left:50%;transform:translateX(-50%);font-family:var(--font-mono);font-size:9px;color:var(--text3);pointer-events:none;white-space:nowrap;}
+.temp-readout{position:absolute;top:6px;right:12px;font-family:var(--font-mono);font-size:10px;color:var(--text2);}
+.preset-grid{display:grid;grid-template-columns:1fr 1fr;gap:4px;}
+.legend{position:absolute;top:8px;left:12px;display:flex;flex-direction:column;gap:3px;font-family:var(--font-mono);font-size:9px;color:var(--text3);background:rgba(9,14,22,.6);padding:7px 9px;border-radius:6px;border:1px solid var(--border);}
+.legend-row{display:flex;align-items:center;gap:6px;}
+.legend-dot{width:8px;height:8px;border-radius:2px;}
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">Coral <em>//</em> Bleaching Cycle</div>
+  <div class="stats">
+    <div class="stat"><span class="stat-label">水温</span><span class="stat-val" id="statTemp">26.0°</span></div>
+    <div class="stat"><span class="stat-label">健全</span><span class="stat-val" id="statHealthy">0%</span></div>
+    <div class="stat"><span class="stat-label">白化</span><span class="stat-val" id="statBleached">0%</span></div>
+    <div class="stat"><span class="stat-label">死亡</span><span class="stat-val" id="statDead">0%</span></div>
+  </div>
+</header>
+
+<div class="main">
+  <div class="sidebar">
+
+    <div class="sec">
+      <button class="play-btn running" id="btnPlay" onclick="togglePlay()">■ pause</button>
+      <div style="display:flex;gap:5px;margin-top:5px;">
+        <button style="flex:1" onclick="reset()">リセット</button>
+        <button style="flex:1" onclick="growReef()">サンゴを育てる</button>
+      </div>
+    </div>
+
+    <div class="sec">
+      <div class="sec-title">水温シナリオ</div>
+      <div class="preset-grid">
+        <button id="sc-stable" class="on" onclick="setScenario('stable')">安定</button>
+        <button id="sc-seasonal" onclick="setScenario('seasonal')">季節変動</button>
+        <button id="sc-warming" onclick="setScenario('warming')">温暖化</button>
+        <button id="sc-spike" onclick="setScenario('spike')">熱波</button>
+      </div>
+    </div>
+
+    <div class="sec">
+      <div class="sec-title">水温パラメータ</div>
+      <div class="sl-row">
+        <div class="sl-head"><span class="sl-name">基準水温°C</span><span class="sl-val" id="vBase">26.0</span></div>
+        <input type="range" min="22" max="31" value="26" step="0.1" id="sBase" oninput="vBase.textContent=(+this.value).toFixed(1)">
+      </div>
+      <div class="sl-row">
+        <div class="sl-head"><span class="sl-name">変動の幅°C</span><span class="sl-val" id="vAmp">1.5</span></div>
+        <input type="range" min="0" max="6" value="1.5" step="0.1" id="sAmp" oninput="vAmp.textContent=(+this.value).toFixed(1)">
+      </div>
+      <div class="sl-row">
+        <div class="sl-head"><span class="sl-name">変動の周期</span><span class="sl-val" id="vPeriod">600</span></div>
+        <input type="range" min="100" max="2000" value="600" step="50" id="sPeriod" oninput="vPeriod.textContent=this.value">
+      </div>
+      <div class="sl-row">
+        <div class="sl-head"><span class="sl-name">温暖化トレンド</span><span class="sl-val" id="vTrend">0.0</span></div>
+        <input type="range" min="0" max="3" value="0" step="0.1" id="sTrend" oninput="vTrend.textContent=(+this.value).toFixed(1)">
+      </div>
+      <div style="font-family:var(--font-mono);font-size:9px;color:var(--text3);margin-top:4px;line-height:1.6;">手動で水温を上下: 下のグラフをドラッグ</div>
+    </div>
+
+    <div class="sec">
+      <div class="sec-title">サンゴの生理</div>
+      <div class="sl-row">
+        <div class="sl-head"><span class="sl-name">白化しきい値°C</span><span class="sl-val" id="vThresh">29.0</span></div>
+        <input type="range" min="26" max="32" value="29" step="0.1" id="sThresh" oninput="vThresh.textContent=(+this.value).toFixed(1)">
+      </div>
+      <div class="sl-row">
+        <div class="sl-head"><span class="sl-name">白化の速さ</span><span class="sl-val" id="vBleachRate">0.015</span></div>
+        <input type="range" min="0.002" max="0.06" value="0.015" step="0.002" id="sBleachRate" oninput="vBleachRate.textContent=(+this.value).toFixed(3)">
+      </div>
+      <div class="sl-row">
+        <div class="sl-head"><span class="sl-name">回復の速さ</span><span class="sl-val" id="vRecover">0.008</span></div>
+        <input type="range" min="0.001" max="0.04" value="0.008" step="0.001" id="sRecover" oninput="vRecover.textContent=(+this.value).toFixed(3)">
+      </div>
+      <div class="sl-row">
+        <div class="sl-head"><span class="sl-name">致死までの耐性</span><span class="sl-val" id="vTolerance">200</span></div>
+        <input type="range" min="40" max="600" value="200" step="10" id="sTolerance" oninput="vTolerance.textContent=this.value">
+      </div>
+      <div style="font-family:var(--font-mono);font-size:9px;color:var(--text3);margin-top:4px;line-height:1.6;">白化が長引くとサンゴは死亡。死ぬと藻に覆われます</div>
+    </div>
+
+    <div class="sec" style="font-family:var(--font-mono);font-size:9px;color:var(--text3);line-height:1.9;">
+      Space: 一時停止<br>
+      高水温で共生藻(zooxanthellae)を失い白化、<br>
+      水温が下がれば回復。長期の白化は死を招く。<br>
+      温暖化シナリオで白化の頻発を体感できます
+    </div>
+  </div>
+
+  <div class="canvas-wrap" id="canvasWrap">
+    <canvas id="reefCanvas"></canvas>
+    <div class="legend">
+      <div class="legend-row"><div class="legend-dot" style="background:#c8693f"></div>健全なサンゴ</div>
+      <div class="legend-row"><div class="legend-dot" style="background:#e8e0d8"></div>白化サンゴ</div>
+      <div class="legend-row"><div class="legend-dot" style="background:#4a5240"></div>死亡（藻に被覆）</div>
+    </div>
+    <div class="temp-panel" id="tempPanel">
+      <canvas id="tempCanvas"></canvas>
+      <div class="hint">水温の履歴（ドラッグで手動操作）</div>
+      <div class="temp-readout" id="tempReadout">26.0°C</div>
+    </div>
+  </div>
+</div>
+
+<script>
+const reefCanvas=document.getElementById('reefCanvas');
+const rctx=reefCanvas.getContext('2d');
+const tempCanvas=document.getElementById('tempCanvas');
+const tctx=tempCanvas.getContext('2d');
+const wrap=document.getElementById('canvasWrap');
+
+let CS=5, COLS=0, ROWS=0, N=0;
+// state: 0 empty/water, 1 rock, 2 coral
+let kind;       // Uint8Array
+let health;     // Float32Array 0..1 (1 healthy, 0 fully bleached)
+let bleachTime; // Float32Array accumulated stress time
+let dead;       // Uint8Array
+let running=true, tick=0;
+let temp=26, tempManual=null;
+let tempHistory=[];
+let scenario='stable';
+let imgData,buf;
+
+function reset(){
+  CS=5;
+  reefCanvas.width=wrap.clientWidth;
+  reefCanvas.height=wrap.clientHeight-document.getElementById('tempPanel').offsetHeight;
+  COLS=Math.floor(reefCanvas.width/CS);
+  ROWS=Math.floor(reefCanvas.height/CS);
+  N=COLS*ROWS;
+  kind=new Uint8Array(N);
+  health=new Float32Array(N);
+  bleachTime=new Float32Array(N);
+  dead=new Uint8Array(N);
+  tick=0; tempHistory=[];
+  imgData=rctx.createImageData(reefCanvas.width,reefCanvas.height);
+  buf=imgData.data;
+
+  // Rock substrate bottom
+  for(let r=ROWS-2;r<ROWS;r++) for(let c=0;c<COLS;c++) kind[idx(r,c)]=1;
+  growReef();
+  resizeTemp();
+}
+
+function idx(r,c){return r*COLS+c;}
+
+function growReef(){
+  // Grow coral via simple DLA-ish seeding from substrate
+  for(let i=0;i<N;i++){ if(kind[i]===2){kind[i]=0;} } // clear existing coral
+  health.fill(0); bleachTime.fill(0); dead.fill(0);
+
+  // Seed corals as blobby colonies sitting on rock/floor
+  const colonies=18;
+  for(let k=0;k<colonies;k++){
+    const cc=Math.floor(Math.random()*COLS);
+    const cr=Math.floor(ROWS*0.35+Math.random()*ROWS*0.6);
+    const rad=3+Math.random()*7;
+    for(let dr=-rad;dr<=rad;dr++) for(let dc=-rad;dc<=rad;dc++){
+      const rr=Math.round(cr+dr), ccx=Math.round(cc+dc);
+      if(rr<0||rr>=ROWS||ccx<0||ccx>=COLS) continue;
+      const d=Math.hypot(dr,dc);
+      if(d>rad) continue;
+      if(Math.random() < 1-d/rad){
+        const i=idx(rr,ccx);
+        if(kind[i]===0){kind[i]=2;health[i]=1;dead[i]=0;}
+      }
+    }
+  }
+  updateStats();
+}
+
+// ── Temperature scenarios ──
+function setScenario(s){
+  scenario=s;
+  ['stable','seasonal','warming','spike'].forEach(k=>document.getElementById('sc-'+k).classList.toggle('on',k===s));
+  if(s==='stable'){ setVals(26,0.5,800,0); }
+  else if(s==='seasonal'){ setVals(26,2.5,500,0); }
+  else if(s==='warming'){ setVals(26,1.5,500,2.5); }
+  else if(s==='spike'){ setVals(27,4.5,300,0.5); }
+}
+function setVals(base,amp,period,trend){
+  document.getElementById('sBase').value=base; document.getElementById('vBase').textContent=base.toFixed(1);
+  document.getElementById('sAmp').value=amp; document.getElementById('vAmp').textContent=amp.toFixed(1);
+  document.getElementById('sPeriod').value=period; document.getElementById('vPeriod').textContent=period;
+  document.getElementById('sTrend').value=trend; document.getElementById('vTrend').textContent=trend.toFixed(1);
+}
+
+function computeTemp(){
+  if(tempManual!==null) return tempManual;
+  const base=+document.getElementById('sBase').value;
+  const amp=+document.getElementById('sAmp').value;
+  const period=+document.getElementById('sPeriod').value;
+  const trend=+document.getElementById('sTrend').value;
+  const seasonal=Math.sin(tick/period*Math.PI*2)*amp;
+  const warming=trend*(tick/5000);
+  // small noise
+  const noise=(Math.random()-0.5)*0.15;
+  return base+seasonal+warming+noise;
+}
+
+// ── Simulation ──
+function step(){
+  tick++;
+  temp=computeTemp();
+
+  const thresh=+document.getElementById('sThresh').value;
+  const bleachRate=+document.getElementById('sBleachRate').value;
+  const recoverRate=+document.getElementById('sRecover').value;
+  const tolerance=+document.getElementById('sTolerance').value;
+
+  const stress=temp-thresh; // positive = stressful
+
+  for(let i=0;i<N;i++){
+    if(kind[i]!==2||dead[i]) continue;
+    if(stress>0){
+      // Lose symbionts (health drops)
+      health[i]=Math.max(0,health[i]-bleachRate*Math.min(stress,4));
+      // Accumulate stress when significantly bleached
+      if(health[i]<0.35) bleachTime[i]+=1+stress*0.3;
+      if(bleachTime[i]>tolerance){ dead[i]=1; }
+    } else {
+      // Recover when cool
+      health[i]=Math.min(1,health[i]+recoverRate);
+      bleachTime[i]=Math.max(0,bleachTime[i]-2);
+    }
+  }
+
+  tempHistory.push(temp);
+  if(tempHistory.length>tempCanvas.width) tempHistory.shift();
+
+  updateStats();
+}
+
+function updateStats(){
+  let coral=0,healthy=0,bleached=0,deadC=0;
+  for(let i=0;i<N;i++){
+    if(kind[i]!==2) continue;
+    coral++;
+    if(dead[i]) deadC++;
+    else if(health[i]<0.4) bleached++;
+    else healthy++;
+  }
+  const pc=coral||1;
+  document.getElementById('statTemp').textContent=temp.toFixed(1)+'°';
+  document.getElementById('statHealthy').textContent=Math.round(healthy/pc*100)+'%';
+  document.getElementById('statBleached').textContent=Math.round(bleached/pc*100)+'%';
+  document.getElementById('statDead').textContent=Math.round(deadC/pc*100)+'%';
+  document.getElementById('tempReadout').textContent=temp.toFixed(1)+'°C';
+}
+
+// ── Render reef ──
+function render(){
+  for(let r=0;r<ROWS;r++) for(let c=0;c<COLS;c++){
+    const i=idx(r,c);
+    let R,G,B;
+    const k=kind[i];
+    if(k===0){
+      const t=r/ROWS;
+      R=4+t*4; G=12+t*10; B=26+t*16;
+    } else if(k===1){
+      const v=64+((r*7+c*13)%18);
+      R=v;G=v-6;B=v-12;
+    } else {
+      if(dead[i]){
+        // dead -> algae-covered dull green
+        R=74;G=82;B=64;
+      } else {
+        const h=health[i];
+        // healthy coral: warm orange/pink. bleached: white
+        const cr=200, cg=105, cb=63;       // healthy color
+        const wr=235, wg=228, wb=220;      // bleached white
+        R=wr+(cr-wr)*h; G=wg+(cg-wg)*h; B=wb+(cb-wb)*h;
+      }
+    }
+    for(let dy=0;dy<CS;dy++) for(let dx=0;dx<CS;dx++){
+      const px=((r*CS+dy)*reefCanvas.width+(c*CS+dx))*4;
+      if(px<0||px>=buf.length) continue;
+      buf[px]=R;buf[px+1]=G;buf[px+2]=B;buf[px+3]=255;
+    }
+  }
+  rctx.putImageData(imgData,0,0);
+}
+
+// ── Temp graph ──
+function resizeTemp(){
+  tempCanvas.width=document.getElementById('tempPanel').clientWidth;
+  tempCanvas.height=document.getElementById('tempPanel').clientHeight;
+}
+function renderTemp(){
+  const W=tempCanvas.width,H=tempCanvas.height;
+  tctx.clearRect(0,0,W,H);
+  tctx.fillStyle='#090e16'; tctx.fillRect(0,0,W,H);
+
+  const tMin=22,tMax=33;
+  const y=t=>H-((t-tMin)/(tMax-tMin))*H;
+
+  // Threshold line
+  const thresh=+document.getElementById('sThresh').value;
+  tctx.strokeStyle='rgba(224,90,60,0.5)'; tctx.lineWidth=1; tctx.setLineDash([4,3]);
+  tctx.beginPath();tctx.moveTo(0,y(thresh));tctx.lineTo(W,y(thresh));tctx.stroke();
+  tctx.setLineDash([]);
+  tctx.fillStyle='rgba(224,90,60,0.7)'; tctx.font='9px IBM Plex Mono,monospace';
+  tctx.fillText('白化しきい値 '+thresh.toFixed(1)+'°', 6, y(thresh)-3);
+
+  // History line
+  tctx.strokeStyle='#5fc4d9'; tctx.lineWidth=1.5;
+  tctx.beginPath();
+  for(let i=0;i<tempHistory.length;i++){
+    const xx=W-tempHistory.length+i;
+    i===0?tctx.moveTo(xx,y(tempHistory[i])):tctx.lineTo(xx,y(tempHistory[i]));
+  }
+  tctx.stroke();
+
+  // Current temp dot
+  if(tempHistory.length){
+    const last=tempHistory[tempHistory.length-1];
+    tctx.fillStyle = last>thresh?'#e05a3c':'#5fc4d9';
+    tctx.beginPath();tctx.arc(W-1,y(last),3,0,Math.PI*2);tctx.fill();
+  }
+}
+
+// ── Loop ──
+function loop(){
+  requestAnimationFrame(loop);
+  if(running) step();
+  render();
+  renderTemp();
+}
+
+// ── Controls ──
+function togglePlay(){
+  running=!running;
+  const btn=document.getElementById('btnPlay');
+  btn.textContent=running?'■ pause':'▶ resume';
+  btn.classList.toggle('running',running);
+}
+window.addEventListener('keydown',e=>{if(e.code==='Space'){e.preventDefault();togglePlay();}});
+window.addEventListener('resize',()=>reset());
+
+// Manual temp drag on graph
+let dragging=false;
+function tempFromY(clientY){
+  const rect=tempCanvas.getBoundingClientRect();
+  const yy=clientY-rect.top;
+  const tMin=22,tMax=33;
+  return tMax-(yy/tempCanvas.height)*(tMax-tMin);
+}
+tempCanvas.addEventListener('mousedown',e=>{dragging=true;tempManual=tempFromY(e.clientY);});
+tempCanvas.addEventListener('mousemove',e=>{if(dragging)tempManual=tempFromY(e.clientY);});
+document.addEventListener('mouseup',()=>{dragging=false;tempManual=null;});
+
+// ── Boot ──
+reset();
+loop();
+</script>
+</body>
+</html>

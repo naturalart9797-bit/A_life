@@ -1,0 +1,1227 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CA Explorer</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans+JP:wght@300;400;500&display=swap');
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#07080f;--surface:#0e0f1a;--surface2:#13152a;--border:#1c1e35;--border2:#252840;
+  --accent:#6c63ff;--accent2:#3d38cc;--accent3:#a89bff;
+  --green:#1fb885;--red:#e05252;--yellow:#e0a832;--cyan:#38c8e0;
+  --text:#cccaff;--text2:#7470a8;--text3:#35324a;
+  --font-mono:'IBM Plex Mono',monospace;--font-ui:'IBM Plex Sans JP',sans-serif;
+}
+body{background:var(--bg);color:var(--text);font-family:var(--font-ui);height:100vh;display:flex;flex-direction:column;overflow:hidden;user-select:none;}
+header{display:flex;align-items:center;gap:10px;padding:7px 16px;border-bottom:1px solid var(--border);background:var(--surface);flex-shrink:0;z-index:20;flex-wrap:wrap;}
+.logo{font-family:var(--font-mono);font-size:12px;font-weight:600;color:var(--accent);letter-spacing:.1em;text-transform:uppercase;}
+.logo em{color:var(--text3);font-style:normal;}
+.tab-bar{display:flex;gap:2px;flex-wrap:wrap;}
+.tab{font-family:var(--font-mono);font-size:10px;padding:4px 10px;border-radius:3px;border:1px solid transparent;cursor:pointer;color:var(--text2);letter-spacing:.04em;transition:all .15s;}
+.tab:hover{color:var(--accent3);background:rgba(108,99,255,.07);}
+.tab.active{color:var(--accent);background:rgba(108,99,255,.15);border-color:var(--accent2);}
+.header-stats{margin-left:auto;display:flex;gap:16px;}
+.hstat{display:flex;flex-direction:column;align-items:flex-end;}
+.hstat-label{font-family:var(--font-mono);font-size:8px;color:var(--text3);letter-spacing:.1em;text-transform:uppercase;}
+.hstat-val{font-family:var(--font-mono);font-size:13px;font-weight:500;color:var(--text);line-height:1.2;}
+.app-body{display:flex;flex:1;overflow:hidden;}
+.panel{display:none;width:100%;height:100%;}
+.panel.active{display:flex;}
+.sidebar{width:245px;flex-shrink:0;background:var(--surface);border-right:1px solid var(--border);display:flex;flex-direction:column;overflow-y:auto;}
+.sidebar::-webkit-scrollbar{width:3px;}
+.sidebar::-webkit-scrollbar-thumb{background:var(--border2);border-radius:2px;}
+.sec{padding:11px 13px;border-bottom:1px solid var(--border);}
+.sec-title{font-family:var(--font-mono);font-size:8px;color:var(--text3);letter-spacing:.14em;text-transform:uppercase;margin-bottom:9px;}
+.group-lbl{font-family:var(--font-mono);font-size:8px;color:var(--accent2);letter-spacing:.1em;text-transform:uppercase;margin:8px 0 5px;border-left:2px solid var(--accent2);padding-left:5px;}
+button{font-family:var(--font-mono);font-size:11px;font-weight:500;background:transparent;border:1px solid var(--border);color:var(--text2);padding:5px 10px;border-radius:3px;cursor:pointer;letter-spacing:.04em;transition:all .15s;white-space:nowrap;}
+button:hover{border-color:var(--accent2);color:var(--accent);background:rgba(108,99,255,.07);}
+button.on{border-color:var(--accent)!important;color:var(--accent)!important;background:rgba(108,99,255,.14)!important;}
+.play-btn{width:100%;padding:7px;font-size:12px;border-color:var(--accent2);color:var(--accent);}
+.play-btn.running{background:rgba(108,99,255,.1);}
+.sl-row{margin-bottom:8px;}
+.sl-head{display:flex;justify-content:space-between;margin-bottom:3px;}
+.sl-name{font-family:var(--font-mono);font-size:10px;color:var(--text2);}
+.sl-val{font-family:var(--font-mono);font-size:10px;color:var(--accent);}
+input[type=range]{-webkit-appearance:none;width:100%;height:2px;background:var(--border);border-radius:1px;outline:none;}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:11px;height:11px;background:var(--accent);border-radius:50%;cursor:pointer;}
+input[type=number]{font-family:var(--font-mono);font-size:11px;background:var(--surface2);border:1px solid var(--border2);color:var(--text);padding:3px 7px;border-radius:3px;outline:none;width:100%;}
+input[type=number]:focus{border-color:var(--accent2);}
+.canvas-wrap{flex:1;position:relative;overflow:hidden;background:var(--bg);}
+canvas{display:block;image-rendering:pixelated;}
+.hint-bar{position:absolute;bottom:10px;left:50%;transform:translateX(-50%);font-family:var(--font-mono);font-size:9px;color:var(--text3);pointer-events:none;letter-spacing:.08em;}
+
+/* Rule display 1D */
+.rule-display{display:flex;gap:3px;flex-wrap:wrap;margin-top:5px;}
+.rule-bit{display:flex;flex-direction:column;align-items:center;gap:2px;cursor:pointer;padding:3px 3px;border-radius:3px;border:1px solid var(--border);transition:all .1s;}
+.rule-bit:hover{border-color:var(--accent2);}
+.rule-bit .pattern{display:flex;gap:1px;}
+.rule-bit .cell-mini{width:6px;height:6px;border-radius:1px;}
+.rule-bit .output{width:6px;height:6px;border-radius:1px;margin-top:2px;}
+.rule-bit.active-bit{border-color:var(--accent);background:rgba(108,99,255,.1);}
+
+/* rule table */
+.rule-table-wrap{overflow:auto;max-height:160px;}
+.rule-table{border-collapse:collapse;font-family:var(--font-mono);font-size:10px;}
+.rule-table th{color:var(--text3);padding:2px 5px;border-bottom:1px solid var(--border);text-align:center;}
+.rule-table td{padding:2px 4px;text-align:center;border:1px solid var(--border2);}
+.rule-cell{width:14px;height:14px;border-radius:2px;cursor:pointer;display:inline-block;transition:background .1s;}
+.preset-grid{display:grid;grid-template-columns:1fr 1fr;gap:3px;}
+.preset-btn{font-size:10px;padding:5px 5px;text-align:left;}
+.color-row{display:flex;align-items:center;justify-content:space-between;margin-bottom:7px;}
+.color-label{font-family:var(--font-mono);font-size:10px;color:var(--text2);}
+.swatch{width:18px;height:18px;border-radius:3px;border:1px solid var(--border);cursor:pointer;}
+input[type=color]{width:0;height:0;opacity:0;position:absolute;pointer-events:none;}
+.hex-in{font-family:var(--font-mono);font-size:10px;width:56px;background:transparent;border:1px solid var(--border);border-radius:2px;padding:2px 4px;color:var(--text2);outline:none;}
+.tog-row{display:flex;align-items:center;justify-content:space-between;margin-bottom:7px;}
+.tog-label{font-family:var(--font-mono);font-size:10px;color:var(--text2);}
+.tog{position:relative;width:28px;height:14px;}
+.tog input{opacity:0;width:0;height:0;}
+.tog-track{position:absolute;inset:0;background:var(--border);border-radius:8px;cursor:pointer;transition:background .2s;}
+.tog input:checked+.tog-track{background:var(--accent2);}
+.tog-track::after{content:'';position:absolute;width:10px;height:10px;left:2px;top:2px;background:var(--text3);border-radius:50%;transition:transform .2s,background .2s;}
+.tog input:checked+.tog-track::after{transform:translateX(14px);background:var(--accent);}
+
+/* Info / explanation box */
+.info-box{font-family:var(--font-mono);font-size:9px;color:var(--text3);line-height:1.85;padding:7px 8px;background:var(--surface2);border-radius:4px;border:1px solid var(--border);margin-top:4px;}
+.info-box b{color:var(--accent3);}
+.info-box i{color:var(--green);font-style:normal;}
+.info-box u{color:var(--yellow);text-decoration:none;}
+.sec-explain{padding:11px 13px;border-bottom:1px solid var(--border);}
+.explain-title{font-family:var(--font-mono);font-size:9px;color:var(--accent2);letter-spacing:.1em;text-transform:uppercase;margin-bottom:6px;}
+
+/* Colormap legend */
+.cmap-bar{height:10px;border-radius:2px;margin:4px 0 2px;border:1px solid var(--border);}
+.cmap-labels{display:flex;justify-content:space-between;font-family:var(--font-mono);font-size:8px;color:var(--text3);}
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">CA <em>//</em> Explorer</div>
+  <div class="tab-bar">
+    <div class="tab active" id="tab1d"  onclick="switchTab('1d')">1次元</div>
+    <div class="tab" id="tab2d"         onclick="switchTab('2d')">2次元</div>
+    <div class="tab" id="tabRD"         onclick="switchTab('rd')">反応拡散</div>
+    <div class="tab" id="tabStoch"      onclick="switchTab('stoch')">確率的CA</div>
+    <div class="tab" id="tabMulti"      onclick="switchTab('multi')">マルチレイヤー</div>
+    <div class="tab" id="tabCont"       onclick="switchTab('cont')">連続値CA</div>
+  </div>
+  <div class="header-stats">
+    <div class="hstat"><span class="hstat-label">世代</span><span class="hstat-val" id="genVal">0</span></div>
+  </div>
+</header>
+
+<div class="app-body">
+
+<!-- ══════════ 1D PANEL ══════════ -->
+<div class="panel active" id="panel1d">
+  <div class="sidebar">
+    <div class="sec">
+      <button class="play-btn" id="btn1dPlay" onclick="toggle1d()">▶ スタート</button>
+      <div style="display:flex;gap:4px;margin-top:5px;">
+        <button style="flex:1" onclick="step1d()">1ステップ</button>
+        <button style="flex:1" onclick="reset1d()">リセット</button>
+        <button style="flex:1" onclick="clear1d()">クリア</button>
+      </div>
+    </div>
+    <div class="sec">
+      <div class="sec-title">ルール設定</div>
+      <div class="sl-row">
+        <div class="sl-head"><span class="sl-name">状態数 k</span><span class="sl-val" id="k1dVal">2</span></div>
+        <input type="range" min="2" max="4" value="2" id="k1d" oninput="k1dVal.textContent=this.value;rebuild1dRule()">
+      </div>
+      <div class="sl-row">
+        <div class="sl-head"><span class="sl-name">近傍半径 r</span><span class="sl-val" id="r1dVal">1</span></div>
+        <input type="range" min="1" max="3" value="1" id="r1d" oninput="r1dVal.textContent=this.value;rebuild1dRule()">
+      </div>
+      <div style="display:flex;gap:5px;align-items:center;margin-bottom:7px;">
+        <span class="sl-name" style="flex:1;">ルール番号</span>
+        <input type="number" id="ruleNum" value="30" min="0" style="width:78px;" oninput="setRuleFromNum(+this.value)">
+      </div>
+      <div style="display:flex;gap:3px;flex-wrap:wrap;margin-bottom:5px;">
+        <button style="font-size:10px;padding:3px 6px;" onclick="randRule1d()">乱数</button>
+        <button style="font-size:10px;padding:3px 6px;" onclick="setRuleFromNum(30)">R30</button>
+        <button style="font-size:10px;padding:3px 6px;" onclick="setRuleFromNum(90)">R90</button>
+        <button style="font-size:10px;padding:3px 6px;" onclick="setRuleFromNum(110)">R110</button>
+        <button style="font-size:10px;padding:3px 6px;" onclick="setRuleFromNum(184)">R184</button>
+      </div>
+      <div class="rule-display" id="ruleDisplay"></div>
+    </div>
+    <div class="sec">
+      <div class="sec-title">初期状態</div>
+      <div class="preset-grid">
+        <button class="preset-btn on" id="init-single" onclick="setInit('single')">中央1点</button>
+        <button class="preset-btn" id="init-random"    onclick="setInit('random')">ランダム</button>
+        <button class="preset-btn" id="init-left"      onclick="setInit('left')">左端1点</button>
+        <button class="preset-btn" id="init-alt"       onclick="setInit('alt')">交互</button>
+      </div>
+    </div>
+    <div class="sec">
+      <div class="sec-title">表示</div>
+      <div class="sl-row">
+        <div class="sl-head"><span class="sl-name">速度</span><span class="sl-val" id="spd1dVal">15</span></div>
+        <input type="range" min="1" max="60" value="15" id="spd1d" oninput="spd1dVal.textContent=this.value">
+      </div>
+      <div class="sl-row">
+        <div class="sl-head"><span class="sl-name">セルサイズ</span><span class="sl-val" id="cs1dVal">4</span></div>
+        <input type="range" min="1" max="12" value="4" id="cs1d" oninput="cs1dVal.textContent=this.value;init1dCanvas()">
+      </div>
+      <div class="tog-row">
+        <span class="tog-label">スクロール（下方向）</span>
+        <label class="tog"><input type="checkbox" id="scroll1d" checked><div class="tog-track"></div></label>
+      </div>
+      <div class="color-row">
+        <span class="color-label">セル色</span>
+        <div style="display:flex;gap:4px;align-items:center;">
+          <div class="swatch" id="sw1dA" style="background:#6c63ff" onclick="openPick('pick1dA')"></div>
+          <input type="color" id="pick1dA" value="#6c63ff" oninput="set1dColor('alive',this.value)">
+          <input type="text" class="hex-in" id="hex1dA" value="#6c63ff" oninput="if(/^#[0-9a-fA-F]{6}$/.test(this.value))set1dColor('alive',this.value);" maxlength="7">
+        </div>
+      </div>
+    </div>
+    <div class="sec-explain">
+      <div class="explain-title">解説</div>
+      <div class="info-box">
+<b>1次元セルオートマトン</b>（Wolfram 1983）<br><br>
+各セルは <i>k</i> 種の状態を持ち、<u>2r+1個</u>の近傍のパターンによって次の状態が決まります。<br><br>
+<b>k=2, r=1</b> の場合、ルールは 2^(2^3)=256通り。<br>
+ルール番号はその2進数表現です。<br><br>
+<i>Rule 30</i>: カオス的・疑似乱数生成に利用<br>
+<i>Rule 90</i>: シェルピンスキー三角形<br>
+<i>Rule 110</i>: チューリング完全（万能計算機と等価）<br>
+<i>Rule 184</i>: 交通流モデル
+      </div>
+    </div>
+  </div>
+  <div class="canvas-wrap" id="wrap1d">
+    <canvas id="ca1Canvas"></canvas>
+    <div class="hint-bar">クリックで最新行を編集 / Space:再生 →:1ステップ</div>
+  </div>
+</div>
+
+<!-- ══════════ 2D PANEL ══════════ -->
+<div class="panel" id="panel2d">
+  <div class="sidebar">
+    <div class="sec">
+      <button class="play-btn" id="btn2dPlay" onclick="toggle2d()">▶ スタート</button>
+      <div style="display:flex;gap:4px;margin-top:5px;">
+        <button style="flex:1" onclick="step2d()">1ステップ</button>
+        <button style="flex:1" onclick="rand2d()">ランダム</button>
+        <button style="flex:1" onclick="clear2d()">クリア</button>
+      </div>
+    </div>
+    <div class="sec">
+      <div class="sec-title">CAタイプ</div>
+      <div class="preset-grid">
+        <button class="preset-btn on" id="type-life"       onclick="setCA2dType('life')">ライフゲーム</button>
+        <button class="preset-btn"    id="type-totalistic" onclick="setCA2dType('totalistic')">総和型</button>
+        <button class="preset-btn"    id="type-larger"     onclick="setCA2dType('larger')">Larger than Life</button>
+        <button class="preset-btn"    id="type-cyclic"     onclick="setCA2dType('cyclic')">サイクリック</button>
+        <button class="preset-btn"    id="type-custom"     onclick="setCA2dType('custom')">カスタム</button>
+      </div>
+    </div>
+    <!-- life -->
+    <div class="sec" id="sec-life">
+      <div class="sec-title">B/Sルール</div>
+      <div style="font-family:var(--font-mono);font-size:9px;color:var(--text3);margin-bottom:4px;">生存（S）</div>
+      <div id="survTags2d" style="display:flex;flex-wrap:wrap;gap:2px;margin-bottom:5px;"></div>
+      <div style="font-family:var(--font-mono);font-size:9px;color:var(--text3);margin-bottom:4px;">誕生（B）</div>
+      <div id="bornTags2d" style="display:flex;flex-wrap:wrap;gap:2px;margin-bottom:4px;"></div>
+      <div style="font-family:var(--font-mono);font-size:11px;color:var(--accent2);margin-bottom:7px;" id="lifeNotation">B3/S23</div>
+      <div class="preset-grid">
+        <button class="preset-btn" onclick="setLifeRule('23','3')">Conway</button>
+        <button class="preset-btn" onclick="setLifeRule('23','36')">HighLife</button>
+        <button class="preset-btn" onclick="setLifeRule('12345','3')">Maze</button>
+        <button class="preset-btn" onclick="setLifeRule('245','368')">Morley</button>
+        <button class="preset-btn" onclick="setLifeRule('23','3678')">Day&Night</button>
+        <button class="preset-btn" onclick="setLifeRule('45678','3')">Coral</button>
+      </div>
+    </div>
+    <!-- totalistic -->
+    <div class="sec" id="sec-totalistic" style="display:none;">
+      <div class="sec-title">総和型ルール</div>
+      <div class="sl-row">
+        <div class="sl-head"><span class="sl-name">状態数 k</span><span class="sl-val" id="kTotVal">3</span></div>
+        <input type="range" min="2" max="6" value="3" id="kTot" oninput="kTotVal.textContent=this.value;buildTotRule()">
+      </div>
+      <div style="font-family:var(--font-mono);font-size:9px;color:var(--text3);margin-bottom:5px;">合計→次状態（クリックで切替）</div>
+      <div id="totRuleDisplay" style="display:flex;flex-wrap:wrap;gap:2px;"></div>
+      <div style="display:flex;gap:3px;margin-top:7px;flex-wrap:wrap;">
+        <button style="font-size:10px;padding:3px 6px;" onclick="randTotRule()">ランダム</button>
+        <button style="font-size:10px;padding:3px 6px;" onclick="setTotPreset('brian')">Brian's Brain</button>
+        <button style="font-size:10px;padding:3px 6px;" onclick="setTotPreset('wave')">Wave</button>
+      </div>
+    </div>
+    <!-- larger -->
+    <div class="sec" id="sec-larger" style="display:none;">
+      <div class="sec-title">Larger than Life</div>
+      <div class="sl-row"><div class="sl-head"><span class="sl-name">近傍半径 R</span><span class="sl-val" id="ltlRVal">3</span></div><input type="range" min="1" max="8" value="3" id="ltlR" oninput="ltlRVal.textContent=this.value"></div>
+      <div class="sl-row"><div class="sl-head"><span class="sl-name">誕生 下限</span><span class="sl-val" id="ltlBminVal">34</span></div><input type="range" min="0" max="200" value="34" id="ltlBmin" oninput="ltlBminVal.textContent=this.value"></div>
+      <div class="sl-row"><div class="sl-head"><span class="sl-name">誕生 上限</span><span class="sl-val" id="ltlBmaxVal">58</span></div><input type="range" min="0" max="200" value="58" id="ltlBmax" oninput="ltlBmaxVal.textContent=this.value"></div>
+      <div class="sl-row"><div class="sl-head"><span class="sl-name">生存 下限</span><span class="sl-val" id="ltlSminVal">34</span></div><input type="range" min="0" max="200" value="34" id="ltlSmin" oninput="ltlSminVal.textContent=this.value"></div>
+      <div class="sl-row"><div class="sl-head"><span class="sl-name">生存 上限</span><span class="sl-val" id="ltlSmaxVal">58</span></div><input type="range" min="0" max="200" value="58" id="ltlSmax" oninput="ltlSmaxVal.textContent=this.value"></div>
+      <div style="display:flex;gap:3px;flex-wrap:wrap;">
+        <button style="font-size:10px;padding:3px 6px;" onclick="setLTLPreset('bugs')">Bugs</button>
+        <button style="font-size:10px;padding:3px 6px;" onclick="setLTLPreset('majority')">Majority</button>
+      </div>
+    </div>
+    <!-- cyclic -->
+    <div class="sec" id="sec-cyclic" style="display:none;">
+      <div class="sec-title">サイクリックCA</div>
+      <div class="sl-row"><div class="sl-head"><span class="sl-name">状態数 k</span><span class="sl-val" id="kCycVal">16</span></div><input type="range" min="3" max="32" value="16" id="kCyc" oninput="kCycVal.textContent=this.value"></div>
+      <div class="sl-row"><div class="sl-head"><span class="sl-name">閾値 θ</span><span class="sl-val" id="thCycVal">3</span></div><input type="range" min="1" max="8" value="3" id="thCyc" oninput="thCycVal.textContent=this.value"></div>
+      <div style="display:flex;gap:3px;margin-top:3px;">
+        <button id="nbMoore" class="on" style="flex:1;font-size:10px;padding:4px;" onclick="setCycNb('moore')">Moore(8)</button>
+        <button id="nbVon" style="flex:1;font-size:10px;padding:4px;" onclick="setCycNb('von')">Von N(4)</button>
+      </div>
+      <div style="display:flex;gap:3px;flex-wrap:wrap;margin-top:5px;">
+        <button style="font-size:10px;padding:3px 6px;" onclick="setCycPreset('spiral')">スパイラル</button>
+        <button style="font-size:10px;padding:3px 6px;" onclick="setCycPreset('turbulence')">乱流</button>
+      </div>
+    </div>
+    <!-- custom -->
+    <div class="sec" id="sec-custom" style="display:none;">
+      <div class="sec-title">カスタムルールテーブル</div>
+      <div class="sl-row"><div class="sl-head"><span class="sl-name">状態数 k</span><span class="sl-val" id="kCustVal">3</span></div><input type="range" min="2" max="5" value="3" id="kCust" oninput="kCustVal.textContent=this.value;buildCustomTable()"></div>
+      <div class="rule-table-wrap"><table class="rule-table" id="customTable"></table></div>
+      <div style="display:flex;gap:3px;margin-top:5px;">
+        <button style="font-size:10px;padding:3px 6px;" onclick="randCustomRule()">ランダム</button>
+        <button style="font-size:10px;padding:3px 6px;" onclick="clearCustomRule()">全0</button>
+      </div>
+    </div>
+    <div class="sec">
+      <div class="sec-title">表示</div>
+      <div class="sl-row"><div class="sl-head"><span class="sl-name">速度fps</span><span class="sl-val" id="spd2dVal">12</span></div><input type="range" min="1" max="60" value="12" id="spd2d" oninput="spd2dVal.textContent=this.value"></div>
+      <div class="sl-row"><div class="sl-head"><span class="sl-name">セルサイズ</span><span class="sl-val" id="cs2dVal">6</span></div><input type="range" min="2" max="20" value="6" id="cs2d" oninput="cs2dVal.textContent=this.value;init2dCanvas()"></div>
+    </div>
+  </div>
+  <div class="canvas-wrap" id="wrap2d">
+    <canvas id="ca2Canvas" style="cursor:crosshair;"></canvas>
+    <div class="hint-bar">クリック/ドラッグで描画 右クリックで消去 / Space:再生</div>
+  </div>
+</div>
+
+<!-- ══════════ REACTION-DIFFUSION PANEL ══════════ -->
+<div class="panel" id="panelRD">
+  <div class="sidebar">
+    <div class="sec">
+      <button class="play-btn" id="btnRDPlay" onclick="toggleRD()">▶ スタート</button>
+      <div style="display:flex;gap:4px;margin-top:5px;">
+        <button style="flex:1" onclick="stepRD()">1ステップ</button>
+        <button style="flex:1" onclick="seedRD()">シード</button>
+        <button style="flex:1" onclick="initRD()">リセット</button>
+      </div>
+    </div>
+    <div class="sec">
+      <div class="sec-title">プリセット</div>
+      <div class="preset-grid">
+        <button class="preset-btn on" id="rdp-spots"   onclick="setRDPreset('spots')">斑点（Spots）</button>
+        <button class="preset-btn"    id="rdp-stripes" onclick="setRDPreset('stripes')">縞模様</button>
+        <button class="preset-btn"    id="rdp-maze"    onclick="setRDPreset('maze')">迷宮</button>
+        <button class="preset-btn"    id="rdp-waves"   onclick="setRDPreset('waves')">波紋</button>
+        <button class="preset-btn"    id="rdp-soliton" onclick="setRDPreset('soliton')">スポット消去</button>
+        <button class="preset-btn"    id="rdp-custom"  onclick="setRDPreset('custom')">カスタム</button>
+      </div>
+    </div>
+    <div class="sec">
+      <div class="sec-title">Gray-Scott パラメータ</div>
+      <div class="sl-row"><div class="sl-head"><span class="sl-name">Feed rate f</span><span class="sl-val" id="rdFVal">0.055</span></div><input type="range" min="0.010" max="0.100" value="0.055" step="0.001" id="rdF" oninput="rdFVal.textContent=(+this.value).toFixed(3)"></div>
+      <div class="sl-row"><div class="sl-head"><span class="sl-name">Kill rate k</span><span class="sl-val" id="rdKVal">0.062</span></div><input type="range" min="0.030" max="0.080" value="0.062" step="0.001" id="rdK" oninput="rdKVal.textContent=(+this.value).toFixed(3)"></div>
+      <div class="sl-row"><div class="sl-head"><span class="sl-name">拡散 Du</span><span class="sl-val" id="rdDuVal">0.210</span></div><input type="range" min="0.05" max="0.50" value="0.210" step="0.005" id="rdDu" oninput="rdDuVal.textContent=(+this.value).toFixed(3)"></div>
+      <div class="sl-row"><div class="sl-head"><span class="sl-name">拡散 Dv</span><span class="sl-val" id="rdDvVal">0.105</span></div><input type="range" min="0.01" max="0.30" value="0.105" step="0.005" id="rdDv" oninput="rdDvVal.textContent=(+this.value).toFixed(3)"></div>
+      <div class="sl-row"><div class="sl-head"><span class="sl-name">時間刻み dt</span><span class="sl-val" id="rdDtVal">1.0</span></div><input type="range" min="0.1" max="2.0" value="1.0" step="0.1" id="rdDt" oninput="rdDtVal.textContent=(+this.value).toFixed(1)"></div>
+      <div class="sl-row"><div class="sl-head"><span class="sl-name">1フレーム反復</span><span class="sl-val" id="rdIterVal">8</span></div><input type="range" min="1" max="20" value="8" step="1" id="rdIter" oninput="rdIterVal.textContent=this.value"></div>
+    </div>
+    <div class="sec">
+      <div class="sec-title">カラーマップ</div>
+      <div class="preset-grid">
+        <button class="preset-btn on" id="cm-plasma"  onclick="setCmap('plasma')">Plasma</button>
+        <button class="preset-btn"    id="cm-viridis" onclick="setCmap('viridis')">Viridis</button>
+        <button class="preset-btn"    id="cm-inferno" onclick="setCmap('inferno')">Inferno</button>
+        <button class="preset-btn"    id="cm-bw"      onclick="setCmap('bw')">白黒</button>
+      </div>
+      <div class="cmap-bar" id="cmapBar" style="background:linear-gradient(to right,#0d0887,#7e03a8,#cc4778,#f89441,#f0f921)"></div>
+      <div class="cmap-labels"><span>0</span><span>v成分</span><span>1</span></div>
+    </div>
+    <div class="sec-explain">
+      <div class="explain-title">解説：反応拡散系</div>
+      <div class="info-box">
+<b>Gray-Scottモデル</b>（1984）は2種類の化学物質 U・V の反応と拡散をシミュレートします。<br><br>
+<u>∂U/∂t = Du∇²U − UV² + f(1−U)</u><br>
+<u>∂V/∂t = Dv∇²V + UV² − (f+k)V</u><br><br>
+<i>f</i>（Feed）: Uの供給速度<br>
+<i>k</i>（Kill）: Vの消去速度<br><br>
+f・kの値によって、<b>斑点・縞・迷宮・波紋</b>など全く異なるパターンが生まれます。これは<b>チューリングパターン</b>の数理的基盤であり、ヒョウの斑や魚の縞模様の説明にも使われます。
+      </div>
+    </div>
+  </div>
+  <div class="canvas-wrap" id="wrapRD">
+    <canvas id="rdCanvas"></canvas>
+    <div class="hint-bar">クリックでVを注入 / Space:再生</div>
+  </div>
+</div>
+
+<!-- ══════════ STOCHASTIC CA PANEL ══════════ -->
+<div class="panel" id="panelStoch">
+  <div class="sidebar">
+    <div class="sec">
+      <button class="play-btn" id="btnStochPlay" onclick="toggleStoch()">▶ スタート</button>
+      <div style="display:flex;gap:4px;margin-top:5px;">
+        <button style="flex:1" onclick="stepStoch()">1ステップ</button>
+        <button style="flex:1" onclick="randStoch()">ランダム</button>
+        <button style="flex:1" onclick="clearStoch()">クリア</button>
+      </div>
+    </div>
+    <div class="sec">
+      <div class="sec-title">モデル</div>
+      <div class="preset-grid">
+        <button class="preset-btn on" id="sm-forest"  onclick="setStochModel('forest')">山火事</button>
+        <button class="preset-btn"    id="sm-ising"   onclick="setStochModel('ising')">イジング</button>
+        <button class="preset-btn"    id="sm-voter"   onclick="setStochModel('voter')">投票モデル</button>
+        <button class="preset-btn"    id="sm-perc"    onclick="setStochModel('perc')">浸透</button>
+        <button class="preset-btn"    id="sm-schelling" onclick="setStochModel('schelling')">シェリング</button>
+        <button class="preset-btn"    id="sm-sir"     onclick="setStochModel('sir')">SIR感染</button>
+      </div>
+    </div>
+    <div class="sec" id="stoch-params">
+      <!-- filled dynamically -->
+    </div>
+    <div class="sec-explain">
+      <div class="explain-title">解説</div>
+      <div class="info-box" id="stochExplain">モデルを選択してください</div>
+    </div>
+  </div>
+  <div class="canvas-wrap" id="wrapStoch">
+    <canvas id="stochCanvas" style="cursor:crosshair;"></canvas>
+    <div class="hint-bar">クリックで描画 / Space:再生</div>
+  </div>
+</div>
+
+<!-- ══════════ MULTI-LAYER PANEL ══════════ -->
+<div class="panel" id="panelMulti">
+  <div class="sidebar">
+    <div class="sec">
+      <button class="play-btn" id="btnMultiPlay" onclick="toggleMulti()">▶ スタート</button>
+      <div style="display:flex;gap:4px;margin-top:5px;">
+        <button style="flex:1" onclick="stepMulti()">1ステップ</button>
+        <button style="flex:1" onclick="randMulti()">ランダム</button>
+        <button style="flex:1" onclick="clearMulti()">クリア</button>
+      </div>
+    </div>
+    <div class="sec">
+      <div class="sec-title">モデル</div>
+      <div class="preset-grid">
+        <button class="preset-btn on" id="mm-predprey" onclick="setMultiModel('predprey')">捕食者-被食者</button>
+        <button class="preset-btn"    id="mm-excite"   onclick="setMultiModel('excite')">興奮性媒体</button>
+        <button class="preset-btn"    id="mm-compete"  onclick="setMultiModel('compete')">競合コロニー</button>
+      </div>
+    </div>
+    <div class="sec" id="multi-params"></div>
+    <div class="sec">
+      <div class="sec-title">表示レイヤー</div>
+      <div id="multiLayerBtns" style="display:flex;gap:3px;flex-wrap:wrap;"></div>
+    </div>
+    <div class="sec-explain">
+      <div class="explain-title">解説</div>
+      <div class="info-box" id="multiExplain">モデルを選択してください</div>
+    </div>
+  </div>
+  <div class="canvas-wrap" id="wrapMulti">
+    <canvas id="multiCanvas"></canvas>
+    <div class="hint-bar">Space:再生 / →:1ステップ</div>
+  </div>
+</div>
+
+<!-- ══════════ CONTINUOUS CA PANEL ══════════ -->
+<div class="panel" id="panelCont">
+  <div class="sidebar">
+    <div class="sec">
+      <button class="play-btn" id="btnContPlay" onclick="toggleCont()">▶ スタート</button>
+      <div style="display:flex;gap:4px;margin-top:5px;">
+        <button style="flex:1" onclick="stepCont()">1ステップ</button>
+        <button style="flex:1" onclick="randCont()">ランダム</button>
+        <button style="flex:1" onclick="clearCont()">クリア</button>
+      </div>
+    </div>
+    <div class="sec">
+      <div class="sec-title">モデル</div>
+      <div class="preset-grid">
+        <button class="preset-btn on" id="cm2-lenia"   onclick="setContModel('lenia')">Lenia</button>
+        <button class="preset-btn"    id="cm2-smooth"  onclick="setContModel('smooth')">SmoothLife</button>
+        <button class="preset-btn"    id="cm2-wave"    onclick="setContModel('wave')">波動方程式</button>
+        <button class="preset-btn"    id="cm2-coupled" onclick="setContModel('coupled')">結合振動子</button>
+      </div>
+    </div>
+    <div class="sec" id="cont-params"></div>
+    <div class="sec">
+      <div class="sec-title">カラーマップ</div>
+      <div class="preset-grid">
+        <button class="preset-btn on" id="cmc-plasma"  onclick="setContCmap('plasma')">Plasma</button>
+        <button class="preset-btn"    id="cmc-viridis" onclick="setContCmap('viridis')">Viridis</button>
+        <button class="preset-btn"    id="cmc-inferno" onclick="setContCmap('inferno')">Inferno</button>
+        <button class="preset-btn"    id="cmc-bw"      onclick="setContCmap('bw')">白黒</button>
+      </div>
+    </div>
+    <div class="sec-explain">
+      <div class="explain-title">解説</div>
+      <div class="info-box" id="contExplain">モデルを選択してください</div>
+    </div>
+  </div>
+  <div class="canvas-wrap" id="wrapCont">
+    <canvas id="contCanvas" style="cursor:crosshair;"></canvas>
+    <div class="hint-bar">クリックで状態を注入 / Space:再生</div>
+  </div>
+</div>
+
+</div><!-- /app-body -->
+<script>
+// ═══════════════════════════════════════════
+//  SHARED UTILS
+// ═══════════════════════════════════════════
+let currentTab='1d';
+function switchTab(t){
+  currentTab=t;
+  const tabs={
+    '1d':'panel1d','2d':'panel2d','rd':'panelRD',
+    'stoch':'panelStoch','multi':'panelMulti','cont':'panelCont'
+  };
+  Object.keys(tabs).forEach(k=>{
+    document.getElementById('tab'+k.charAt(0).toUpperCase()+k.slice(1))?.classList.toggle('active',k===t);
+    if(k==='1d') document.getElementById('tab1d')?.classList.toggle('active',t==='1d');
+    if(k==='2d') document.getElementById('tab2d')?.classList.toggle('active',t==='2d');
+    if(k==='rd') document.getElementById('tabRD')?.classList.toggle('active',t==='rd');
+    if(k==='stoch') document.getElementById('tabStoch')?.classList.toggle('active',t==='stoch');
+    if(k==='multi') document.getElementById('tabMulti')?.classList.toggle('active',t==='multi');
+    if(k==='cont') document.getElementById('tabCont')?.classList.toggle('active',t==='cont');
+    document.getElementById(tabs[k])?.classList.toggle('active',k===t);
+  });
+  if(t==='rd') setTimeout(initRDCanvas,20);
+  if(t==='stoch') setTimeout(initStochCanvas,20);
+  if(t==='multi') setTimeout(initMultiCanvas,20);
+  if(t==='cont') setTimeout(initContCanvas,20);
+  if(t==='2d') setTimeout(init2dCanvas,20);
+}
+function openPick(id){const el=document.getElementById(id);el.style.pointerEvents='auto';el.click();setTimeout(()=>el.style.pointerEvents='none',100);}
+function clamp(v,a,b){return Math.max(a,Math.min(b,v));}
+function lerpHex(a,b,t){
+  const [ar,ag,ab]=[parseInt(a.slice(1,3),16),parseInt(a.slice(3,5),16),parseInt(a.slice(5,7),16)];
+  const [br,bg,bb]=[parseInt(b.slice(1,3),16),parseInt(b.slice(3,5),16),parseInt(b.slice(5,7),16)];
+  return '#'+[ar+(br-ar)*t,ag+(bg-ag)*t,ab+(bb-ab)*t].map(v=>(v|0).toString(16).padStart(2,'0')).join('');
+}
+
+// Colormaps
+const CMAPS={
+  plasma:(t)=>{const stops=[{t:0,r:13,g:8,b:135},{t:.25,r:126,g:3,b:168},{t:.5,r:204,g:71,b:120},{t:.75,r:248,g:148,b:65},{t:1,r:240,g:249,b:33}];return cmapInterp(stops,t);},
+  viridis:(t)=>{const stops=[{t:0,r:68,g:1,b:84},{t:.25,r:59,g:82,b:139},{t:.5,r:33,g:145,b:140},{t:.75,r:94,g:201,b:98},{t:1,r:253,g:231,b:37}];return cmapInterp(stops,t);},
+  inferno:(t)=>{const stops=[{t:0,r:0,g:0,b:4},{t:.25,r:87,g:16,b:110},{t:.5,r:188,g:55,b:84},{t:.75,r:249,g:142,b:9},{t:1,r:252,g:255,b:164}];return cmapInterp(stops,t);},
+  bw:(t)=>{const v=t*255|0;return [v,v,v];}
+};
+function cmapInterp(stops,t){
+  let s0=stops[0],s1=stops[stops.length-1];
+  for(let i=0;i<stops.length-1;i++){if(t>=stops[i].t&&t<=stops[i+1].t){s0=stops[i];s1=stops[i+1];break;}}
+  const f=(t-s0.t)/(s1.t-s0.t||1);
+  return [s0.r+(s1.r-s0.r)*f|0,s0.g+(s1.g-s0.g)*f|0,s0.b+(s1.b-s0.b)*f|0];
+}
+
+window.addEventListener('keydown',e=>{
+  if(e.code==='Space'){e.preventDefault();
+    if(currentTab==='1d')toggle1d();
+    else if(currentTab==='2d')toggle2d();
+    else if(currentTab==='rd')toggleRD();
+    else if(currentTab==='stoch')toggleStoch();
+    else if(currentTab==='multi')toggleMulti();
+    else if(currentTab==='cont')toggleCont();
+  }else if(e.code==='ArrowRight'){
+    if(currentTab==='1d')step1d();
+    else if(currentTab==='2d')step2d();
+    else if(currentTab==='rd')stepRD();
+    else if(currentTab==='stoch')stepStoch();
+    else if(currentTab==='multi')stepMulti();
+    else if(currentTab==='cont')stepCont();
+  }
+});
+
+// ═══════════════════════════════════════════
+//  1D CA
+// ═══════════════════════════════════════════
+const c1=document.getElementById('ca1Canvas'),x1=c1.getContext('2d');
+let W1=0,CS1=4,rule1d=[],k1=2,r1=1,ruleSize=0;
+let row1d=[],history1d=[],running1d=false,timer1d=null,gen1d=0;
+let init1dMode='single',color1d={alive:'#6c63ff',bg:'#07080f'};
+
+function rebuild1dRule(){k1=+document.getElementById('k1d').value;r1=+document.getElementById('r1d').value;ruleSize=Math.pow(k1,2*r1+1);setRuleFromNum(+document.getElementById('ruleNum').value);}
+function setRuleFromNum(n){
+  document.getElementById('ruleNum').value=n;
+  k1=+document.getElementById('k1d').value;r1=+document.getElementById('r1d').value;ruleSize=Math.pow(k1,2*r1+1);
+  let tmp=Math.max(0,Math.min(n,Math.pow(k1,ruleSize)-1));rule1d=[];
+  for(let i=0;i<ruleSize;i++){rule1d.push(tmp%k1);tmp=Math.floor(tmp/k1);}
+  buildRuleDisplay();
+}
+function randRule1d(){k1=+document.getElementById('k1d').value;r1=+document.getElementById('r1d').value;ruleSize=Math.pow(k1,2*r1+1);rule1d=Array.from({length:ruleSize},()=>Math.floor(Math.random()*k1));let n=0;for(let i=ruleSize-1;i>=0;i--)n=n*k1+rule1d[i];document.getElementById('ruleNum').value=n;buildRuleDisplay();}
+function buildRuleDisplay(){
+  const el=document.getElementById('ruleDisplay');el.innerHTML='';const nc=2*r1+1;
+  for(let i=ruleSize-1;i>=0;i--){
+    const div=document.createElement('div');div.className='rule-bit'+(rule1d[i]>0?' active-bit':'');
+    const pat=document.createElement('div');pat.className='pattern';
+    let tmp=i;for(let j=0;j<nc;j++){const s=tmp%k1;tmp=Math.floor(tmp/k1);const cell=document.createElement('div');cell.className='cell-mini';cell.style.background=sc1d(s);pat.appendChild(cell);}
+    const out=document.createElement('div');out.className='output';out.style.background=sc1d(rule1d[i]);
+    div.appendChild(pat);div.appendChild(out);
+    const idx=i;div.onclick=()=>{rule1d[idx]=(rule1d[idx]+1)%k1;let n=0;for(let j=ruleSize-1;j>=0;j--)n=n*k1+rule1d[j];document.getElementById('ruleNum').value=n;buildRuleDisplay();};
+    el.appendChild(div);
+  }
+}
+function sc1d(s){if(s===0)return color1d.bg;if(k1===2)return color1d.alive;return lerpHex(color1d.bg,color1d.alive,s/(k1-1));}
+function set1dColor(k,v){color1d[k]=v;document.getElementById('sw1d'+k[0].toUpperCase()+k.slice(1))?.style&&(document.getElementById('sw1d'+k[0].toUpperCase()+k.slice(1)).style.background=v);if(k==='bg')document.getElementById('wrap1d').style.background=v;buildRuleDisplay();redraw1d();}
+function init1dCanvas(){CS1=+document.getElementById('cs1d').value;const wrap=document.getElementById('wrap1d');c1.width=wrap.clientWidth;c1.height=wrap.clientHeight;W1=Math.floor(c1.width/CS1);reset1d();}
+function makeInitRow(){const row=new Uint8Array(W1);if(init1dMode==='single')row[Math.floor(W1/2)]=1;else if(init1dMode==='left')row[0]=1;else if(init1dMode==='random')for(let i=0;i<W1;i++)row[i]=Math.floor(Math.random()*k1);else if(init1dMode==='alt')for(let i=0;i<W1;i++)row[i]=i%k1;return row;}
+function reset1d(){gen1d=0;document.getElementById('genVal').textContent='0';row1d=makeInitRow();history1d=[new Uint8Array(row1d)];redraw1d();}
+function clear1d(){row1d=new Uint8Array(W1);gen1d=0;history1d=[];history1d.push(new Uint8Array(row1d));redraw1d();}
+function step1d(){
+  const nc=2*r1+1,next=new Uint8Array(W1);
+  for(let c=0;c<W1;c++){let idx=0;for(let j=0;j<nc;j++)idx+=row1d[(c-r1+j+W1)%W1]*Math.pow(k1,j);next[c]=rule1d[Math.round(idx)]??0;}
+  row1d=next;gen1d++;document.getElementById('genVal').textContent=gen1d;
+  history1d.push(new Uint8Array(row1d));
+  const maxR=Math.floor(c1.height/CS1);if(history1d.length>maxR)history1d.shift();
+  redraw1d();
+}
+function redraw1d(){x1.fillStyle=color1d.bg;x1.fillRect(0,0,c1.width,c1.height);history1d.forEach((row,ri)=>{for(let c=0;c<W1;c++){if(!row[c])continue;x1.fillStyle=sc1d(row[c]);x1.fillRect(c*CS1,ri*CS1,CS1,CS1);}});}
+function toggle1d(){running1d=!running1d;const btn=document.getElementById('btn1dPlay');if(running1d){btn.textContent='■ ストップ';btn.classList.add('running');timer1d=setInterval(step1d,1000/+document.getElementById('spd1d').value);}else{btn.textContent='▶ スタート';btn.classList.remove('running');clearInterval(timer1d);}}
+function setInit(m){init1dMode=m;['single','random','left','alt'].forEach(k=>document.getElementById('init-'+k).classList.toggle('on',k===m));reset1d();}
+c1.addEventListener('click',e=>{const row=history1d[history1d.length-1];const c=Math.floor(e.offsetX/CS1);if(c>=0&&c<W1){row[c]=(row[c]+1)%k1;redraw1d();}});
+
+// ═══════════════════════════════════════════
+//  2D CA
+// ═══════════════════════════════════════════
+const c2=document.getElementById('ca2Canvas'),x2=c2.getContext('2d');
+let CS2=6,COLS2=0,ROWS2=0,N2=0,grid2,next2;
+let running2d=false,timer2d=null,gen2d=0,ca2dType='life';
+let survive2d=new Set([2,3]),born2d=new Set([3]),cycNb='moore';
+let totRule=[],customRule=[];
+const SP2=['#07080f','#6c63ff','#1fb885','#e05252','#e0a832','#38c8e0','#ff63a5','#a89bff','#63ffdd'];
+
+function init2dCanvas(){CS2=+document.getElementById('cs2d').value;const w=document.getElementById('wrap2d');c2.width=w.clientWidth;c2.height=w.clientHeight;COLS2=Math.floor(c2.width/CS2);ROWS2=Math.floor(c2.height/CS2);N2=ROWS2*COLS2;grid2=new Uint8Array(N2);next2=new Uint8Array(N2);gen2d=0;document.getElementById('genVal').textContent='0';draw2d();}
+function getK2d(){if(ca2dType==='totalistic')return +document.getElementById('kTot').value;if(ca2dType==='cyclic')return +document.getElementById('kCyc').value;if(ca2dType==='custom')return +document.getElementById('kCust').value;return 2;}
+function draw2d(){
+  const img=x2.createImageData(c2.width,c2.height);const d=img.data;const W=c2.width;
+  for(let r=0;r<ROWS2;r++)for(let c=0;c<COLS2;c++){const i=r*COLS2+c;if(!grid2[i])continue;const col=SP2[grid2[i]%SP2.length];const R=parseInt(col.slice(1,3),16),G=parseInt(col.slice(3,5),16),B=parseInt(col.slice(5,7),16);const csm=CS2-1;for(let dy=0;dy<csm;dy++)for(let dx=0;dx<csm;dx++){const px=((r*CS2+dy)*W+(c*CS2+dx))*4;d[px]=R;d[px+1]=G;d[px+2]=B;d[px+3]=255;}}
+  x2.fillStyle='#07080f';x2.fillRect(0,0,c2.width,c2.height);x2.putImageData(img,0,0);
+}
+function mns(r,c){let n=0;for(let dr=-1;dr<=1;dr++)for(let dc=-1;dc<=1;dc++){if(!dr&&!dc)continue;n+=grid2[((r+dr+ROWS2)%ROWS2)*COLS2+(c+dc+COLS2)%COLS2];}return n;}
+function stepLife(){for(let r=0;r<ROWS2;r++)for(let c=0;c<COLS2;c++){const i=r*COLS2+c,n=mns(r,c);next2[i]=grid2[i]?survive2d.has(n)?1:0:born2d.has(n)?1:0;}const t=grid2;grid2=next2;next2=t;}
+function stepTotalistic(){const k=+document.getElementById('kTot').value,ms=8*(k-1);for(let r=0;r<ROWS2;r++)for(let c=0;c<COLS2;c++){const i=r*COLS2+c,s=mns(r,c),cur=grid2[i];next2[i]=totRule[cur*(ms+1)+s]??0;}const t=grid2;grid2=next2;next2=t;}
+function stepLarger(){const R=+document.getElementById('ltlR').value,bmin=+document.getElementById('ltlBmin').value,bmax=+document.getElementById('ltlBmax').value,smin=+document.getElementById('ltlSmin').value,smax=+document.getElementById('ltlSmax').value;for(let r=0;r<ROWS2;r++)for(let c=0;c<COLS2;c++){let n=0;for(let dr=-R;dr<=R;dr++)for(let dc=-R;dc<=R;dc++){if(!dr&&!dc)continue;n+=grid2[((r+dr+ROWS2)%ROWS2)*COLS2+(c+dc+COLS2)%COLS2];}const a=grid2[r*COLS2+c];next2[r*COLS2+c]=a?(n>=smin&&n<=smax?1:0):(n>=bmin&&n<=bmax?1:0);}const t=grid2;grid2=next2;next2=t;}
+function stepCyclic(){const k=+document.getElementById('kCyc').value,th=+document.getElementById('thCyc').value;for(let r=0;r<ROWS2;r++)for(let c=0;c<COLS2;c++){const i=r*COLS2+c,cur=grid2[i],succ=(cur+1)%k;let cnt=0;if(cycNb==='moore'){for(let dr=-1;dr<=1;dr++)for(let dc=-1;dc<=1;dc++){if(!dr&&!dc)continue;if(grid2[((r+dr+ROWS2)%ROWS2)*COLS2+(c+dc+COLS2)%COLS2]===succ)cnt++;}}else{[[-1,0],[1,0],[0,-1],[0,1]].forEach(([dr,dc])=>{if(grid2[((r+dr+ROWS2)%ROWS2)*COLS2+(c+dc+COLS2)%COLS2]===succ)cnt++;});}next2[i]=cnt>=th?succ:cur;}const t=grid2;grid2=next2;next2=t;}
+function stepCustom(){const k=+document.getElementById('kCust').value,ms=8*(k-1);for(let r=0;r<ROWS2;r++)for(let c=0;c<COLS2;c++){const i=r*COLS2+c,s=mns(r,c),cur=grid2[i];next2[i]=customRule[cur*(ms+1)+s]??0;}const t=grid2;grid2=next2;next2=t;}
+function step2d(){if(ca2dType==='life')stepLife();else if(ca2dType==='totalistic')stepTotalistic();else if(ca2dType==='larger')stepLarger();else if(ca2dType==='cyclic')stepCyclic();else if(ca2dType==='custom')stepCustom();gen2d++;document.getElementById('genVal').textContent=gen2d.toLocaleString();draw2d();}
+function toggle2d(){running2d=!running2d;const btn=document.getElementById('btn2dPlay');if(running2d){btn.textContent='■ ストップ';btn.classList.add('running');timer2d=setInterval(step2d,1000/+document.getElementById('spd2d').value);}else{btn.textContent='▶ スタート';btn.classList.remove('running');clearInterval(timer2d);}}
+function rand2d(){const k=getK2d();for(let i=0;i<N2;i++)grid2[i]=Math.floor(Math.random()*k);gen2d=0;document.getElementById('genVal').textContent='0';draw2d();}
+function clear2d(){grid2.fill(0);gen2d=0;document.getElementById('genVal').textContent='0';draw2d();}
+function setLifeRule(s,b){survive2d=new Set(s.split('').map(Number));born2d=new Set(b.split('').map(Number));buildLifeTags();}
+function buildLifeTags(){['surv','born'].forEach(type=>{const el=document.getElementById(type+'Tags2d');el.innerHTML='';const s=type==='surv'?survive2d:born2d;for(let i=0;i<=8;i++){const tag=document.createElement('button');tag.style.cssText='font-family:var(--font-mono);font-size:10px;background:transparent;border:1px solid var(--border);color:var(--text3);padding:3px 2px;border-radius:2px;cursor:pointer;min-width:19px;';if(s.has(i))tag.style.cssText+='border-color:var(--accent);color:var(--accent);background:rgba(108,99,255,.13);';tag.textContent=i;tag.onclick=()=>{s.has(i)?s.delete(i):s.add(i);buildLifeTags();document.getElementById('lifeNotation').textContent='B'+[...born2d].sort((a,b)=>a-b).join('')+'/S'+[...survive2d].sort((a,b)=>a-b).join('');};el.appendChild(tag);}});document.getElementById('lifeNotation').textContent='B'+[...born2d].sort((a,b)=>a-b).join('')+'/S'+[...survive2d].sort((a,b)=>a-b).join('');}
+function buildTotRule(){const k=+document.getElementById('kTot').value,ms=8*(k-1);if(totRule.length!==k*(ms+1))totRule=new Uint8Array(k*(ms+1));renderTotDisplay();}
+function renderTotDisplay(){const k=+document.getElementById('kTot').value,ms=8*(k-1);const el=document.getElementById('totRuleDisplay');el.innerHTML='';for(let s=0;s<k;s++){const row=document.createElement('div');row.style.cssText='display:flex;gap:2px;align-items:center;margin-bottom:2px;';const lbl=document.createElement('span');lbl.style.cssText='font-family:var(--font-mono);font-size:9px;color:var(--text3);width:12px;';lbl.textContent=s+':';row.appendChild(lbl);for(let sum=0;sum<=ms;sum++){const box=document.createElement('div');box.className='rule-cell';box.style.background=SP2[totRule[s*(ms+1)+sum]]||SP2[0];box.title='s='+s+' Σ='+sum+' →'+totRule[s*(ms+1)+sum];const idx=s*(ms+1)+sum;box.onclick=()=>{totRule[idx]=(totRule[idx]+1)%k;renderTotDisplay();};row.appendChild(box);}el.appendChild(row);}}
+function randTotRule(){const k=+document.getElementById('kTot').value,ms=8*(k-1);totRule=new Uint8Array(k*(ms+1));for(let i=0;i<totRule.length;i++)totRule[i]=Math.floor(Math.random()*k);renderTotDisplay();}
+function setTotPreset(n){const k=3;document.getElementById('kTot').value=3;document.getElementById('kTotVal').textContent=3;const ms=8*(k-1);totRule=new Uint8Array(k*(ms+1));if(n==='brian'){for(let s=0;s<=ms;s++){totRule[0*(ms+1)+s]=s===2?1:0;totRule[1*(ms+1)+s]=2;totRule[2*(ms+1)+s]=0;}}else if(n==='wave'){for(let st=0;st<k;st++)for(let s=0;s<=ms;s++)totRule[st*(ms+1)+s]=(s+st)%k;}renderTotDisplay();}
+function buildCustomTable(){const k=+document.getElementById('kCust').value,ms=8*(k-1);if(customRule.length!==k*(ms+1))customRule=new Uint8Array(k*(ms+1));const tbl=document.getElementById('customTable');tbl.innerHTML='';const thead=document.createElement('thead');let hr=document.createElement('tr');let th=document.createElement('th');th.textContent='S\\Σ';hr.appendChild(th);for(let s=0;s<=ms;s+=2){th=document.createElement('th');th.textContent=s;hr.appendChild(th);}thead.appendChild(hr);tbl.appendChild(thead);const tb=document.createElement('tbody');for(let st=0;st<k;st++){const tr=document.createElement('tr');let td=document.createElement('td');td.style.cssText='font-family:var(--font-mono);font-size:10px;color:'+SP2[st]+';';td.textContent=st;tr.appendChild(td);for(let s=0;s<=ms;s+=2){td=document.createElement('td');const box=document.createElement('div');box.className='rule-cell';box.style.background=SP2[customRule[st*(ms+1)+s]]||SP2[0];const idx=st*(ms+1)+s;box.onclick=()=>{customRule[idx]=(customRule[idx]+1)%k;buildCustomTable();};td.appendChild(box);tr.appendChild(td);}tb.appendChild(tr);}tbl.appendChild(tb);}
+function randCustomRule(){const k=+document.getElementById('kCust').value,ms=8*(k-1);customRule=new Uint8Array(k*(ms+1));for(let i=0;i<customRule.length;i++)customRule[i]=Math.floor(Math.random()*k);buildCustomTable();}
+function clearCustomRule(){const k=+document.getElementById('kCust').value,ms=8*(k-1);customRule=new Uint8Array(k*(ms+1));buildCustomTable();}
+function setLTLPreset(n){if(n==='bugs'){['ltlR','ltlBmin','ltlBmax','ltlSmin','ltlSmax'].forEach((id,i)=>{const vs=[5,34,58,34,58];document.getElementById(id).value=vs[i];document.getElementById(id+'Val').textContent=vs[i];});}else{['ltlR','ltlBmin','ltlBmax','ltlSmin','ltlSmax'].forEach((id,i)=>{const vs=[3,25,48,25,48];document.getElementById(id).value=vs[i];document.getElementById(id+'Val').textContent=vs[i];});}}
+function setCycNb(nb){cycNb=nb;document.getElementById('nbMoore').classList.toggle('on',nb==='moore');document.getElementById('nbVon').classList.toggle('on',nb==='von');}
+function setCycPreset(n){if(n==='spiral'){document.getElementById('kCyc').value=16;document.getElementById('kCycVal').textContent=16;document.getElementById('thCyc').value=3;document.getElementById('thCycVal').textContent=3;setCycNb('moore');}else{document.getElementById('kCyc').value=8;document.getElementById('kCycVal').textContent=8;document.getElementById('thCyc').value=2;document.getElementById('thCycVal').textContent=2;setCycNb('von');}}
+function setCA2dType(t){ca2dType=t;['life','totalistic','larger','cyclic','custom'].forEach(k=>{document.getElementById('type-'+k).classList.toggle('on',k===t);document.getElementById('sec-'+k).style.display=k===t?'':'none';});clear2d();}
+let painting2d=false,paintVal2d=1;
+c2.addEventListener('mousedown',e=>{e.preventDefault();painting2d=true;const r=Math.floor(e.offsetY/CS2),c=Math.floor(e.offsetX/CS2);if(r>=0&&r<ROWS2&&c>=0&&c<COLS2){const k=getK2d();paintVal2d=e.button===2?0:k>2?(grid2[r*COLS2+c]+1)%k:(grid2[r*COLS2+c]?0:1);grid2[r*COLS2+c]=paintVal2d;draw2d();}});
+c2.addEventListener('mousemove',e=>{if(!painting2d)return;const r=Math.floor(e.offsetY/CS2),c=Math.floor(e.offsetX/CS2);if(r>=0&&r<ROWS2&&c>=0&&c<COLS2){grid2[r*COLS2+c]=paintVal2d;draw2d();}});
+c2.addEventListener('contextmenu',e=>e.preventDefault());
+document.addEventListener('mouseup',()=>{painting2d=false;paintingRD=false;paintingStoch=false;paintingCont=false;});
+
+// ═══════════════════════════════════════════
+//  REACTION-DIFFUSION (Gray-Scott)
+// ═══════════════════════════════════════════
+const rdC=document.getElementById('rdCanvas'),rdX=rdC.getContext('2d');
+let rdW=0,rdH=0,rdU,rdV,rdU2,rdV2,rdN=0;
+let runningRD=false,timerRD=null,genRD=0;
+let rdCmap='plasma';
+let paintingRD=false;
+
+const RD_PRESETS={
+  spots:{f:0.055,k:0.062,du:0.210,dv:0.105},
+  stripes:{f:0.026,k:0.051,du:0.210,dv:0.105},
+  maze:{f:0.029,k:0.057,du:0.210,dv:0.105},
+  waves:{f:0.014,k:0.054,du:0.210,dv:0.105},
+  soliton:{f:0.038,k:0.061,du:0.210,dv:0.105},
+  custom:{f:0.055,k:0.062,du:0.210,dv:0.105}
+};
+
+function initRDCanvas(){
+  const wrap=document.getElementById('wrapRD');
+  const scale=3;
+  rdW=Math.floor(wrap.clientWidth/scale);rdH=Math.floor(wrap.clientHeight/scale);
+  rdC.width=wrap.clientWidth;rdC.height=wrap.clientHeight;
+  rdN=rdW*rdH;
+  rdU=new Float32Array(rdN).fill(1);
+  rdV=new Float32Array(rdN);
+  rdU2=new Float32Array(rdN);rdV2=new Float32Array(rdN);
+  genRD=0;document.getElementById('genVal').textContent='0';
+  seedRD();
+}
+
+function seedRD(){
+  rdU.fill(1);rdV.fill(0);
+  const cx=rdW>>1,cy=rdH>>1,rad=5;
+  for(let dr=-rad;dr<=rad;dr++)for(let dc=-rad;dc<=rad;dc++){
+    if(dr*dr+dc*dc>rad*rad)continue;
+    const i=(cy+dr)*rdW+(cx+dc);
+    if(i>=0&&i<rdN){rdU[i]=0.5;rdV[i]=0.25+Math.random()*0.1;}
+  }
+  drawRD();
+}
+
+function setRDPreset(name){
+  Object.keys(RD_PRESETS).forEach(k=>document.getElementById('rdp-'+k)?.classList.toggle('on',k===name));
+  const p=RD_PRESETS[name]||RD_PRESETS.spots;
+  document.getElementById('rdF').value=p.f;document.getElementById('rdFVal').textContent=p.f.toFixed(3);
+  document.getElementById('rdK').value=p.k;document.getElementById('rdKVal').textContent=p.k.toFixed(3);
+  document.getElementById('rdDu').value=p.du;document.getElementById('rdDuVal').textContent=p.du.toFixed(3);
+  document.getElementById('rdDv').value=p.dv;document.getElementById('rdDvVal').textContent=p.dv.toFixed(3);
+  initRDCanvas();
+}
+
+function initRD(){initRDCanvas();}
+
+function setCmap(cm){
+  rdCmap=cm;
+  ['plasma','viridis','inferno','bw'].forEach(c=>document.getElementById('cm-'+c).classList.toggle('on',c===cm));
+  const gradMap={plasma:'#0d0887,#7e03a8,#cc4778,#f89441,#f0f921',viridis:'#440154,#3b5289,#21918c,#5ec962,#fde725',inferno:'#000004,#57106e,#bc3754,#f98e09,#fcffa4',bw:'#000,#fff'};
+  document.getElementById('cmapBar').style.background='linear-gradient(to right,'+gradMap[cm]+')';
+}
+
+function laplacian(A,i){
+  const r=Math.floor(i/rdW),c=i%rdW;
+  const up=((r-1+rdH)%rdH)*rdW+c,dn=((r+1)%rdH)*rdW+c;
+  const lt=r*rdW+(c-1+rdW)%rdW,rt=r*rdW+(c+1)%rdW;
+  return A[up]+A[dn]+A[lt]+A[rt]-4*A[i];
+}
+
+function stepRD(){
+  const f=+document.getElementById('rdF').value;
+  const k=+document.getElementById('rdK').value;
+  const Du=+document.getElementById('rdDu').value;
+  const Dv=+document.getElementById('rdDv').value;
+  const dt=+document.getElementById('rdDt').value;
+  const iters=+document.getElementById('rdIter').value;
+  for(let it=0;it<iters;it++){
+    for(let i=0;i<rdN;i++){
+      const u=rdU[i],v=rdV[i],uvv=u*v*v;
+      rdU2[i]=u+dt*(Du*laplacian(rdU,i)-uvv+f*(1-u));
+      rdV2[i]=v+dt*(Dv*laplacian(rdV,i)+uvv-(f+k)*v);
+    }
+    const tu=rdU;rdU=rdU2;rdU2=tu;
+    const tv=rdV;rdV=rdV2;rdV2=tv;
+  }
+  genRD++;document.getElementById('genVal').textContent=genRD.toLocaleString();
+  drawRD();
+}
+
+function drawRD(){
+  const imgData=rdX.createImageData(rdC.width,rdC.height);const d=imgData.data;
+  const scale=rdC.width/rdW;
+  const cm=CMAPS[rdCmap]||CMAPS.plasma;
+  for(let r=0;r<rdH;r++)for(let c=0;c<rdW;c++){
+    const v=clamp(rdV[r*rdW+c],0,1);
+    const [R,G,B]=cm(v);
+    const px=(r*rdC.width+c)|0;
+    const scale2=rdC.width/rdW|0;
+    for(let dy=0;dy<scale2;dy++)for(let dx=0;dx<scale2;dx++){
+      const p=((r*scale2+dy)*rdC.width+(c*scale2+dx))*4;
+      d[p]=R;d[p+1]=G;d[p+2]=B;d[p+3]=255;
+    }
+  }
+  rdX.putImageData(imgData,0,0);
+}
+
+function toggleRD(){runningRD=!runningRD;const btn=document.getElementById('btnRDPlay');if(runningRD){btn.textContent='■ ストップ';btn.classList.add('running');timerRD=requestAnimationFrame(rdLoop);}else{btn.textContent='▶ スタート';btn.classList.remove('running');}}
+function rdLoop(){if(!runningRD)return;stepRD();timerRD=requestAnimationFrame(rdLoop);}
+
+rdC.addEventListener('mousedown',e=>{paintingRD=true;injectRD(e);});
+rdC.addEventListener('mousemove',e=>{if(paintingRD)injectRD(e);});
+function injectRD(e){
+  const scale=rdC.width/rdW;
+  const cx=Math.floor(e.offsetX/scale),cy=Math.floor(e.offsetY/scale);
+  const rad=3;
+  for(let dr=-rad;dr<=rad;dr++)for(let dc=-rad;dc<=rad;dc++){
+    const i=(cy+dr)*rdW+(cx+dc);
+    if(i>=0&&i<rdN){rdU[i]=0.5;rdV[i]=0.25+Math.random()*0.1;}
+  }
+  drawRD();
+}
+
+// ═══════════════════════════════════════════
+//  STOCHASTIC CA
+// ═══════════════════════════════════════════
+const stC=document.getElementById('stochCanvas'),stX=stC.getContext('2d');
+let stW=0,stH=0,stN=0,stGrid,stNext;
+let runningStoch=false,timerStoch=null,genStoch=0;
+let stochModel='forest';
+let paintingStoch=false;
+
+const STOCH_EXPLAINS={
+  forest:'<b>山火事モデル</b>（Forest Fire）<br><br>緑: 木 / 赤: 炎 / 黒: 焼け跡<br><br><i>p</i>: 木が自然発生する確率<br><i>f</i>: 木が自然発火する確率<br><br>近傍に炎があれば燃え移ります。p≫f のとき、周期的な火災パターンが現れます。',
+  ising:'<b>イジングモデル</b>（確率的）<br><br>磁性体の簡易モデル。各セルはスピン +1/-1 を持ちます。<br><br><i>T</i>: 温度。低いほど整列（強磁性）、高いほどランダム。<br><br>T≈2.27 付近で<u>相転移</u>が起こります。',
+  voter:'<b>投票モデル</b>（Voter Model）<br><br>意見の伝播モデル。各ステップでランダムに1セルを選び、そのランダムな隣人の意見を採用します。<br><br>2つの意見（色）が競合し、最終的に一方が広がります。',
+  perc:'<b>浸透モデル</b>（Site Percolation）<br><br><i>p</i>: 各サイトが「開いている」確率<br><br>p > p_c (≈0.593) のとき、上から下へ液体が浸透するクラスターが形成されます。',
+  schelling:'<b>シェリング分離モデル</b>（1971）<br><br>個人が「同類の割合がf以上の近傍」を好む場合、全体として強い<u>居住分離</u>が生じることを示します。<br><br>局所的な嗜好が大域的分離を引き起こす、社会科学の古典モデルです。',
+  sir:'<b>SIR感染モデル</b><br><br>緑: 感受性（Susceptible）<br>赤: 感染（Infected）<br>青: 回復（Recovered）<br><br><i>β</i>: 感染確率 / <i>γ</i>: 回復確率<br><br>感染が広がり、免疫集団（青）が増えると収束します。'
+};
+
+const STOCH_PARAMS_HTML={
+  forest:`<div class="sl-row"><div class="sl-head"><span class="sl-name">発芽率 p</span><span class="sl-val" id="stP">0.05</span></div><input type="range" min="0.001" max="0.2" value="0.05" step="0.001" id="stPR" oninput="stP.textContent=(+this.value).toFixed(3)"></div><div class="sl-row"><div class="sl-head"><span class="sl-name">発火率 f</span><span class="sl-val" id="stF">0.001</span></div><input type="range" min="0.0001" max="0.01" value="0.001" step="0.0001" id="stFR" oninput="stF.textContent=(+this.value).toFixed(4)"></div>`,
+  ising:`<div class="sl-row"><div class="sl-head"><span class="sl-name">温度 T</span><span class="sl-val" id="stT">2.27</span></div><input type="range" min="0.1" max="5.0" value="2.27" step="0.01" id="stTR" oninput="stT.textContent=(+this.value).toFixed(2)"></div>`,
+  voter:`<div class="sl-row"><div class="sl-head"><span class="sl-name">ノイズ率</span><span class="sl-val" id="stNoise">0.001</span></div><input type="range" min="0" max="0.05" value="0.001" step="0.0001" id="stNoiseR" oninput="stNoise.textContent=(+this.value).toFixed(4)"></div>`,
+  perc:`<div class="sl-row"><div class="sl-head"><span class="sl-name">密度 p</span><span class="sl-val" id="stDens">0.593</span></div><input type="range" min="0.1" max="1.0" value="0.593" step="0.001" id="stDensR" oninput="stDens.textContent=(+this.value).toFixed(3)"></div><button style="width:100%;margin-top:4px;font-size:10px;" onclick="randStoch()">再生成</button>`,
+  schelling:`<div class="sl-row"><div class="sl-head"><span class="sl-name">幸福閾値</span><span class="sl-val" id="stSch">0.3</span></div><input type="range" min="0.1" max="0.9" value="0.3" step="0.05" id="stSchR" oninput="stSch.textContent=(+this.value).toFixed(2)"></div>`,
+  sir:`<div class="sl-row"><div class="sl-head"><span class="sl-name">感染率 β</span><span class="sl-val" id="stBeta">0.3</span></div><input type="range" min="0.01" max="1.0" value="0.3" step="0.01" id="stBetaR" oninput="stBeta.textContent=(+this.value).toFixed(2)"></div><div class="sl-row"><div class="sl-head"><span class="sl-name">回復率 γ</span><span class="sl-val" id="stGamma">0.05</span></div><input type="range" min="0.01" max="0.5" value="0.05" step="0.01" id="stGammaR" oninput="stGamma.textContent=(+this.value).toFixed(2)"></div>`
+};
+
+function setStochModel(m){
+  stochModel=m;
+  Object.keys(STOCH_PARAMS_HTML).forEach(k=>document.getElementById('sm-'+k).classList.toggle('on',k===m));
+  document.getElementById('stoch-params').innerHTML='<div class="sec-title">パラメータ</div>'+STOCH_PARAMS_HTML[m];
+  document.getElementById('stochExplain').innerHTML=STOCH_EXPLAINS[m];
+  randStoch();
+}
+
+function initStochCanvas(){const w=document.getElementById('wrapStoch');stC.width=w.clientWidth;stC.height=w.clientHeight;stW=Math.floor(stC.width/4);stH=Math.floor(stC.height/4);stN=stW*stH;stGrid=new Uint8Array(stN);stNext=new Uint8Array(stN);genStoch=0;document.getElementById('genVal').textContent='0';setStochModel(stochModel);}
+
+function randStoch(){
+  stGrid.fill(0);
+  if(stochModel==='forest'){for(let i=0;i<stN;i++)stGrid[i]=Math.random()<0.6?1:0;}
+  else if(stochModel==='ising'){for(let i=0;i<stN;i++)stGrid[i]=Math.random()<0.5?0:1;}
+  else if(stochModel==='voter'){for(let i=0;i<stN;i++)stGrid[i]=Math.random()<0.5?0:1;}
+  else if(stochModel==='perc'){const p=+document.getElementById('stDensR')?.value||0.593;for(let i=0;i<stN;i++)stGrid[i]=Math.random()<p?1:0;}
+  else if(stochModel==='schelling'){for(let i=0;i<stN;i++)stGrid[i]=Math.random()<0.1?0:Math.floor(Math.random()*2)+1;}
+  else if(stochModel==='sir'){for(let i=0;i<stN;i++)stGrid[i]=1;const seed=Math.floor(stN*0.01);for(let i=0;i<seed;i++)stGrid[Math.floor(Math.random()*stN)]=2;}
+  genStoch=0;document.getElementById('genVal').textContent='0';drawStoch();
+}
+function clearStoch(){stGrid.fill(0);genStoch=0;document.getElementById('genVal').textContent='0';drawStoch();}
+
+function stNb4(r,c){return[[(r-1+stH)%stH,c],[(r+1)%stH,c],[r,(c-1+stW)%stW],[r,(c+1)%stW]];}
+function stNb8(r,c){const ns=[];for(let dr=-1;dr<=1;dr++)for(let dc=-1;dc<=1;dc++){if(!dr&&!dc)continue;ns.push([(r+dr+stH)%stH,(c+dc+stW)%stW]);}return ns;}
+
+function stepStoch(){
+  stNext.set(stGrid);
+  if(stochModel==='forest'){
+    const p=+document.getElementById('stPR')?.value||0.05;
+    const f=+document.getElementById('stFR')?.value||0.001;
+    for(let r=0;r<stH;r++)for(let c=0;c<stW;c++){
+      const i=r*stW+c,s=stGrid[i];
+      if(s===0)stNext[i]=Math.random()<p?1:0;
+      else if(s===1){let fire=false;stNb4(r,c).forEach(([nr,nc])=>{if(stGrid[nr*stW+nc]===2)fire=true;});stNext[i]=(fire||Math.random()<f)?2:1;}
+      else stNext[i]=0;
+    }
+  } else if(stochModel==='ising'){
+    const T=+document.getElementById('stTR')?.value||2.27;
+    for(let it=0;it<stN/2;it++){
+      const i=Math.floor(Math.random()*stN);const r=Math.floor(i/stW),c=i%stW;
+      const spin=stGrid[i]===0?-1:1;
+      let dE=0;stNb4(r,c).forEach(([nr,nc])=>{dE+=2*spin*(stGrid[nr*stW+nc]===0?-1:1);});
+      if(dE<0||Math.random()<Math.exp(-dE/T))stNext[i]=stGrid[i]===0?1:0;
+    }
+  } else if(stochModel==='voter'){
+    const noise=+document.getElementById('stNoiseR')?.value||0.001;
+    for(let r=0;r<stH;r++)for(let c=0;c<stW;c++){
+      const i=r*stW+c;
+      if(Math.random()<noise){stNext[i]=Math.floor(Math.random()*2);continue;}
+      const nb=stNb4(r,c);const [nr,nc]=nb[Math.floor(Math.random()*nb.length)];stNext[i]=stGrid[nr*stW+nc];
+    }
+  } else if(stochModel==='schelling'){
+    const thr=+document.getElementById('stSchR')?.value||0.3;
+    const unhappy=[];
+    for(let r=0;r<stH;r++)for(let c=0;c<stW;c++){
+      const i=r*stW+c,s=stGrid[i];if(!s)continue;
+      const nbs=stNb8(r,c);let same=0,total=0;nbs.forEach(([nr,nc])=>{const ns=stGrid[nr*stW+nc];if(ns){total++;if(ns===s)same++;}});
+      if(total>0&&same/total<thr)unhappy.push(i);
+    }
+    const empties=[];for(let i=0;i<stN;i++)if(!stGrid[i])empties.push(i);
+    for(let i=0;i<Math.min(unhappy.length,empties.length);i++){
+      const ui=unhappy[Math.floor(Math.random()*unhappy.length)];
+      const ei=empties[Math.floor(Math.random()*empties.length)];
+      stNext[ei]=stGrid[ui];stNext[ui]=0;
+    }
+  } else if(stochModel==='sir'){
+    const beta=+document.getElementById('stBetaR')?.value||0.3;
+    const gamma=+document.getElementById('stGammaR')?.value||0.05;
+    for(let r=0;r<stH;r++)for(let c=0;c<stW;c++){
+      const i=r*stW+c,s=stGrid[i];
+      if(s===1){let inf=0;stNb4(r,c).forEach(([nr,nc])=>{if(stGrid[nr*stW+nc]===2)inf++;});if(inf>0&&Math.random()<1-Math.pow(1-beta,inf))stNext[i]=2;}
+      else if(s===2&&Math.random()<gamma)stNext[i]=3;
+    }
+  }
+  const t=stGrid;stGrid=stNext;stNext=t;
+  genStoch++;document.getElementById('genVal').textContent=genStoch.toLocaleString();
+  drawStoch();
+}
+
+const STOCH_COLORS={
+  forest:['#07080f','#1fb885','#e05252','#3d3d3d'],
+  ising:['#0a0a1a','#6c63ff'],
+  voter:['#e05252','#38c8e0'],
+  perc:['#07080f','#6c63ff'],
+  schelling:['#07080f','#e05252','#38c8e0'],
+  sir:['#07080f','#1fb885','#e05252','#3870cc']
+};
+
+function drawStoch(){
+  const img=stX.createImageData(stC.width,stC.height);const d=img.data;
+  const sc=stC.width/stW|0;
+  const cols=(STOCH_COLORS[stochModel]||['#07080f','#6c63ff']).map(h=>[parseInt(h.slice(1,3),16),parseInt(h.slice(3,5),16),parseInt(h.slice(5,7),16)]);
+  for(let r=0;r<stH;r++)for(let c=0;c<stW;c++){
+    const s=stGrid[r*stW+c];const col=cols[s%cols.length]||[0,0,0];
+    for(let dy=0;dy<sc;dy++)for(let dx=0;dx<sc;dx++){const p=((r*sc+dy)*stC.width+(c*sc+dx))*4;d[p]=col[0];d[p+1]=col[1];d[p+2]=col[2];d[p+3]=255;}
+  }
+  stX.putImageData(img,0,0);
+}
+
+function toggleStoch(){runningStoch=!runningStoch;const btn=document.getElementById('btnStochPlay');if(runningStoch){btn.textContent='■ ストップ';btn.classList.add('running');timerStoch=setInterval(stepStoch,80);}else{btn.textContent='▶ スタート';btn.classList.remove('running');clearInterval(timerStoch);}}
+
+stC.addEventListener('mousedown',e=>{paintingStoch=true;const sc=stC.width/stW|0;const c=Math.floor(e.offsetX/sc),r=Math.floor(e.offsetY/sc);if(r>=0&&r<stH&&c>=0&&c<stW)stGrid[r*stW+c]=(stGrid[r*stW+c]+1)%(STOCH_COLORS[stochModel]||['a','b']).length;drawStoch();});
+
+// ═══════════════════════════════════════════
+//  MULTI-LAYER CA
+// ═══════════════════════════════════════════
+const mlC=document.getElementById('multiCanvas'),mlX=mlC.getContext('2d');
+let mlW=0,mlH=0,mlN=0,mlLayers=[],mlNextLayers=[];
+let runningMulti=false,timerMulti=null,genMulti=0;
+let multiModel='predprey',viewLayer=0;
+
+const MULTI_EXPLAINS={
+  predprey:'<b>捕食者-被食者モデル</b><br><br>緑レイヤー: 草（Prey） / 赤レイヤー: 捕食者（Predator）<br><br>草は自然増殖し、捕食者は草を食べて生存・繁殖し、食料がないと死にます。<br><br>2つのレイヤーが互いの生死に影響するため、<u>ロトカ＝ヴォルテラ振動</u>的なダイナミクスが生まれます。',
+  excite:'<b>興奮性媒体</b>（Excitable Media）<br><br>3状態レイヤー: 静止(0)→興奮(1)→不応期(2)→静止<br><br>興奮は近傍に伝播しますが、不応期は興奮できません。これにより<u>スパイラル波</u>や<u>ターゲットパターン</u>が生じます。心筋の電気伝播モデルとしても使われます。',
+  compete:'<b>競合コロニー</b><br><br>2種のコロニー（青・橙）が同じ空間を争います。各コロニーは独自のCAルールで成長し、互いに競合します。<br><br>パラメータを変えることで、共存・一方勝利・交互優勢などの動態が現れます。'
+};
+
+const MULTI_PARAMS_HTML={
+  predprey:`<div class="sl-row"><div class="sl-head"><span class="sl-name">草の成長率</span><span class="sl-val" id="mlGR">0.03</span></div><input type="range" min="0.001" max="0.1" value="0.03" step="0.001" id="mlGrowth" oninput="mlGR.textContent=(+this.value).toFixed(3)"></div><div class="sl-row"><div class="sl-head"><span class="sl-name">捕食率</span><span class="sl-val" id="mlPR">0.4</span></div><input type="range" min="0.01" max="1.0" value="0.4" step="0.01" id="mlPred" oninput="mlPR.textContent=(+this.value).toFixed(2)"></div><div class="sl-row"><div class="sl-head"><span class="sl-name">捕食者死亡率</span><span class="sl-val" id="mlDR">0.05</span></div><input type="range" min="0.001" max="0.2" value="0.05" step="0.001" id="mlDeath" oninput="mlDR.textContent=(+this.value).toFixed(3)"></div>`,
+  excite:`<div class="sl-row"><div class="sl-head"><span class="sl-name">興奮閾値</span><span class="sl-val" id="mlET">2</span></div><input type="range" min="1" max="6" value="2" step="1" id="mlExThr" oninput="mlET.textContent=this.value"></div><div class="sl-row"><div class="sl-head"><span class="sl-name">不応期長さ</span><span class="sl-val" id="mlRefr">2</span></div><input type="range" min="1" max="8" value="2" step="1" id="mlRefrR" oninput="mlRefr.textContent=this.value"></div>`,
+  compete:`<div class="sl-row"><div class="sl-head"><span class="sl-name">コロニーA 成長</span><span class="sl-val" id="mlAG">3</span></div><input type="range" min="1" max="5" value="3" step="1" id="mlAGrowth" oninput="mlAG.textContent=this.value"></div><div class="sl-row"><div class="sl-head"><span class="sl-name">コロニーB 成長</span><span class="sl-val" id="mlBG">3</span></div><input type="range" min="1" max="5" value="3" step="1" id="mlBGrowth" oninput="mlBG.textContent=this.value"></div>`
+};
+
+function setMultiModel(m){
+  multiModel=m;
+  ['predprey','excite','compete'].forEach(k=>document.getElementById('mm-'+k).classList.toggle('on',k===m));
+  document.getElementById('multi-params').innerHTML='<div class="sec-title">パラメータ</div>'+MULTI_PARAMS_HTML[m];
+  document.getElementById('multiExplain').innerHTML=MULTI_EXPLAINS[m];
+  initMultiLayers();
+  buildMultiLayerBtns();
+}
+
+function initMultiCanvas(){
+  const w=document.getElementById('wrapMulti');
+  mlC.width=w.clientWidth;mlC.height=w.clientHeight;
+  mlW=Math.floor(mlC.width/5);mlH=Math.floor(mlC.height/5);mlN=mlW*mlH;
+  setMultiModel(multiModel);
+}
+
+function initMultiLayers(){
+  const nLayers=multiModel==='compete'?2:multiModel==='excite'?1:2;
+  mlLayers=Array.from({length:nLayers},()=>new Uint8Array(mlN));
+  mlNextLayers=Array.from({length:nLayers},()=>new Uint8Array(mlN));
+  randMulti();
+}
+
+function buildMultiLayerBtns(){
+  const el=document.getElementById('multiLayerBtns');el.innerHTML='';
+  const names=multiModel==='predprey'?['草（緑）','捕食者（赤）','合成']:multiModel==='excite'?['状態']:['コロニーA','コロニーB','合成'];
+  names.forEach((n,i)=>{
+    const btn=document.createElement('button');btn.textContent=n;btn.style.cssText='font-size:10px;padding:4px 6px;';
+    if(i===viewLayer)btn.classList.add('on');
+    btn.onclick=()=>{viewLayer=i;buildMultiLayerBtns();drawMulti();};
+    el.appendChild(btn);
+  });
+}
+
+function randMulti(){
+  mlLayers.forEach((layer,li)=>{for(let i=0;i<mlN;i++)layer[i]=Math.random()<(li===0?0.5:0.1)?1:0;});
+  genMulti=0;document.getElementById('genVal').textContent='0';drawMulti();
+}
+function clearMulti(){mlLayers.forEach(l=>l.fill(0));genMulti=0;document.getElementById('genVal').textContent='0';drawMulti();}
+
+function mlMoore(layer,r,c){let n=0;for(let dr=-1;dr<=1;dr++)for(let dc=-1;dc<=1;dc++){if(!dr&&!dc)continue;n+=layer[((r+dr+mlH)%mlH)*mlW+(c+dc+mlW)%mlW];}return n;}
+
+function stepMulti(){
+  if(multiModel==='predprey'){
+    const growth=+document.getElementById('mlGrowth')?.value||0.03;
+    const pred=+document.getElementById('mlPred')?.value||0.4;
+    const death=+document.getElementById('mlDeath')?.value||0.05;
+    const [prey,predator]=[mlLayers[0],mlLayers[1]];
+    const [np,nPred]=[mlNextLayers[0],mlNextLayers[1]];
+    for(let r=0;r<mlH;r++)for(let c=0;c<mlW;c++){
+      const i=r*mlW+c,p=prey[i],pr=predator[i];
+      const nNbPrey=mlMoore(prey,r,c),nNbPred=mlMoore(predator,r,c);
+      // Prey: grows if neighbors and empty of predators
+      np[i]=p?1:(nNbPrey>0&&!pr&&Math.random()<growth?1:0);
+      if(pr&&prey[i])np[i]=0; // eaten
+      // Predator: survives if prey available, dies otherwise
+      nPred[i]=pr?(prey[i]&&Math.random()<pred?1:(Math.random()<death?0:pr)):(nNbPred>0&&prey[i]&&Math.random()<pred*0.3?1:0);
+    }
+    mlLayers[0].set(np);mlLayers[1].set(nPred);
+  } else if(multiModel==='excite'){
+    const thr=+document.getElementById('mlExThr')?.value||2;
+    const refr=+document.getElementById('mlRefrR')?.value||2;
+    const maxState=1+refr;
+    const layer=mlLayers[0];const nl=mlNextLayers[0];
+    for(let r=0;r<mlH;r++)for(let c=0;c<mlW;c++){
+      const i=r*mlW+c,s=layer[i];
+      if(s===0){let exc=0;for(let dr=-1;dr<=1;dr++)for(let dc=-1;dc<=1;dc++){if(!dr&&!dc)continue;if(layer[((r+dr+mlH)%mlH)*mlW+(c+dc+mlW)%mlW]===1)exc++;}nl[i]=exc>=thr?1:0;}
+      else if(s<maxState)nl[i]=s+1;
+      else nl[i]=0;
+    }
+    mlLayers[0].set(nl);
+  } else if(multiModel==='compete'){
+    const bgA=+document.getElementById('mlAGrowth')?.value||3;
+    const bgB=+document.getElementById('mlBGrowth')?.value||3;
+    [mlLayers[0],mlLayers[1]].forEach((layer,li)=>{
+      const bg=li===0?bgA:bgB;const nl=mlNextLayers[li];
+      const other=mlLayers[1-li];
+      for(let r=0;r<mlH;r++)for(let c=0;c<mlW;c++){
+        const i=r*mlW+c;const nb=mlMoore(layer,r,c);const occ=other[i];
+        if(layer[i])nl[i]=1;
+        else if(!occ&&nb>=bg)nl[i]=1;
+        else nl[i]=0;
+      }
+      layer.set(nl);
+    });
+  }
+  genMulti++;document.getElementById('genVal').textContent=genMulti.toLocaleString();
+  drawMulti();
+}
+
+function drawMulti(){
+  const img=mlX.createImageData(mlC.width,mlC.height);const d=img.data;
+  const sc=mlC.width/mlW|0;
+  for(let r=0;r<mlH;r++)for(let c=0;c<mlW;c++){
+    let R=7,G=8,B=15;
+    if(multiModel==='predprey'){
+      const prey=mlLayers[0][r*mlW+c],pred=mlLayers[1][r*mlW+c];
+      if(viewLayer===0){if(prey)[R,G,B]=[31,184,133];}
+      else if(viewLayer===1){if(pred)[R,G,B]=[224,82,82];}
+      else{if(prey&&pred)[R,G,B]=[224,168,50];else if(prey)[R,G,B]=[31,184,133];else if(pred)[R,G,B]=[224,82,82];}
+    } else if(multiModel==='excite'){
+      const s=mlLayers[0][r*mlW+c];
+      if(s===1)[R,G,B]=[240,249,33];
+      else if(s>1){const t=s/(+document.getElementById('mlRefrR')?.value||2+1);[R,G,B]=[108*t|0,99*t|0,255];}
+    } else {
+      const a=mlLayers[0][r*mlW+c],b=mlLayers[1][r*mlW+c];
+      if(viewLayer===0){if(a)[R,G,B]=[56,200,224];}
+      else if(viewLayer===1){if(b)[R,G,B]=[249,148,65];}
+      else{if(a&&b)[R,G,B]=[200,200,200];else if(a)[R,G,B]=[56,200,224];else if(b)[R,G,B]=[249,148,65];}
+    }
+    for(let dy=0;dy<sc;dy++)for(let dx=0;dx<sc;dx++){const p=((r*sc+dy)*mlC.width+(c*sc+dx))*4;d[p]=R;d[p+1]=G;d[p+2]=B;d[p+3]=255;}
+  }
+  mlX.fillStyle='#07080f';mlX.fillRect(0,0,mlC.width,mlC.height);
+  mlX.putImageData(img,0,0);
+}
+
+function toggleMulti(){runningMulti=!runningMulti;const btn=document.getElementById('btnMultiPlay');if(runningMulti){btn.textContent='■ ストップ';btn.classList.add('running');timerMulti=setInterval(stepMulti,80);}else{btn.textContent='▶ スタート';btn.classList.remove('running');clearInterval(timerMulti);}}
+
+// ═══════════════════════════════════════════
+//  CONTINUOUS CA
+// ═══════════════════════════════════════════
+const ccC=document.getElementById('contCanvas'),ccX=ccC.getContext('2d');
+let ccW=0,ccH=0,ccN=0,ccGrid,ccNext,ccGrid2;
+let runningCont=false,timerCont=null,genCont=0;
+let contModel='lenia',contCmap='plasma';
+let paintingCont=false;
+
+const CONT_EXPLAINS={
+  lenia:'<b>Lenia</b>（Chan 2019）<br><br>連続値・連続時間のライフゲーム。各セルは 0〜1 の実数値を持ち、<u>成長関数 G</u> と <u>カーネル K</u> によって更新されます。<br><br>μ: 成長の中心値 / σ: 成長の幅<br>R: カーネル半径<br><br>適切なパラメータで、動く<b>生命体（glider）</b>のような構造が自発的に生まれます。',
+  smooth:'<b>SmoothLife</b>（Rafler 2011）<br><br>ライフゲームを連続空間に拡張したモデル。内円の平均と外環の平均で状態を更新します。<br><br>通常のライフゲームの「滑らか」な一般化であり、流体的な動きをします。',
+  wave:'<b>波動方程式</b>（数値解法）<br><br>∂²u/∂t² = c²∇²u<br><br>2次元波動方程式を有限差分法で解きます。クリックすると波源を生成します。<br><br><i>c</i>: 波速 / <i>減衰</i>: エネルギー消散',
+  coupled:'<b>結合振動子</b>（Kuramoto model）<br><br>各セルが位相 θ を持つ振動子として振る舞い、近傍と位相を同期しようとします。<br><br>K: 結合強度が強いほど同期が起きます。生物の概日リズム、神経振動、心筋同期などのモデルです。'
+};
+
+const CONT_PARAMS_HTML={
+  lenia:`<div class="sl-row"><div class="sl-head"><span class="sl-name">カーネル半径 R</span><span class="sl-val" id="lenR">13</span></div><input type="range" min="3" max="25" value="13" step="1" id="lenRR" oninput="lenR.textContent=this.value"></div><div class="sl-row"><div class="sl-head"><span class="sl-name">成長中心 μ</span><span class="sl-val" id="lenMu">0.15</span></div><input type="range" min="0.01" max="0.5" value="0.15" step="0.01" id="lenMuR" oninput="lenMu.textContent=(+this.value).toFixed(2)"></div><div class="sl-row"><div class="sl-head"><span class="sl-name">成長幅 σ</span><span class="sl-val" id="lenSigma">0.015</span></div><input type="range" min="0.001" max="0.1" value="0.015" step="0.001" id="lenSigmaR" oninput="lenSigma.textContent=(+this.value).toFixed(3)"></div><div class="sl-row"><div class="sl-head"><span class="sl-name">時間刻み dt</span><span class="sl-val" id="lenDt">0.1</span></div><input type="range" min="0.01" max="0.5" value="0.1" step="0.01" id="lenDtR" oninput="lenDt.textContent=(+this.value).toFixed(2)"></div>`,
+  smooth:`<div class="sl-row"><div class="sl-head"><span class="sl-name">内半径 ri</span><span class="sl-val" id="slRi">3</span></div><input type="range" min="1" max="10" value="3" step="1" id="slRiR" oninput="slRi.textContent=this.value"></div><div class="sl-row"><div class="sl-head"><span class="sl-name">外半径 ro</span><span class="sl-val" id="slRo">6</span></div><input type="range" min="2" max="20" value="6" step="1" id="slRoR" oninput="slRo.textContent=this.value"></div><div class="sl-row"><div class="sl-head"><span class="sl-name">誕生閾値</span><span class="sl-val" id="slBt">0.278</span></div><input type="range" min="0.1" max="0.5" value="0.278" step="0.001" id="slBtR" oninput="slBt.textContent=(+this.value).toFixed(3)"></div>`,
+  wave:`<div class="sl-row"><div class="sl-head"><span class="sl-name">波速 c</span><span class="sl-val" id="waveC">0.5</span></div><input type="range" min="0.1" max="0.9" value="0.5" step="0.01" id="waveCR" oninput="waveC.textContent=(+this.value).toFixed(2)"></div><div class="sl-row"><div class="sl-head"><span class="sl-name">減衰</span><span class="sl-val" id="waveDamp">0.995</span></div><input type="range" min="0.9" max="1.0" value="0.995" step="0.001" id="waveDampR" oninput="waveDamp.textContent=(+this.value).toFixed(3)"></div>`,
+  coupled:`<div class="sl-row"><div class="sl-head"><span class="sl-name">固有角周波数 ω</span><span class="sl-val" id="kurW">0.2</span></div><input type="range" min="0.0" max="1.0" value="0.2" step="0.01" id="kurWR" oninput="kurW.textContent=(+this.value).toFixed(2)"></div><div class="sl-row"><div class="sl-head"><span class="sl-name">結合強度 K</span><span class="sl-val" id="kurK">2.0</span></div><input type="range" min="0.0" max="5.0" value="2.0" step="0.1" id="kurKR" oninput="kurK.textContent=(+this.value).toFixed(1)"></div><div class="sl-row"><div class="sl-head"><span class="sl-name">時間刻み dt</span><span class="sl-val" id="kurDt">0.05</span></div><input type="range" min="0.01" max="0.2" value="0.05" step="0.01" id="kurDtR" oninput="kurDt.textContent=(+this.value).toFixed(2)"></div>`
+};
+
+// Wave equation needs extra buffer
+let ccVelocity; // for wave
+let ccPhase;    // for coupled
+
+function setContModel(m){
+  contModel=m;
+  ['lenia','smooth','wave','coupled'].forEach(k=>document.getElementById('cm2-'+k).classList.toggle('on',k===m));
+  document.getElementById('cont-params').innerHTML='<div class="sec-title">パラメータ</div>'+CONT_PARAMS_HTML[m];
+  document.getElementById('contExplain').innerHTML=CONT_EXPLAINS[m];
+  initContGrid();
+}
+
+function initContCanvas(){
+  const w=document.getElementById('wrapCont');
+  ccC.width=w.clientWidth;ccC.height=w.clientHeight;
+  const scale=contModel==='lenia'?4:3;
+  ccW=Math.floor(ccC.width/scale);ccH=Math.floor(ccC.height/scale);ccN=ccW*ccH;
+  initContGrid();
+}
+
+function initContGrid(){
+  ccGrid=new Float32Array(ccN);ccNext=new Float32Array(ccN);ccGrid2=new Float32Array(ccN);
+  ccVelocity=new Float32Array(ccN);ccPhase=new Float32Array(ccN);
+  genCont=0;document.getElementById('genVal').textContent='0';
+  randCont();
+}
+
+function randCont(){
+  if(contModel==='lenia'){
+    ccGrid.fill(0);
+    const cx=ccW>>1,cy=ccH>>1,R=+document.getElementById('lenRR')?.value||13;
+    for(let r=cy-R*2;r<=cy+R*2;r++)for(let c=cx-R*2;c<=cx+R*2;c++){
+      const i=((r+ccH)%ccH)*ccW+(c+ccW)%ccW;
+      ccGrid[i]=Math.random()<0.5?Math.random():0;
+    }
+  } else if(contModel==='smooth'){
+    for(let i=0;i<ccN;i++)ccGrid[i]=Math.random()<0.3?Math.random():0;
+  } else if(contModel==='wave'){
+    ccGrid.fill(0);ccVelocity.fill(0);
+    injectWave(ccW>>1,ccH>>1,1.0);
+  } else if(contModel==='coupled'){
+    for(let i=0;i<ccN;i++)ccPhase[i]=Math.random()*Math.PI*2;
+  }
+  drawCont();
+}
+function clearCont(){ccGrid.fill(0);ccVelocity&&ccVelocity.fill(0);ccPhase&&ccPhase.fill(0);genCont=0;document.getElementById('genVal').textContent='0';drawCont();}
+
+function injectWave(cx,cy,amp){
+  const rad=3;
+  for(let dr=-rad;dr<=rad;dr++)for(let dc=-rad;dc<=rad;dc++){
+    const i=((cy+dr+ccH)%ccH)*ccW+(cx+dc+ccW)%ccW;
+    ccGrid[i]=clamp(ccGrid[i]+amp,0,1);
+    ccVelocity&&(ccVelocity[i]+=amp*0.5);
+  }
+}
+
+function ccLap(A,i){
+  const r=Math.floor(i/ccW),c=i%ccW;
+  return A[((r-1+ccH)%ccH)*ccW+c]+A[((r+1)%ccH)*ccW+c]+A[r*ccW+(c-1+ccW)%ccW]+A[r*ccW+(c+1)%ccW]-4*A[i];
+}
+
+function stepCont(){
+  if(contModel==='lenia'){
+    const R=+document.getElementById('lenRR')?.value||13;
+    const mu=+document.getElementById('lenMuR')?.value||0.15;
+    const sigma=+document.getElementById('lenSigmaR')?.value||0.015;
+    const dt=+document.getElementById('lenDtR')?.value||0.1;
+    // Compute kernel average in radius R (box kernel for speed)
+    for(let r=0;r<ccH;r++)for(let c=0;c<ccW;c++){
+      let sum=0,cnt=0;
+      const R2=Math.ceil(R/2);
+      for(let dr=-R2;dr<=R2;dr++)for(let dc=-R2;dc<=R2;dc++){
+        const d=Math.sqrt(dr*dr+dc*dc)/R;if(d>1)continue;
+        sum+=ccGrid[((r+dr+ccH)%ccH)*ccW+(c+dc+ccW)%ccW];cnt++;
+      }
+      const u=cnt>0?sum/cnt:0;
+      const g=2*Math.exp(-0.5*Math.pow((u-mu)/sigma,2))-1;
+      ccNext[r*ccW+c]=clamp(ccGrid[r*ccW+c]+dt*g,0,1);
+    }
+    const t=ccGrid;ccGrid=ccNext;ccNext=t;
+  } else if(contModel==='smooth'){
+    const ri=+document.getElementById('slRiR')?.value||3;
+    const ro=+document.getElementById('slRoR')?.value||6;
+    const bt=+document.getElementById('slBtR')?.value||0.278;
+    for(let r=0;r<ccH;r++)for(let c=0;c<ccW;c++){
+      let inner=0,icnt=0,outer=0,ocnt=0;
+      for(let dr=-ro;dr<=ro;dr++)for(let dc=-ro;dc<=ro;dc++){
+        const d=Math.sqrt(dr*dr+dc*dc);
+        const v=ccGrid[((r+dr+ccH)%ccH)*ccW+(c+dc+ccW)%ccW];
+        if(d<=ri){inner+=v;icnt++;}else if(d<=ro){outer+=v;ocnt++;}
+      }
+      inner=icnt?inner/icnt:0;outer=ocnt?outer/ocnt:0;
+      const alive=ccGrid[r*ccW+c]>0.5;
+      let nv;
+      if(alive) nv=outer>bt&&outer<1-bt?1:0;
+      else nv=outer>bt&&outer<1-bt&&inner<bt?1:0;
+      ccNext[r*ccW+c]=nv*1.0;
+    }
+    const t=ccGrid;ccGrid=ccNext;ccNext=t;
+  } else if(contModel==='wave'){
+    const c2=Math.pow(+document.getElementById('waveCR')?.value||0.5,2);
+    const damp=+document.getElementById('waveDampR')?.value||0.995;
+    for(let i=0;i<ccN;i++){
+      ccVelocity[i]=(ccVelocity[i]+c2*ccLap(ccGrid,i))*damp;
+      ccNext[i]=clamp(ccGrid[i]+ccVelocity[i],0,1);
+    }
+    const t=ccGrid;ccGrid=ccNext;ccNext=t;
+  } else if(contModel==='coupled'){
+    const omega=+document.getElementById('kurWR')?.value||0.2;
+    const K=+document.getElementById('kurKR')?.value||2.0;
+    const dt=+document.getElementById('kurDtR')?.value||0.05;
+    for(let r=0;r<ccH;r++)for(let c=0;c<ccW;c++){
+      const i=r*ccW+c;let sync=0;
+      [[-1,0],[1,0],[0,-1],[0,1]].forEach(([dr,dc])=>{
+        const j=((r+dr+ccH)%ccH)*ccW+(c+dc+ccW)%ccW;
+        sync+=Math.sin(ccPhase[j]-ccPhase[i]);
+      });
+      ccNext[i]=ccPhase[i]+dt*(omega+K/4*sync);
+    }
+    for(let i=0;i<ccN;i++)ccPhase[i]=ccNext[i];
+    // Map phase to [0,1] for display
+    for(let i=0;i<ccN;i++)ccGrid[i]=(Math.sin(ccPhase[i])+1)*0.5;
+  }
+  genCont++;document.getElementById('genVal').textContent=genCont.toLocaleString();
+  drawCont();
+}
+
+function drawCont(){
+  const img=ccX.createImageData(ccC.width,ccC.height);const d=img.data;
+  const sc=ccC.width/ccW|0;
+  const cm=CMAPS[contCmap]||CMAPS.plasma;
+  for(let r=0;r<ccH;r++)for(let c=0;c<ccW;c++){
+    const v=clamp(ccGrid[r*ccW+c],0,1);
+    const [R,G,B]=cm(v);
+    for(let dy=0;dy<sc;dy++)for(let dx=0;dx<sc;dx++){
+      const p=((r*sc+dy)*ccC.width+(c*sc+dx))*4;
+      d[p]=R;d[p+1]=G;d[p+2]=B;d[p+3]=255;
+    }
+  }
+  ccX.putImageData(img,0,0);
+}
+
+function setContCmap(cm){contCmap=cm;['plasma','viridis','inferno','bw'].forEach(k=>document.getElementById('cmc-'+k).classList.toggle('on',k===cm));drawCont();}
+function toggleCont(){runningCont=!runningCont;const btn=document.getElementById('btnContPlay');if(runningCont){btn.textContent='■ ストップ';btn.classList.add('running');timerCont=requestAnimationFrame(contLoop);}else{btn.textContent='▶ スタート';btn.classList.remove('running');}}
+function contLoop(){if(!runningCont)return;stepCont();timerCont=requestAnimationFrame(contLoop);}
+
+ccC.addEventListener('mousedown',e=>{paintingCont=true;injectCont(e);});
+ccC.addEventListener('mousemove',e=>{if(paintingCont)injectCont(e);});
+function injectCont(e){
+  const sc=ccC.width/ccW;const cx=Math.floor(e.offsetX/sc),cy=Math.floor(e.offsetY/sc);
+  if(contModel==='wave'){injectWave(cx,cy,0.8);}
+  else if(contModel==='coupled'){const rad=4;for(let dr=-rad;dr<=rad;dr++)for(let dc=-rad;dc<=rad;dc++){const i=((cy+dr+ccH)%ccH)*ccW+(cx+dc+ccW)%ccW;ccPhase[i]=0;}}
+  else{const rad=3;for(let dr=-rad;dr<=rad;dr++)for(let dc=-rad;dc<=rad;dc++){const i=((cy+dr+ccH)%ccH)*ccW+(cx+dc+ccW)%ccW;if(i>=0&&i<ccN)ccGrid[i]=Math.random();}}
+  drawCont();
+}
+
+// ═══════════════════════════════════════════
+//  RESIZE + INIT
+// ═══════════════════════════════════════════
+window.addEventListener('resize',()=>{
+  if(currentTab==='1d')init1dCanvas();
+  else if(currentTab==='2d')init2dCanvas();
+  else if(currentTab==='rd')initRDCanvas();
+  else if(currentTab==='stoch')initStochCanvas();
+  else if(currentTab==='multi')initMultiCanvas();
+  else if(currentTab==='cont')initContCanvas();
+});
+
+rebuild1dRule();
+init1dCanvas();
+buildLifeTags();
+buildTotRule();
+buildCustomTable();
+setTimeout(()=>{init2dCanvas();},50);
+</script>
+</body>
+</html>

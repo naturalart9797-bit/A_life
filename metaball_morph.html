@@ -1,0 +1,427 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Metaball Morph</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+JP:wght@300;400;500&display=swap');
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#06080d;--surface:#0c0f16;--border:#181d28;--border2:#242c3a;
+  --accent:#56c8e0;--accent2:#2f8aa6;
+  --text:#cfe8f0;--text2:#6a808c;--text3:#243038;
+  --font-mono:'IBM Plex Mono',monospace;--font-ui:'IBM Plex Sans JP',sans-serif;
+}
+body{background:var(--bg);color:var(--text);font-family:var(--font-ui);height:100vh;display:flex;flex-direction:column;overflow:hidden;user-select:none;}
+header{display:flex;align-items:center;gap:14px;padding:8px 18px;border-bottom:1px solid var(--border);background:var(--surface);flex-shrink:0;}
+.logo{font-family:var(--font-mono);font-size:12px;font-weight:500;color:var(--accent);letter-spacing:.1em;text-transform:uppercase;}
+.logo em{color:var(--text3);font-style:normal;}
+.stats{margin-left:auto;display:flex;gap:16px;}
+.stat{display:flex;flex-direction:column;align-items:flex-end;}
+.stat-label{font-family:var(--font-mono);font-size:8px;color:var(--text3);letter-spacing:.1em;text-transform:uppercase;}
+.stat-val{font-family:var(--font-mono);font-size:13px;font-weight:500;color:var(--text);line-height:1.2;}
+.rec-dot{width:7px;height:7px;border-radius:50%;background:#e05252;display:none;animation:blink 1s infinite;}
+.rec-dot.on{display:inline-block;}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.15}}
+.main{display:flex;flex:1;overflow:hidden;}
+.sidebar{width:256px;flex-shrink:0;background:var(--surface);border-right:1px solid var(--border);display:flex;flex-direction:column;overflow-y:auto;}
+.sidebar::-webkit-scrollbar{width:3px;}
+.sidebar::-webkit-scrollbar-thumb{background:var(--border2);border-radius:2px;}
+.sec{padding:11px 13px;border-bottom:1px solid var(--border);}
+.sec-title{font-family:var(--font-mono);font-size:8px;color:var(--text3);letter-spacing:.14em;text-transform:uppercase;margin-bottom:9px;}
+button{font-family:var(--font-mono);font-size:11px;font-weight:500;background:transparent;border:1px solid var(--border);color:var(--text2);padding:5px 10px;border-radius:3px;cursor:pointer;transition:all .15s;white-space:nowrap;}
+button:hover{border-color:var(--accent2);color:var(--accent);background:rgba(86,200,224,.07);}
+button.on{border-color:var(--accent)!important;color:var(--accent)!important;background:rgba(86,200,224,.14)!important;}
+.play-btn{width:100%;padding:7px;font-size:12px;border-color:var(--accent2);color:var(--accent);}
+.play-btn.running{background:rgba(86,200,224,.1);}
+.rec-btn{border-color:#e05252;color:#e05252;}
+.rec-btn:hover,.rec-btn.recording{background:rgba(224,82,82,.1);}
+.sl-row{margin-bottom:8px;}
+.sl-head{display:flex;justify-content:space-between;margin-bottom:3px;}
+.sl-name{font-family:var(--font-mono);font-size:10px;color:var(--text2);}
+.sl-val{font-family:var(--font-mono);font-size:10px;color:var(--accent);}
+input[type=range]{-webkit-appearance:none;width:100%;height:2px;background:var(--border);border-radius:1px;outline:none;}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:11px;height:11px;background:var(--accent);border-radius:50%;cursor:pointer;}
+.tog-row{display:flex;align-items:center;justify-content:space-between;margin-bottom:7px;}
+.tog-label{font-family:var(--font-mono);font-size:10px;color:var(--text2);}
+.tog{position:relative;width:28px;height:14px;flex-shrink:0;}
+.tog input{opacity:0;width:0;height:0;position:absolute;}
+.tog-track{position:absolute;inset:0;background:var(--border);border-radius:8px;cursor:pointer;transition:background .2s;}
+.tog input:checked+.tog-track{background:var(--accent2);}
+.tog-track::after{content:'';position:absolute;width:10px;height:10px;left:2px;top:2px;background:var(--text3);border-radius:50%;transition:transform .2s,background .2s;}
+.tog input:checked+.tog-track::after{transform:translateX(14px);background:var(--accent);}
+.canvas-wrap{flex:1;position:relative;overflow:hidden;background:#000;}
+canvas{display:block;width:100%;height:100%;}
+.img-slots{display:flex;gap:6px;}
+.img-slot{flex:1;aspect-ratio:1;border:1px dashed var(--border2);border-radius:5px;display:flex;align-items:center;justify-content:center;cursor:pointer;overflow:hidden;position:relative;}
+.img-slot:hover{border-color:var(--accent2);}
+.img-slot img{width:100%;height:100%;object-fit:cover;}
+.img-slot .ph{font-family:var(--font-mono);font-size:9px;color:var(--text3);text-align:center;line-height:1.5;}
+.img-slot .badge{position:absolute;top:3px;left:4px;font-family:var(--font-mono);font-size:9px;color:var(--accent);background:rgba(6,8,13,.7);padding:1px 5px;border-radius:3px;}
+.hint{position:absolute;bottom:10px;left:50%;transform:translateX(-50%);font-family:var(--font-mono);font-size:9px;color:var(--text3);pointer-events:none;white-space:nowrap;}
+.morph-bar{position:absolute;bottom:0;left:0;right:0;height:3px;background:var(--border);}
+.morph-fill{height:100%;background:var(--accent);width:0%;}
+.cmap-grid{display:grid;grid-template-columns:1fr 1fr;gap:4px;}
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">Metaball <em>//</em> Morph</div>
+  <span class="rec-dot" id="recDot"></span>
+  <div class="stats">
+    <div class="stat"><span class="stat-label">ブロブ</span><span class="stat-val" id="statN">0</span></div>
+    <div class="stat"><span class="stat-label">補間</span><span class="stat-val" id="statMorph">A</span></div>
+    <div class="stat"><span class="stat-label">fps</span><span class="stat-val" id="statFps">—</span></div>
+  </div>
+</header>
+
+<div class="main">
+  <div class="sidebar">
+
+    <div class="sec">
+      <button class="play-btn running" id="btnPlay" onclick="togglePlay()">■ pause</button>
+      <div style="display:flex;gap:5px;margin-top:5px;">
+        <button style="flex:1" onclick="resample()">再サンプル</button>
+        <button class="rec-btn" id="btnRec" onclick="toggleRec()">● rec</button>
+        <button id="btnDL" onclick="downloadVid()" disabled>↓</button>
+      </div>
+    </div>
+
+    <div class="sec">
+      <div class="sec-title">ロゴ（2枚）</div>
+      <div class="img-slots">
+        <div class="img-slot" id="slotA" onclick="document.getElementById('fileA').click()"><div class="ph">ロゴA</div></div>
+        <div class="img-slot" id="slotB" onclick="document.getElementById('fileB').click()"><div class="ph">ロゴB</div></div>
+      </div>
+      <input type="file" id="fileA" accept="image/*" style="display:none" onchange="loadImg(this,'A')">
+      <input type="file" id="fileB" accept="image/*" style="display:none" onchange="loadImg(this,'B')">
+    </div>
+
+    <div class="sec">
+      <div class="sec-title">液体ブロブ</div>
+      <div class="sl-row">
+        <div class="sl-head"><span class="sl-name">ブロブ数</span><span class="sl-val" id="vN">700</span></div>
+        <input type="range" min="100" max="2000" value="700" step="50" id="sN" oninput="vN.textContent=this.value">
+      </div>
+      <div class="sl-row">
+        <div class="sl-head"><span class="sl-name">ブロブ半径</span><span class="sl-val" id="vR">11</span></div>
+        <input type="range" min="5" max="30" value="11" step="1" id="sR" oninput="vR.textContent=this.value">
+      </div>
+      <div class="sl-row">
+        <div class="sl-head"><span class="sl-name">融合のなめらかさ</span><span class="sl-val" id="vThresh">0.62</span></div>
+        <input type="range" min="0.3" max="0.9" value="0.62" step="0.02" id="sThresh" oninput="vThresh.textContent=(+this.value).toFixed(2)">
+      </div>
+      <div class="sl-row">
+        <div class="sl-head"><span class="sl-name">明るさしきい値</span><span class="sl-val" id="vLum">0.45</span></div>
+        <input type="range" min="0.1" max="0.9" value="0.45" step="0.05" id="sLum" oninput="vLum.textContent=(+this.value).toFixed(2);resample()">
+      </div>
+      <div class="tog-row"><span class="tog-label">明暗を反転</span>
+        <label class="tog"><input type="checkbox" id="togInvert" onchange="resample()"><div class="tog-track"></div></label>
+      </div>
+    </div>
+
+    <div class="sec">
+      <div class="sec-title">補間（A↔B ループ）</div>
+      <div class="sl-row">
+        <div class="sl-head"><span class="sl-name">遷移の速さ</span><span class="sl-val" id="vSpd">0.005</span></div>
+        <input type="range" min="0.001" max="0.025" value="0.005" step="0.001" id="sSpd" oninput="vSpd.textContent=(+this.value).toFixed(3)">
+      </div>
+      <div class="sl-row">
+        <div class="sl-head"><span class="sl-name">端での停留</span><span class="sl-val" id="vHold">100</span></div>
+        <input type="range" min="0" max="400" value="100" step="10" id="sHold" oninput="vHold.textContent=this.value">
+      </div>
+      <div class="tog-row"><span class="tog-label">イージング</span>
+        <label class="tog"><input type="checkbox" id="togEase" checked><div class="tog-track"></div></label>
+      </div>
+    </div>
+
+    <div class="sec">
+      <div class="sec-title">生命の動き</div>
+      <div class="sl-row">
+        <div class="sl-head"><span class="sl-name">追従の強さ</span><span class="sl-val" id="vFollow">0.10</span></div>
+        <input type="range" min="0.02" max="0.4" value="0.10" step="0.01" id="sFollow" oninput="vFollow.textContent=(+this.value).toFixed(2)">
+      </div>
+      <div class="sl-row">
+        <div class="sl-head"><span class="sl-name">うねり（遷移中）</span><span class="sl-val" id="vSwirl">2.0</span></div>
+        <input type="range" min="0" max="6" value="2.0" step="0.1" id="sSwirl" oninput="vSwirl.textContent=(+this.value).toFixed(1)">
+      </div>
+      <div class="sl-row">
+        <div class="sl-head"><span class="sl-name">ぷるぷる（鼓動）</span><span class="sl-val" id="vPulse">0.3</span></div>
+        <input type="range" min="0" max="1" value="0.3" step="0.05" id="sPulse" oninput="vPulse.textContent=(+this.value).toFixed(2)">
+      </div>
+      <div class="sl-row">
+        <div class="sl-head"><span class="sl-name">摩擦</span><span class="sl-val" id="vFrict">0.82</span></div>
+        <input type="range" min="0.6" max="0.95" value="0.82" step="0.01" id="sFrict" oninput="vFrict.textContent=(+this.value).toFixed(2)">
+      </div>
+    </div>
+
+    <div class="sec">
+      <div class="sec-title">表示</div>
+      <div class="cmap-grid">
+        <button class="on" id="cm-img" onclick="setCmap('img')">ロゴの色</button>
+        <button id="cm-mercury" onclick="setCmap('mercury')">水銀</button>
+        <button id="cm-lava" onclick="setCmap('lava')">溶岩</button>
+        <button id="cm-jelly" onclick="setCmap('jelly')">ゼリー</button>
+      </div>
+      <div class="tog-row" style="margin-top:8px;"><span class="tog-label">輪郭を光らせる</span>
+        <label class="tog"><input type="checkbox" id="togRim" checked><div class="tog-track"></div></label>
+      </div>
+    </div>
+
+    <div class="sec" style="font-family:var(--font-mono);font-size:9px;color:var(--text3);line-height:1.9;">
+      Space: 一時停止<br>
+      液体の塊がロゴAの形からBの形へ、<br>
+      表面張力でぬめっと融合しながら流れます
+    </div>
+  </div>
+
+  <div class="canvas-wrap" id="canvasWrap">
+    <canvas id="c"></canvas>
+    <div class="hint">2枚のロゴをアップロードしてください</div>
+    <div class="morph-bar"><div class="morph-fill" id="morphFill"></div></div>
+  </div>
+</div>
+
+<canvas id="sampleCanvas" style="display:none;"></canvas>
+<canvas id="fieldCanvas" style="display:none;"></canvas>
+
+<script>
+const canvas=document.getElementById('c');
+const ctx=canvas.getContext('2d');
+const wrap=document.getElementById('canvasWrap');
+const sampleCanvas=document.getElementById('sampleCanvas');
+const sctx=sampleCanvas.getContext('2d',{willReadFrequently:true});
+const fieldCanvas=document.getElementById('fieldCanvas');
+const fctx=fieldCanvas.getContext('2d');
+
+let W=0,H=0,FW=0,FH=0;
+const FSCALE=3; // field computed at lower res
+let blobs=null; // {x,y,vx,vy,tax,tay,tbx,tby,r,g,b}
+let nBlobs=0;
+let imgA=null,imgB=null;
+let morph=0,morphDir=1,holdTimer=0;
+let running=true,tick=0;
+let cmap='img';
+let field,fieldImg,fbuf;
+let fpsFrames=0,fpsLast=performance.now();
+
+function loadImg(input,slot){
+  const f=input.files[0];if(!f)return;
+  const img=new Image();
+  img.onload=()=>{if(slot==='A'){imgA=img;showThumb('slotA',img,'A');}else{imgB=img;showThumb('slotB',img,'B');}resample();};
+  img.src=URL.createObjectURL(f);
+}
+function showThumb(id,img,label){const slot=document.getElementById(id);slot.innerHTML='<div class="badge">'+label+'</div>';const im=document.createElement('img');im.src=img.src;slot.appendChild(im);}
+function setCmap(c){cmap=c;['img','mercury','lava','jelly'].forEach(k=>document.getElementById('cm-'+k).classList.toggle('on',k===c));}
+
+function imgPoints(img){
+  if(!img)return[];
+  const sw=160,sh=Math.round(160*img.height/img.width);
+  sampleCanvas.width=sw;sampleCanvas.height=sh;
+  sctx.fillStyle='#000';sctx.fillRect(0,0,sw,sh);
+  sctx.drawImage(img,0,0,sw,sh);
+  const data=sctx.getImageData(0,0,sw,sh).data;
+  const lumThr=+document.getElementById('sLum').value;
+  const invert=document.getElementById('togInvert').checked;
+  const scale=Math.min(W/img.width,H/img.height)*0.85;
+  const dw=img.width*scale,dh=img.height*scale;
+  const ox=(W-dw)/2,oy=(H-dh)/2;
+  const out=[];
+  for(let y=0;y<sh;y++)for(let x=0;x<sw;x++){
+    const i=(y*sw+x)*4;
+    let l=(data[i]*0.299+data[i+1]*0.587+data[i+2]*0.114)/255;
+    if(invert)l=1-l;
+    if(l>lumThr) out.push({x:ox+(x/sw)*dw,y:oy+(y/sh)*dh,r:data[i],g:data[i+1],b:data[i+2]});
+  }
+  return out;
+}
+
+function resample(){
+  if(W===0)return;
+  nBlobs=+document.getElementById('sN').value;
+  const ptsA=imgPoints(imgA), ptsB=imgPoints(imgB);
+  if(!blobs||blobs.length!==nBlobs){
+    blobs=new Array(nBlobs);
+    for(let i=0;i<nBlobs;i++) blobs[i]={x:Math.random()*W,y:Math.random()*H,vx:0,vy:0,tax:0,tay:0,tbx:0,tby:0,r:120,g:200,b:224,phase:Math.random()*Math.PI*2};
+  }
+  for(let i=0;i<nBlobs;i++){
+    const a=ptsA.length?ptsA[(Math.random()*ptsA.length)|0]:{x:W/2,y:H/2,r:120,g:200,b:224};
+    const b=ptsB.length?ptsB[(Math.random()*ptsB.length)|0]:{x:W/2,y:H/2,r:120,g:200,b:224};
+    blobs[i].tax=a.x;blobs[i].tay=a.y;
+    blobs[i].tbx=b.x;blobs[i].tby=b.y;
+    blobs[i].ar=a.r;blobs[i].ag=a.g;blobs[i].ab=a.b;
+    blobs[i].br=b.r;blobs[i].bg=b.g;blobs[i].bb=b.b;
+  }
+  document.getElementById('statN').textContent=nBlobs.toLocaleString();
+  if(imgA&&imgB)document.querySelector('.hint').style.display='none';
+}
+
+function noiseFlow(x,y,t){
+  const a=Math.sin(x*0.011+t*0.6)+Math.cos(y*0.013-t*0.5);
+  const b=Math.cos(x*0.012-t*0.55)+Math.sin(y*0.010+t*0.4);
+  return Math.atan2(b,a);
+}
+
+function step(){
+  tick++;
+  if(!blobs)return;
+  const ease=document.getElementById('togEase').checked;
+  const spd=+document.getElementById('sSpd').value;
+  const hold=+document.getElementById('sHold').value;
+  const follow=+document.getElementById('sFollow').value;
+  const swirl=+document.getElementById('sSwirl').value;
+  const pulse=+document.getElementById('sPulse').value;
+  const frict=+document.getElementById('sFrict').value;
+
+  if(holdTimer>0)holdTimer--;
+  else{
+    morph+=morphDir*spd;
+    if(morph>=1){morph=1;morphDir=-1;holdTimer=hold;}
+    else if(morph<=0){morph=0;morphDir=1;holdTimer=hold;}
+  }
+  let m=morph; if(ease)m=m*m*(3-2*m);
+  const trans=Math.sin(m*Math.PI);
+  const sw=swirl*trans;
+  const t=tick*0.01;
+
+  for(let i=0;i<nBlobs;i++){
+    const bl=blobs[i];
+    const tx=bl.tax*(1-m)+bl.tbx*m;
+    const ty=bl.tay*(1-m)+bl.tby*m;
+    bl.vx+=(tx-bl.x)*follow;
+    bl.vy+=(ty-bl.y)*follow;
+    if(sw>0){const ang=noiseFlow(bl.x,bl.y,t);bl.vx+=Math.cos(ang)*sw;bl.vy+=Math.sin(ang)*sw;}
+    bl.vx*=frict;bl.vy*=frict;
+    bl.x+=bl.vx;bl.y+=bl.vy;
+  }
+  document.getElementById('morphFill').style.width=(m*100)+'%';
+  document.getElementById('statMorph').textContent=morphDir>0?'A→B':'B→A';
+}
+
+const PALETTES={
+  mercury:[[180,190,200],[230,240,250]],
+  lava:[[120,20,10],[255,180,40]],
+  jelly:[[80,200,180],[180,255,230]],
+};
+
+function render(){
+  const m = document.getElementById('togEase').checked?morph*morph*(3-2*morph):morph;
+  const R=+document.getElementById('sR').value;
+  const thresh=+document.getElementById('sThresh').value;
+  const pulse=+document.getElementById('sPulse').value;
+  const rim=document.getElementById('togRim').checked;
+
+  // Compute metaball field at low res
+  for(let i=0;i<field.length;i++) field[i]=0;
+  const t=tick*0.05;
+  for(let i=0;i<nBlobs;i++){
+    const bl=blobs[i];
+    // pulsing radius
+    const pr=R*(1+pulse*0.4*Math.sin(t+bl.phase));
+    const fx=bl.x/FSCALE, fy=bl.y/FSCALE, fr=pr/FSCALE;
+    const r2=fr*fr;
+    const x0=Math.max(0,(fx-fr*2)|0), x1=Math.min(FW-1,(fx+fr*2)|0);
+    const y0=Math.max(0,(fy-fr*2)|0), y1=Math.min(FH-1,(fy+fr*2)|0);
+    for(let y=y0;y<=y1;y++)for(let x=x0;x<=x1;x++){
+      const dx=x-fx,dy=y-fy;
+      const d2=dx*dx+dy*dy+1;
+      field[y*FW+x]+=r2/d2;
+    }
+  }
+
+  // color
+  let c0,c1;
+  if(cmap==='img'){c0=null;}
+  else {const pal=PALETTES[cmap];c0=pal[0];c1=pal[1];}
+
+  const d=fbuf;
+  for(let y=0;y<FH;y++)for(let x=0;x<FW;x++){
+    const v=field[y*FW+x];
+    const i=(y*FW+x)*4;
+    if(v>thresh){
+      // inside blob
+      let r,g,b;
+      if(cmap==='img'){
+        // approximate color: interpolate logo colors by morph
+        r=120*(1-m)+120*m; g=200; b=224;
+        // sample-free: use a teal-ish default tinted by morph; better: average from nearest blob handled below
+        r=200; g=220; b=235;
+      } else {
+        const edge=Math.min(1,(v-thresh)/thresh);
+        r=c0[0]+(c1[0]-c0[0])*edge;
+        g=c0[1]+(c1[1]-c0[1])*edge;
+        b=c0[2]+(c1[2]-c0[2])*edge;
+      }
+      d[i]=r;d[i+1]=g;d[i+2]=b;d[i+3]=255;
+    } else if(rim && v>thresh*0.7){
+      // rim glow
+      const e=(v-thresh*0.7)/(thresh*0.3);
+      d[i]=86*e;d[i+1]=200*e;d[i+2]=224*e;d[i+3]=255*e;
+    } else {
+      d[i]=6;d[i+1]=8;d[i+2]=13;d[i+3]=255;
+    }
+  }
+  fctx.putImageData(fieldImg,0,0);
+
+  // For img color mode, recolor by drawing blobs' colors as soft sprites under threshold mask
+  ctx.imageSmoothingEnabled=true;
+  ctx.clearRect(0,0,W,H);
+  ctx.fillStyle='#06080d';ctx.fillRect(0,0,W,H);
+  if(cmap==='img'){
+    // draw colored soft circles, then we rely on additive look
+    ctx.globalCompositeOperation='lighter';
+    for(let i=0;i<nBlobs;i++){
+      const bl=blobs[i];
+      const cr=bl.ar*(1-m)+bl.br*m, cg=bl.ag*(1-m)+bl.bg*m, cb=bl.ab*(1-m)+bl.bb*m;
+      const pr=R*(1+pulse*0.4*Math.sin(t+bl.phase));
+      const grd=ctx.createRadialGradient(bl.x,bl.y,0,bl.x,bl.y,pr*1.6);
+      grd.addColorStop(0,`rgba(${cr|0},${cg|0},${cb|0},0.5)`);
+      grd.addColorStop(1,`rgba(${cr|0},${cg|0},${cb|0},0)`);
+      ctx.fillStyle=grd;
+      ctx.beginPath();ctx.arc(bl.x,bl.y,pr*1.6,0,Math.PI*2);ctx.fill();
+    }
+    ctx.globalCompositeOperation='source-over';
+    // overlay the metaball silhouette for crisp edges
+    ctx.globalCompositeOperation='multiply';
+    ctx.drawImage(fieldCanvas,0,0,FW,FH,0,0,W,H);
+    ctx.globalCompositeOperation='source-over';
+  } else {
+    ctx.drawImage(fieldCanvas,0,0,FW,FH,0,0,W,H);
+  }
+}
+
+function loop(){
+  requestAnimationFrame(loop);
+  fpsFrames++;
+  const now=performance.now();
+  if(now-fpsLast>=1000){document.getElementById('statFps').textContent=fpsFrames;fpsFrames=0;fpsLast=now;}
+  if(running)step();
+  render();
+}
+
+function togglePlay(){running=!running;const btn=document.getElementById('btnPlay');btn.textContent=running?'■ pause':'▶ resume';btn.classList.toggle('running',running);}
+window.addEventListener('keydown',e=>{if(e.code==='Space'){e.preventDefault();togglePlay();}});
+function resize(){
+  W=canvas.width=wrap.clientWidth;H=canvas.height=wrap.clientHeight;
+  FW=Math.floor(W/FSCALE);FH=Math.floor(H/FSCALE);
+  fieldCanvas.width=FW;fieldCanvas.height=FH;
+  field=new Float32Array(FW*FH);
+  fieldImg=fctx.createImageData(FW,FH);fbuf=fieldImg.data;
+}
+window.addEventListener('resize',()=>{resize();resample();});
+wrap.addEventListener('dragover',e=>e.preventDefault());
+wrap.addEventListener('drop',e=>{e.preventDefault();const files=[...e.dataTransfer.files].filter(f=>f.type.startsWith('image/'));if(files[0]){const dt=new DataTransfer();dt.items.add(files[0]);document.getElementById('fileA').files=dt.files;loadImg(document.getElementById('fileA'),'A');}if(files[1]){const dt=new DataTransfer();dt.items.add(files[1]);document.getElementById('fileB').files=dt.files;loadImg(document.getElementById('fileB'),'B');}});
+
+let mediaRecorder=null,recChunks=[];
+function toggleRec(){if(!mediaRecorder||mediaRecorder.state==='inactive')startRec();else stopRec();}
+function startRec(){recChunks=[];const stream=canvas.captureStream(30);const opts={mimeType:'video/webm;codecs=vp9',videoBitsPerSecond:9000000};if(!MediaRecorder.isTypeSupported(opts.mimeType))opts.mimeType='video/webm';try{mediaRecorder=new MediaRecorder(stream,opts);}catch(e){mediaRecorder=new MediaRecorder(stream);}mediaRecorder.ondataavailable=e=>{if(e.data.size>0)recChunks.push(e.data);};mediaRecorder.onstop=()=>{document.getElementById('btnDL').disabled=false;document.getElementById('recDot').classList.remove('on');document.getElementById('btnRec').textContent='● rec';document.getElementById('btnRec').classList.remove('recording');};mediaRecorder.start(100);document.getElementById('recDot').classList.add('on');document.getElementById('btnRec').textContent='■ stop';document.getElementById('btnRec').classList.add('recording');}
+function stopRec(){if(mediaRecorder&&mediaRecorder.state!=='inactive')mediaRecorder.stop();}
+function downloadVid(){if(!recChunks.length)return;const blob=new Blob(recChunks,{type:'video/webm'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='metaball_morph_'+Date.now()+'.webm';a.click();}
+
+resize();
+resample();
+loop();
+</script>
+</body>
+</html>

@@ -1,0 +1,886 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Creature Ecosystem</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+JP:wght@300;400;500&display=swap');
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#070809;--surface:#0e1012;--border:#1c1f24;--border2:#2a2e36;
+  --accent:#7c6af7;--accent2:#4a3fcc;
+  --text:#cfd2da;--text2:#6c7280;--text3:#33373f;
+  --font-mono:'IBM Plex Mono',monospace;--font-ui:'IBM Plex Sans JP',sans-serif;
+}
+body{background:var(--bg);color:var(--text);font-family:var(--font-ui);height:100vh;display:flex;flex-direction:column;overflow:hidden;user-select:none;}
+header{display:flex;align-items:center;gap:14px;padding:8px 18px;border-bottom:1px solid var(--border);background:var(--surface);flex-shrink:0;}
+.logo{font-family:var(--font-mono);font-size:12px;font-weight:500;color:var(--accent);letter-spacing:.1em;text-transform:uppercase;}
+.logo em{color:var(--text3);font-style:normal;}
+.stats{margin-left:auto;display:flex;gap:18px;}
+.stat{display:flex;flex-direction:column;align-items:flex-end;}
+.stat-label{font-family:var(--font-mono);font-size:8px;color:var(--text3);letter-spacing:.1em;text-transform:uppercase;}
+.stat-val{font-family:var(--font-mono);font-size:13px;font-weight:500;color:var(--text);line-height:1.2;}
+.main{display:flex;flex:1;overflow:hidden;}
+.sidebar{width:262px;flex-shrink:0;background:var(--surface);border-right:1px solid var(--border);display:flex;flex-direction:column;overflow-y:auto;}
+.sidebar::-webkit-scrollbar{width:3px;}
+.sidebar::-webkit-scrollbar-thumb{background:var(--border2);border-radius:2px;}
+.sec{padding:11px 13px;border-bottom:1px solid var(--border);}
+.sec-title{font-family:var(--font-mono);font-size:8px;color:var(--text3);letter-spacing:.14em;text-transform:uppercase;margin-bottom:9px;}
+button{font-family:var(--font-mono);font-size:11px;font-weight:500;background:transparent;border:1px solid var(--border);color:var(--text2);padding:5px 10px;border-radius:3px;cursor:pointer;transition:all .15s;white-space:nowrap;}
+button:hover{border-color:var(--accent2);color:var(--accent);background:rgba(124,106,247,.07);}
+button.on{border-color:var(--accent)!important;color:var(--accent)!important;background:rgba(124,106,247,.14)!important;}
+.play-btn{width:100%;padding:7px;font-size:12px;border-color:var(--accent2);color:var(--accent);}
+.play-btn.running{background:rgba(124,106,247,.1);}
+.sl-row{margin-bottom:8px;}
+.sl-head{display:flex;justify-content:space-between;margin-bottom:3px;}
+.sl-name{font-family:var(--font-mono);font-size:10px;color:var(--text2);}
+.sl-val{font-family:var(--font-mono);font-size:10px;color:var(--accent);}
+input[type=range]{-webkit-appearance:none;width:100%;height:2px;background:var(--border);border-radius:1px;outline:none;}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:11px;height:11px;background:var(--accent);border-radius:50%;cursor:pointer;}
+
+.sp-card{border:1px solid var(--border);border-radius:6px;padding:9px 10px;margin-bottom:8px;}
+.sp-head{display:flex;align-items:center;gap:7px;margin-bottom:5px;}
+.sp-dot{width:11px;height:11px;border-radius:50%;flex-shrink:0;}
+.sp-name{font-family:var(--font-mono);font-size:11px;font-weight:500;flex:1;}
+.sp-cnt{font-family:var(--font-mono);font-size:10px;color:var(--accent);}
+.sp-desc{font-family:var(--font-mono);font-size:8px;color:var(--text3);line-height:1.7;margin-bottom:6px;}
+
+.tog-row{display:flex;align-items:center;justify-content:space-between;margin-bottom:7px;}
+.tog-label{font-family:var(--font-mono);font-size:10px;color:var(--text2);}
+.tog{position:relative;width:28px;height:14px;flex-shrink:0;}
+.tog input{opacity:0;width:0;height:0;position:absolute;}
+.tog-track{position:absolute;inset:0;background:var(--border);border-radius:8px;cursor:pointer;transition:background .2s;}
+.tog input:checked+.tog-track{background:var(--accent2);}
+.tog-track::after{content:'';position:absolute;width:10px;height:10px;left:2px;top:2px;background:var(--text3);border-radius:50%;transition:transform .2s,background .2s;}
+.tog input:checked+.tog-track::after{transform:translateX(14px);background:var(--accent);}
+
+.canvas-wrap{flex:1;position:relative;overflow:hidden;background:#000;}
+canvas{display:block;}
+.hint{position:absolute;bottom:10px;left:50%;transform:translateX(-50%);font-family:var(--font-mono);font-size:9px;color:var(--text3);pointer-events:none;white-space:nowrap;}
+.legend{position:absolute;top:10px;right:12px;display:flex;flex-direction:column;gap:4px;font-family:var(--font-mono);font-size:9px;color:var(--text3);background:rgba(14,16,18,.6);padding:8px 10px;border-radius:6px;border:1px solid var(--border);}
+.legend-row{display:flex;align-items:center;gap:6px;}
+.legend-dot{width:8px;height:8px;border-radius:50%;}
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">Creature <em>//</em> Ecosystem</div>
+  <div class="stats">
+    <div class="stat"><span class="stat-label">個体数</span><span class="stat-val" id="statN">0</span></div>
+    <div class="stat"><span class="stat-label">食料</span><span class="stat-val" id="statFood">0</span></div>
+    <div class="stat"><span class="stat-label">fps</span><span class="stat-val" id="statFps">—</span></div>
+  </div>
+</header>
+
+<div class="main">
+  <div class="sidebar">
+
+    <div class="sec">
+      <button class="play-btn running" id="btnPlay" onclick="togglePlay()">■ pause</button>
+      <div style="display:flex;gap:5px;margin-top:5px;">
+        <button style="flex:1" onclick="respawnAll()">再生成</button>
+        <button style="flex:1" onclick="clearTrails()">残像クリア</button>
+      </div>
+    </div>
+
+    <div class="sec">
+      <div class="sec-title">生物種（独自ルール）</div>
+      <div id="speciesCards"></div>
+    </div>
+
+    <div class="sec">
+      <div class="sec-title">速度</div>
+      <div class="sl-row">
+        <div class="sl-head"><span class="sl-name">捕食者の速度</span><span class="sl-val" id="vSpeedPred">1.5×</span></div>
+        <input type="range" min="0.2" max="4" value="1.5" step="0.1" id="sSpeedPred" oninput="vSpeedPred.textContent=this.value+'×'">
+      </div>
+      <div class="sl-row">
+        <div class="sl-head"><span class="sl-name">被食者の速度</span><span class="sl-val" id="vSpeedPrey">1.15×</span></div>
+        <input type="range" min="0.2" max="4" value="1.15" step="0.1" id="sSpeedPrey" oninput="vSpeedPrey.textContent=this.value+'×'">
+      </div>
+      <div class="sl-row">
+        <div class="sl-head"><span class="sl-name">全体速度倍率</span><span class="sl-val" id="vSpeed">1.0×</span></div>
+        <input type="range" min="0.2" max="3" value="1" step="0.1" id="sSpeed" oninput="vSpeed.textContent=this.value+'×'">
+      </div>
+    </div>
+
+    <div class="sec">
+      <div class="sec-title">障害物（岩）</div>
+      <div class="sl-row">
+        <div class="sl-head"><span class="sl-name">岩の数</span><span class="sl-val" id="vRockN">14</span></div>
+        <input type="range" min="0" max="40" value="14" step="1" id="sRockN" oninput="vRockN.textContent=this.value">
+      </div>
+      <div class="sl-row">
+        <div class="sl-head"><span class="sl-name">岩の大きさ</span><span class="sl-val" id="vRockSz">26</span></div>
+        <input type="range" min="8" max="60" value="26" step="2" id="sRockSz" oninput="vRockSz.textContent=this.value">
+      </div>
+      <div class="sl-row">
+        <div class="sl-head"><span class="sl-name">クラスター度</span><span class="sl-val" id="vRockClu">3</span></div>
+        <input type="range" min="1" max="6" value="3" step="1" id="sRockClu" oninput="vRockClu.textContent=this.value">
+      </div>
+      <div style="display:flex;gap:5px;">
+        <button style="flex:1" onclick="generateObstacles()">岩を生成</button>
+        <button style="flex:1" onclick="clearObstacles()">岩を消去</button>
+      </div>
+    </div>
+
+    <div class="sec">
+      <div class="sec-title">表示</div>
+      <div class="tog-row"><span class="tog-label">脚を表示</span>
+        <label class="tog"><input type="checkbox" id="togLegs" checked><div class="tog-track"></div></label>
+      </div>
+      <div class="tog-row"><span class="tog-label">残像</span>
+        <label class="tog"><input type="checkbox" id="togTrail" checked><div class="tog-track"></div></label>
+      </div>
+      <div class="tog-row"><span class="tog-label">センサー範囲表示</span>
+        <label class="tog"><input type="checkbox" id="togSensor"><div class="tog-track"></div></label>
+      </div>
+    </div>
+
+    <div class="sec">
+      <div class="sec-title">食料</div>
+      <div class="sl-row">
+        <div class="sl-head"><span class="sl-name">出現速度</span><span class="sl-val" id="vFoodRate">2.0</span></div>
+        <input type="range" min="0" max="10" value="2" step="0.5" id="sFoodRate" oninput="vFoodRate.textContent=this.value">
+      </div>
+    </div>
+
+    <div class="sec" style="font-family:var(--font-mono);font-size:9px;color:var(--text3);line-height:1.9;">
+      Space: 一時停止<br>
+      各カードのスライダーで個体数を調整<br>
+      ハンターはグレイザーを捕食、<br>
+      グレイザーは食料(緑の点)を採食します
+    </div>
+  </div>
+
+  <div class="canvas-wrap" id="canvasWrap">
+    <canvas id="c"></canvas>
+    <div class="legend" id="legend"></div>
+    <div class="hint">Space: pause / 各種の個体数はサイドバーで調整</div>
+  </div>
+</div>
+
+<script>
+// ════════════════════════════════════════════════
+//  SPECIES DEFINITIONS — each has its own rule
+// ════════════════════════════════════════════════
+const SPECIES = [
+  {
+    id:'hunter', name:'ハンター（捕食者）', color:[224,82,82],
+    segments:7, legPairsEvery:2, size:6, baseSpeed:1.5, turnRate:0.11,
+    rule:'predator',
+    energyBased:true, energyDecay:0.045, eatGain:55, repro:80,
+    sense:140, desc:'他の全ての種を追跡・捕食。エネルギーが尽きると死亡。捕食でエネルギー回復＆繁殖。',
+    pop:6, maxPop:18
+  },
+  {
+    id:'grazer', name:'グレイザー（被食者）', color:[31,184,133],
+    segments:6, legPairsEvery:2, size:4.5, baseSpeed:1.15, turnRate:0.13,
+    rule:'prey', fleeId:'hunter',
+    energyBased:true, energyDecay:0.03, eatGain:35, repro:75,
+    sense:110, fleeSense:120, desc:'食料(緑の点)を探して採食。ハンターを感知すると逃走。エネルギー切れで死亡。',
+    pop:14, maxPop:40
+  },
+  {
+    id:'wallcrawler', name:'ウォールクローラー', color:[56,200,224],
+    segments:11, legPairsEvery:1, size:4.2, baseSpeed:0.95, turnRate:0.05,
+    rule:'wall', followDist:34,
+    energyBased:false, desc:'壁・境界に沿って徘徊し続ける。常に壁から一定距離を保つ。',
+    pop:0, maxPop:10
+  },
+  {
+    id:'wanderer', name:'ワンダラー', color:[124,106,247],
+    segments:8, legPairsEvery:2, size:4.5, baseSpeed:1.1, turnRate:0.07,
+    rule:'random', turnNoise:0.18, turnInterval:40,
+    energyBased:false, desc:'ランダムウォーク。一定間隔でランダムに方向転換する。',
+    pop:0, maxPop:14
+  },
+  {
+    id:'swarm', name:'スウォーム（群れ）', color:[240,220,50],
+    segments:5, legPairsEvery:2, size:3.2, baseSpeed:1.35, turnRate:0.15,
+    rule:'flock', sense:55,
+    energyBased:false, desc:'同種で整列・結合・分離（ボイド則）。常に群れを作って移動。',
+    pop:0, maxPop:40
+  },
+  {
+    id:'centipede', name:'センチピード', color:[212,83,126],
+    segments:18, legPairsEvery:1, size:3.6, baseSpeed:0.55, turnRate:0.035,
+    rule:'undulate', turnNoise:0.10, turnInterval:70, waveAmp:5, waveFreq:0.35,
+    energyBased:false, desc:'長い体節をうねらせながらゆっくり徘徊する。方向転換は緩やか。',
+    pop:0, maxPop:8
+  },
+];
+
+// ════════════════════════════════════════════════
+//  STATE
+// ════════════════════════════════════════════════
+const canvas=document.getElementById('c');
+const ctx=canvas.getContext('2d');
+const wrap=document.getElementById('canvasWrap');
+
+let creatures=[];
+let food=[];
+let obstacles=[];
+let running=true;
+let fpsFrames=0,fpsLast=performance.now();
+let nextId=0;
+
+// ── Creature factory ─────────────────────────────
+function spawnCreature(spec, x, y, angle){
+  const W=canvas.width,H=canvas.height;
+  if(x===undefined){x=Math.random()*W; y=Math.random()*H;}
+  if(angle===undefined) angle=Math.random()*Math.PI*2;
+  return {
+    id:nextId++,
+    spec,
+    x,y,angle,
+    speed:spec.baseSpeed,
+    path:[{x,y}],
+    travel:0,
+    energy: spec.energyBased ? 60+Math.random()*30 : 100,
+    age:0,
+    turnTimer: spec.turnInterval ? Math.random()*spec.turnInterval : 0,
+    targetAngle: angle,
+    wallSign: Math.random()<0.5?1:-1,
+    lastCheckX:x, lastCheckY:y, stuckTimer:50+Math.floor(Math.random()*20),
+    chaseTargetId:null, chaseTime:0, stamina:100,
+  };
+}
+
+function respawnAll(){
+  creatures=[];
+  food=[];
+  const W=canvas.width,H=canvas.height;
+  SPECIES.forEach(spec=>{
+    const n=+document.getElementById('pop-'+spec.id).value;
+    for(let i=0;i<n;i++) creatures.push(spawnCreature(spec));
+  });
+  for(let i=0;i<40;i++) food.push({x:Math.random()*W,y:Math.random()*H,r:2.5});
+  updateStats();
+}
+
+function clearTrails(){
+  ctx.fillStyle='#000';
+  ctx.fillRect(0,0,canvas.width,canvas.height);
+}
+
+// ── Obstacles (rocks) ─────────────────────────────
+function generateObstacles(){
+  const W=canvas.width,H=canvas.height;
+  const n=+document.getElementById('sRockN').value;
+  const baseSz=+document.getElementById('sRockSz').value;
+  const cluster=+document.getElementById('sRockClu').value;
+  obstacles=[];
+  const numClusters=Math.max(1,Math.round(n/cluster));
+  let placed=0;
+  for(let c=0;c<numClusters && placed<n;c++){
+    const cx=baseSz*2+Math.random()*(W-baseSz*4);
+    const cy=baseSz*2+Math.random()*(H-baseSz*4);
+    const cnt=Math.min(cluster, n-placed);
+    for(let i=0;i<cnt;i++){
+      const ang=Math.random()*Math.PI*2;
+      const dist=Math.random()*baseSz*1.4;
+      const r=baseSz*(0.5+Math.random()*0.7);
+      obstacles.push({
+        x:cx+Math.cos(ang)*dist, y:cy+Math.sin(ang)*dist, r,
+        rot:Math.random()*Math.PI*2,
+        verts:5+Math.floor(Math.random()*3),
+        jag:0.7+Math.random()*0.3
+      });
+      placed++;
+    }
+  }
+  // Clamp inside bounds
+  obstacles.forEach(o=>{
+    o.x=Math.min(Math.max(o.x,o.r+4),W-o.r-4);
+    o.y=Math.min(Math.max(o.y,o.r+4),H-o.r-4);
+  });
+}
+function clearObstacles(){ obstacles=[]; }
+
+function renderObstacles(){
+  ctx.fillStyle='rgba(90,90,100,0.85)';
+  ctx.strokeStyle='rgba(160,160,175,0.5)';
+  ctx.lineWidth=1;
+  for(const o of obstacles){
+    ctx.beginPath();
+    for(let i=0;i<=o.verts;i++){
+      const a=o.rot+(i/o.verts)*Math.PI*2;
+      const rr=o.r*(i%2===0?1:o.jag);
+      const px=o.x+Math.cos(a)*rr, py=o.y+Math.sin(a)*rr;
+      i===0?ctx.moveTo(px,py):ctx.lineTo(px,py);
+    }
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+  }
+}
+
+// Push a creature out of any overlapping obstacle
+function resolveObstacleCollision(cr){
+  for(const o of obstacles){
+    const dx=cr.x-o.x, dy=cr.y-o.y;
+    const dist=Math.hypot(dx,dy);
+    const minDist=o.r+cr.spec.size;
+    if(dist>0 && dist<minDist){
+      const nx=dx/dist, ny=dy/dist;
+      const overlap=minDist-dist;
+      cr.x+=nx*overlap; cr.y+=ny*overlap;
+      // Reflect angle off obstacle normal
+      const dot=Math.cos(cr.angle)*nx+Math.sin(cr.angle)*ny;
+      if(dot<0){
+        cr.angle = cr.angle - 2*dot*Math.atan2(ny,nx)*0 ; // placeholder unused
+        const inAngle=cr.angle;
+        const nAngle=Math.atan2(ny,nx);
+        // Reflect vector across normal
+        const vx=Math.cos(inAngle), vy=Math.sin(inAngle);
+        const d2=vx*nx+vy*ny;
+        const rx=vx-2*d2*nx, ry=vy-2*d2*ny;
+        cr.angle=Math.atan2(ry,rx);
+      }
+    }
+  }
+}
+
+// Steering avoidance: look ahead for obstacles and steer away before collision
+function avoidObstacles(cr){
+  const lookAhead=cr.spec.size*4+10;
+  for(const o of obstacles){
+    const dx=o.x-cr.x, dy=o.y-cr.y;
+    const dist=Math.hypot(dx,dy);
+    if(dist>lookAhead+o.r) continue;
+    const angToObs=Math.atan2(dy,dx);
+    let diff=angToObs-cr.angle;
+    while(diff>Math.PI) diff-=Math.PI*2;
+    while(diff<-Math.PI) diff+=Math.PI*2;
+    // Only react if obstacle roughly ahead
+    if(Math.abs(diff)<Math.PI*0.6){
+      const closeness=1-(dist-o.r)/lookAhead;
+      const turnAway = diff>=0 ? -1 : 1;
+      cr.angle += turnAway * closeness * (0.13+Math.random()*0.06);
+    }
+  }
+}
+
+// ════════════════════════════════════════════════
+//  RULES — each species' unique behavior
+// ════════════════════════════════════════════════
+function ruleRandom(cr){
+  const spec=cr.spec;
+  cr.turnTimer--;
+  if(cr.turnTimer<=0){
+    cr.targetAngle = cr.angle + (Math.random()-0.5)*Math.PI*1.4;
+    cr.turnTimer = spec.turnInterval*(0.5+Math.random());
+  }
+  steerToward(cr, cr.targetAngle, spec.turnRate);
+}
+
+function ruleUndulate(cr){
+  const spec=cr.spec;
+  cr.turnTimer--;
+  if(cr.turnTimer<=0){
+    cr.targetAngle = cr.angle + (Math.random()-0.5)*Math.PI*0.7;
+    cr.turnTimer = spec.turnInterval*(0.6+Math.random()*0.8);
+  }
+  steerToward(cr, cr.targetAngle, spec.turnRate);
+}
+
+function ruleWall(cr){
+  const spec=cr.spec;
+  const W=canvas.width,H=canvas.height;
+  const d=spec.followDist;
+  const distL=cr.x, distR=W-cr.x, distT=cr.y, distB=H-cr.y;
+  const minD=Math.min(distL,distR,distT,distB);
+
+  if(minD < d*1.8){
+    let tangent;
+    if(minD===distL) tangent = -Math.PI/2;
+    else if(minD===distT) tangent = 0;
+    else if(minD===distR) tangent = Math.PI/2;
+    else tangent = Math.PI;
+
+    let correction=0;
+    if(minD < d*0.7) correction = 0.35;
+    else if(minD > d*1.3) correction = -0.35;
+    steerToward(cr, tangent + correction, spec.turnRate);
+  } else {
+    let tx,ty;
+    if(minD===distL){tx=0;ty=cr.y;}
+    else if(minD===distR){tx=W;ty=cr.y;}
+    else if(minD===distT){tx=cr.x;ty=0;}
+    else {tx=cr.x;ty=H;}
+    const ang=Math.atan2(ty-cr.y,tx-cr.x);
+    steerToward(cr, ang, spec.turnRate*0.6);
+  }
+}
+
+function ruleFlock(cr, all){
+  const spec=cr.spec;
+  let ax=0,ay=0,cx=0,cy=0,sx=0,sy=0,n=0;
+  for(const o of all){
+    if(o===cr||o.spec.id!==spec.id) continue;
+    const dx=o.x-cr.x,dy=o.y-cr.y;
+    const dist=Math.hypot(dx,dy);
+    if(dist>spec.sense||dist===0) continue;
+    n++;
+    ax+=Math.cos(o.angle); ay+=Math.sin(o.angle);
+    cx+=o.x; cy+=o.y;
+    if(dist<spec.sense*0.4){ sx-=dx/dist; sy-=dy/dist; }
+  }
+  let desired=cr.angle;
+  if(n>0){
+    const alignAng=Math.atan2(ay,ax);
+    const cohAng=Math.atan2(cy/n-cr.y, cx/n-cr.x);
+    let vx=Math.cos(alignAng)*0.4+Math.cos(cohAng)*0.3;
+    let vy=Math.sin(alignAng)*0.4+Math.sin(cohAng)*0.3;
+    if(sx!==0||sy!==0){
+      const sepAng=Math.atan2(sy,sx);
+      vx+=Math.cos(sepAng)*0.6; vy+=Math.sin(sepAng)*0.6;
+    }
+    if(vx!==0||vy!==0) desired=Math.atan2(vy,vx);
+  } else {
+    cr.turnTimer=(cr.turnTimer||0)-1;
+    if(cr.turnTimer<=0){cr.targetAngle=cr.angle+(Math.random()-0.5)*1.2;cr.turnTimer=30;}
+    desired=cr.targetAngle;
+  }
+  steerToward(cr, desired, spec.turnRate);
+}
+
+function ruleSeekFlee(cr, all, food){
+  const spec=cr.spec;
+  if(spec.rule==='predator'){
+    let target=null,best=Infinity;
+    for(const o of all){
+      if(o.spec.id===spec.id||o.dead) continue;
+      const dist=Math.hypot(o.x-cr.x,o.y-cr.y);
+      if(dist<best&&dist<spec.sense){best=dist;target=o;}
+    }
+    if(target){
+      const ang=Math.atan2(target.y-cr.y,target.x-cr.x)+(Math.random()-0.5)*0.25;
+      steerToward(cr, ang, spec.turnRate);
+
+      // Track sustained chase of the same target -> desperation burst
+      if(cr.chaseTargetId===target.id){
+        cr.chaseTime++;
+      } else {
+        cr.chaseTargetId=target.id;
+        cr.chaseTime=0;
+      }
+      // Burst grows with chase duration: up to +120% speed after ~4s
+      const burst = 1 + Math.min(cr.chaseTime/240, 1.2);
+      cr.speed = spec.baseSpeed * burst;
+
+      if(best<spec.size+target.spec.size){
+        target.dead=true;
+        cr.energy=Math.min(100,cr.energy+spec.eatGain);
+        spawnFoodBurst(target.x,target.y,2);
+        cr.chaseTargetId=null; cr.chaseTime=0;
+      }
+    } else {
+      cr.speed=spec.baseSpeed;
+      cr.chaseTargetId=null; cr.chaseTime=Math.max(0,cr.chaseTime-2);
+      ruleRandomLike(cr);
+    }
+  } else if(spec.rule==='prey'){
+    let predator=null,best=Infinity;
+    for(const o of all){
+      if(o.spec.id!==spec.fleeId) continue;
+      const dist=Math.hypot(o.x-cr.x,o.y-cr.y);
+      if(dist<best&&dist<spec.fleeSense){best=dist;predator=o;}
+    }
+    if(predator){
+      const ang=Math.atan2(cr.y-predator.y,cr.x-predator.x)+(Math.random()-0.5)*0.3;
+      steerToward(cr, ang, spec.turnRate*1.4);
+      // Fleeing drains stamina; low stamina -> slows down, lets predator catch up
+      cr.stamina=Math.max(0,cr.stamina-0.6);
+      const staminaFactor=0.45+0.55*(cr.stamina/100);
+      cr.speed=spec.baseSpeed*1.4*staminaFactor;
+      return;
+    }
+    // Not being chased: recover stamina
+    cr.stamina=Math.min(100,cr.stamina+0.4);
+    cr.speed=spec.baseSpeed;
+    let target=null,best2=Infinity;
+    for(const f of food){
+      const dist=Math.hypot(f.x-cr.x,f.y-cr.y);
+      if(dist<best2&&dist<spec.sense){best2=dist;target=f;}
+    }
+    if(target){
+      const ang=Math.atan2(target.y-cr.y,target.x-cr.x);
+      steerToward(cr, ang, spec.turnRate);
+      if(best2<spec.size+target.r+2){
+        target.dead=true;
+        cr.energy=Math.min(100,cr.energy+spec.eatGain);
+      }
+    } else {
+      ruleRandomLike(cr);
+    }
+  }
+}
+
+function ruleRandomLike(cr){
+  cr.turnTimer=(cr.turnTimer||0)-1;
+  if(cr.turnTimer<=0){
+    cr.targetAngle=cr.angle+(Math.random()-0.5)*Math.PI;
+    cr.turnTimer=35+Math.random()*30;
+  }
+  steerToward(cr, cr.targetAngle, cr.spec.turnRate);
+}
+
+function steerToward(cr, targetAngle, rate){
+  let diff=targetAngle-cr.angle;
+  while(diff>Math.PI) diff-=Math.PI*2;
+  while(diff<-Math.PI) diff+=Math.PI*2;
+  cr.angle += diff*rate;
+}
+
+function spawnFoodBurst(x,y,n){
+  for(let i=0;i<n;i++){
+    food.push({x:x+(Math.random()-0.5)*20,y:y+(Math.random()-0.5)*20,r:2.5});
+  }
+}
+
+// ════════════════════════════════════════════════
+//  UPDATE LOOP
+// ════════════════════════════════════════════════
+function updateCreature(cr, all){
+  const spec=cr.spec;
+  const speedMul=+document.getElementById('sSpeed').value;
+  const predMul=+document.getElementById('sSpeedPred').value;
+  const preyMul=+document.getElementById('sSpeedPrey').value;
+  const roleMul = spec.rule==='predator'?predMul : spec.rule==='prey'?preyMul : 1;
+
+  switch(spec.rule){
+    case 'random': ruleRandom(cr); break;
+    case 'undulate': ruleUndulate(cr); break;
+    case 'wall': ruleWall(cr); break;
+    case 'flock': ruleFlock(cr, all); break;
+    case 'predator':
+    case 'prey': ruleSeekFlee(cr, all, food); break;
+  }
+
+  avoidObstacles(cr);
+
+  const sp=(cr.speed||spec.baseSpeed)*speedMul*roleMul;
+  cr.x += Math.cos(cr.angle)*sp;
+  cr.y += Math.sin(cr.angle)*sp;
+
+  resolveObstacleCollision(cr);
+
+  const W=canvas.width,H=canvas.height,m=spec.size+2;
+  if(cr.x<m){cr.x=m;cr.angle=reflect(cr.angle,'v');}
+  if(cr.x>W-m){cr.x=W-m;cr.angle=reflect(cr.angle,'v');}
+  if(cr.y<m){cr.y=m;cr.angle=reflect(cr.angle,'h');}
+  if(cr.y>H-m){cr.y=H-m;cr.angle=reflect(cr.angle,'h');}
+
+  cr.travel += sp;
+  cr.age++;
+
+  // Stuck/loop detection: if barely moved over stuckTimer frames, apply random kick
+  cr.stuckTimer--;
+  if(cr.stuckTimer<=0){
+    const moved=Math.hypot(cr.x-cr.lastCheckX,cr.y-cr.lastCheckY);
+    if(moved < spec.size*1.5){
+      cr.angle += (Math.random()-0.5)*Math.PI*1.6 + (Math.random()<0.5?Math.PI:0);
+    }
+    cr.lastCheckX=cr.x; cr.lastCheckY=cr.y;
+    cr.stuckTimer=45+Math.floor(Math.random()*30);
+  }
+
+  cr.path.push({x:cr.x,y:cr.y});
+  const maxPath=spec.segments*4+10;
+  if(cr.path.length>maxPath) cr.path.shift();
+
+  if(spec.energyBased){
+    cr.energy -= spec.energyDecay*speedMul;
+    if(cr.energy<=0) cr.dead=true;
+    if(cr.energy>=spec.repro){
+      const alive=all.filter(o=>o.spec.id===spec.id&&!o.dead).length;
+      if(alive<spec.maxPop){
+        cr.energy*=0.5;
+        const child=spawnCreature(spec, cr.x, cr.y, cr.angle+Math.PI+(Math.random()-0.5));
+        child.energy=cr.energy;
+        creatures.push(child);
+      }
+    }
+  }
+}
+function reflect(angle,axis){
+  if(axis==='v') return Math.PI-angle;
+  return -angle;
+}
+
+// ── Collision resolution: prevent bodies from overlapping ──
+function resolveCollisions(all){
+  const W=canvas.width,H=canvas.height;
+  for(let i=0;i<all.length;i++){
+    const a=all[i];
+    if(a.dead) continue;
+    for(let j=i+1;j<all.length;j++){
+      const b=all[j];
+      if(b.dead) continue;
+      let dx=b.x-a.x, dy=b.y-a.y;
+      const dist=Math.hypot(dx,dy);
+      const minDist=a.spec.size+b.spec.size;
+      if(dist>0 && dist<minDist){
+        const overlap=(minDist-dist);
+        const nx=dx/dist, ny=dy/dist;
+        // Push each apart proportional to overlap (split evenly)
+        const push=overlap*0.5;
+        a.x-=nx*push; a.y-=ny*push;
+        b.x+=nx*push; b.y+=ny*push;
+        // Clamp back inside bounds
+        a.x=Math.min(Math.max(a.x,a.spec.size+2),W-a.spec.size-2);
+        a.y=Math.min(Math.max(a.y,a.spec.size+2),H-a.spec.size-2);
+        b.x=Math.min(Math.max(b.x,b.spec.size+2),W-b.spec.size-2);
+        b.y=Math.min(Math.max(b.y,b.spec.size+2),H-b.spec.size-2);
+      }
+    }
+  }
+}
+
+// ════════════════════════════════════════════════
+//  RENDER
+// ════════════════════════════════════════════════
+function renderCreature(cr){
+  const spec=cr.spec;
+  const path=cr.path;
+  const spacing=spec.size*1.25;
+  const showLegs=document.getElementById('togLegs').checked;
+  const r=spec.color[0],g=spec.color[1],b=spec.color[2];
+
+  const segs=[{x:cr.x,y:cr.y,a:cr.angle}];
+  let lastP={x:cr.x,y:cr.y};
+  let idx=path.length-1;
+  for(let s=1;s<spec.segments;s++){
+    let need=spacing;
+    while(need>0&&idx>0){
+      idx--;
+      const p=path[idx];
+      const dd=Math.hypot(lastP.x-p.x,lastP.y-p.y);
+      if(dd>=need){
+        const t=need/dd;
+        const nx=lastP.x+(p.x-lastP.x)*t, ny=lastP.y+(p.y-lastP.y)*t;
+        segs.push({x:nx,y:ny,a:Math.atan2(lastP.y-ny,lastP.x-nx)});
+        lastP={x:nx,y:ny};
+        need=0;
+      } else {
+        need-=dd; lastP=p;
+      }
+    }
+    if(need>0){
+      const prev=segs[segs.length-1];
+      segs.push({x:prev.x-Math.cos(prev.a)*spacing,y:prev.y-Math.sin(prev.a)*spacing,a:prev.a});
+    }
+  }
+
+  const wave = spec.rule==='undulate';
+
+  if(showLegs && spec.legPairsEvery>0){
+    ctx.strokeStyle=`rgba(${r},${g},${b},0.55)`;
+    ctx.lineWidth=1.2;
+    for(let s=1;s<segs.length;s+=spec.legPairsEvery){
+      const seg=segs[s];
+      const phase=cr.travel*0.25 + s*1.4;
+      const swing=Math.sin(phase)*0.55;
+      const legLen=spec.size*1.9;
+      for(const side of [1,-1]){
+        const perp=seg.a+Math.PI/2*side;
+        const legAngle=perp+swing*side;
+        const fx=seg.x+Math.cos(legAngle)*legLen;
+        const fy=seg.y+Math.sin(legAngle)*legLen;
+        const kx=seg.x+Math.cos(perp)*legLen*0.6;
+        const ky=seg.y+Math.sin(perp)*legLen*0.6;
+        ctx.beginPath();
+        ctx.moveTo(seg.x,seg.y);
+        ctx.lineTo(kx,ky);
+        ctx.lineTo(fx,fy);
+        ctx.stroke();
+      }
+    }
+  }
+
+  for(let s=segs.length-1;s>=0;s--){
+    const seg=segs[s];
+    let x=seg.x,y=seg.y;
+    if(wave){
+      const off=Math.sin(cr.travel*spec.waveFreq + s*0.6)*spec.waveAmp;
+      x+=Math.cos(seg.a+Math.PI/2)*off;
+      y+=Math.sin(seg.a+Math.PI/2)*off;
+    }
+    const t=s/segs.length;
+    const radius=spec.size*(1-t*0.55);
+    const alpha=0.55+0.45*(1-t);
+    ctx.fillStyle=`rgba(${r},${g},${b},${alpha})`;
+    ctx.beginPath();
+    ctx.arc(x,y,radius,0,Math.PI*2);
+    ctx.fill();
+  }
+
+  const head=segs[0];
+  ctx.fillStyle=`rgba(255,255,255,0.85)`;
+  const eyeOff=spec.size*0.45;
+  for(const side of [1,-1]){
+    const ea=head.a+side*0.6;
+    ctx.beginPath();
+    ctx.arc(head.x+Math.cos(ea)*eyeOff, head.y+Math.sin(ea)*eyeOff, spec.size*0.16,0,Math.PI*2);
+    ctx.fill();
+  }
+
+  if(document.getElementById('togSensor').checked){
+    const sr=spec.sense||spec.fleeSense||spec.followDist;
+    if(sr){
+      ctx.strokeStyle=`rgba(${r},${g},${b},0.12)`;
+      ctx.lineWidth=1;
+      ctx.beginPath();ctx.arc(cr.x,cr.y,sr,0,Math.PI*2);ctx.stroke();
+    }
+  }
+
+  if(spec.energyBased){
+    const w=spec.size*2.4, h=2;
+    const ex=cr.x-w/2, ey=cr.y-spec.size-7;
+    ctx.fillStyle='rgba(0,0,0,0.5)';
+    ctx.fillRect(ex,ey,w,h);
+    ctx.fillStyle = cr.energy>40?`rgba(${r},${g},${b},0.9)`:'rgba(255,80,80,0.9)';
+    ctx.fillRect(ex,ey,w*(cr.energy/100),h);
+  }
+}
+
+function render(){
+  const trail=document.getElementById('togTrail').checked;
+  ctx.globalAlpha = trail?0.18:1;
+  ctx.fillStyle='#06070a';
+  ctx.fillRect(0,0,canvas.width,canvas.height);
+  ctx.globalAlpha=1;
+
+  renderObstacles();
+
+  for(const f of food){
+    ctx.fillStyle='rgba(120,230,160,0.9)';
+    ctx.beginPath();ctx.arc(f.x,f.y,f.r,0,Math.PI*2);ctx.fill();
+  }
+
+  for(const cr of creatures) renderCreature(cr);
+}
+
+// ════════════════════════════════════════════════
+//  MAIN LOOP
+// ════════════════════════════════════════════════
+function tick(){
+  requestAnimationFrame(tick);
+  fpsFrames++;
+  const now=performance.now();
+  if(now-fpsLast>=1000){
+    document.getElementById('statFps').textContent=fpsFrames;
+    fpsFrames=0; fpsLast=now;
+  }
+
+  if(running){
+    const all=creatures;
+    for(const cr of all) updateCreature(cr, all);
+    creatures=creatures.filter(c=>!c.dead);
+    resolveCollisions(creatures);
+
+    const rate=+document.getElementById('sFoodRate').value;
+    if(Math.random()<rate*0.02 && food.length<120){
+      food.push({x:Math.random()*canvas.width,y:Math.random()*canvas.height,r:2.5});
+    }
+    if(food.length>140) food.splice(0,food.length-140);
+  }
+  render();
+  updateStats();
+}
+
+function updateStats(){
+  document.getElementById('statN').textContent=creatures.length;
+  document.getElementById('statFood').textContent=food.length;
+  SPECIES.forEach(spec=>{
+    const el=document.getElementById('cnt-'+spec.id);
+    if(el) el.textContent=creatures.filter(c=>c.spec.id===spec.id).length;
+  });
+}
+
+// ════════════════════════════════════════════════
+//  UI BUILD
+// ════════════════════════════════════════════════
+function buildSpeciesCards(){
+  const wrap=document.getElementById('speciesCards');
+  SPECIES.forEach(spec=>{
+    const r=spec.color[0],g=spec.color[1],b=spec.color[2];
+    const card=document.createElement('div');
+    card.className='sp-card';
+    card.style.borderColor=`rgba(${r},${g},${b},0.25)`;
+    card.innerHTML=
+      '<div class="sp-head">'+
+        '<div class="sp-dot" style="background:rgb('+r+','+g+','+b+')"></div>'+
+        '<div class="sp-name">'+spec.name+'</div>'+
+        '<div class="sp-cnt" id="cnt-'+spec.id+'">'+spec.pop+'</div>'+
+      '</div>'+
+      '<div class="sp-desc">'+spec.desc+'</div>'+
+      '<input type="range" min="0" max="'+spec.maxPop+'" value="'+spec.pop+'" id="pop-'+spec.id+'" '+
+        'oninput="document.getElementById(&quot;cnt-'+spec.id+'&quot;).textContent=this.value">';
+    wrap.appendChild(card);
+  });
+}
+
+function buildLegend(){
+  const el=document.getElementById('legend');
+  SPECIES.forEach(spec=>{
+    const r=spec.color[0],g=spec.color[1],b=spec.color[2];
+    const row=document.createElement('div');
+    row.className='legend-row';
+    row.innerHTML='<div class="legend-dot" style="background:rgb('+r+','+g+','+b+')"></div>'+spec.name;
+    el.appendChild(row);
+  });
+}
+
+// ════════════════════════════════════════════════
+//  CONTROLS
+// ════════════════════════════════════════════════
+function togglePlay(){
+  running=!running;
+  const btn=document.getElementById('btnPlay');
+  btn.textContent=running?'■ pause':'▶ resume';
+  btn.classList.toggle('running',running);
+}
+window.addEventListener('keydown',e=>{
+  if(e.code==='Space'){e.preventDefault();togglePlay();}
+});
+window.addEventListener('resize',()=>{resize();});
+
+function resize(){
+  canvas.width=wrap.clientWidth;
+  canvas.height=wrap.clientHeight;
+  ctx.fillStyle='#06070a';
+  ctx.fillRect(0,0,canvas.width,canvas.height);
+}
+
+document.addEventListener('change',e=>{
+  if(e.target.id&&e.target.id.startsWith('pop-')){
+    const specId=e.target.id.slice(4);
+    const spec=SPECIES.find(s=>s.id===specId);
+    const target=+e.target.value;
+    let cur=creatures.filter(c=>c.spec.id===specId);
+    if(cur.length<target){
+      for(let i=cur.length;i<target;i++) creatures.push(spawnCreature(spec));
+    } else if(cur.length>target){
+      let toRemove=cur.length-target;
+      for(const c of cur){ if(toRemove<=0) break; c.dead=true; toRemove--; }
+      creatures=creatures.filter(c=>!c.dead);
+    }
+  }
+});
+
+// ════════════════════════════════════════════════
+//  BOOT
+// ════════════════════════════════════════════════
+buildSpeciesCards();
+buildLegend();
+resize();
+generateObstacles();
+respawnAll();
+tick();
+</script>
+</body>
+</html>

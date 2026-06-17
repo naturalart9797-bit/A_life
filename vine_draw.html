@@ -1,0 +1,431 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Vine Draw</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+JP:wght@300;400;500&display=swap');
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#070b08;--surface:#0c120e;--border:#18221b;--border2:#243528;
+  --accent:#6ad88a;--accent2:#2f9a52;
+  --text:#d4f0db;--text2:#6a8a72;--text3:#243028;
+  --font-mono:'IBM Plex Mono',monospace;--font-ui:'IBM Plex Sans JP',sans-serif;
+}
+body{background:var(--bg);color:var(--text);font-family:var(--font-ui);height:100vh;display:flex;flex-direction:column;overflow:hidden;user-select:none;}
+header{display:flex;align-items:center;gap:14px;padding:8px 18px;border-bottom:1px solid var(--border);background:var(--surface);flex-shrink:0;}
+.logo{font-family:var(--font-mono);font-size:12px;font-weight:500;color:var(--accent);letter-spacing:.1em;text-transform:uppercase;}
+.logo em{color:var(--text3);font-style:normal;}
+.stats{margin-left:auto;display:flex;gap:16px;}
+.stat{display:flex;flex-direction:column;align-items:flex-end;}
+.stat-label{font-family:var(--font-mono);font-size:8px;color:var(--text3);letter-spacing:.1em;text-transform:uppercase;}
+.stat-val{font-family:var(--font-mono);font-size:13px;font-weight:500;color:var(--text);line-height:1.2;}
+.rec-dot{width:7px;height:7px;border-radius:50%;background:#e05252;display:none;animation:blink 1s infinite;}
+.rec-dot.on{display:inline-block;}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.15}}
+.main{display:flex;flex:1;overflow:hidden;}
+.sidebar{width:256px;flex-shrink:0;background:var(--surface);border-right:1px solid var(--border);display:flex;flex-direction:column;overflow-y:auto;}
+.sidebar::-webkit-scrollbar{width:3px;}
+.sidebar::-webkit-scrollbar-thumb{background:var(--border2);border-radius:2px;}
+.sec{padding:11px 13px;border-bottom:1px solid var(--border);}
+.sec-title{font-family:var(--font-mono);font-size:8px;color:var(--text3);letter-spacing:.14em;text-transform:uppercase;margin-bottom:9px;}
+button{font-family:var(--font-mono);font-size:11px;font-weight:500;background:transparent;border:1px solid var(--border);color:var(--text2);padding:5px 10px;border-radius:3px;cursor:pointer;transition:all .15s;white-space:nowrap;}
+button:hover{border-color:var(--accent2);color:var(--accent);background:rgba(106,216,138,.07);}
+button.on{border-color:var(--accent)!important;color:var(--accent)!important;background:rgba(106,216,138,.14)!important;}
+.play-btn{width:100%;padding:7px;font-size:12px;border-color:var(--accent2);color:var(--accent);}
+.play-btn.running{background:rgba(106,216,138,.1);}
+.rec-btn{border-color:#e05252;color:#e05252;}
+.rec-btn:hover,.rec-btn.recording{background:rgba(224,82,82,.1);}
+.sl-row{margin-bottom:8px;}
+.sl-head{display:flex;justify-content:space-between;margin-bottom:3px;}
+.sl-name{font-family:var(--font-mono);font-size:10px;color:var(--text2);}
+.sl-val{font-family:var(--font-mono);font-size:10px;color:var(--accent);}
+input[type=range]{-webkit-appearance:none;width:100%;height:2px;background:var(--border);border-radius:1px;outline:none;}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:11px;height:11px;background:var(--accent);border-radius:50%;cursor:pointer;}
+.tog-row{display:flex;align-items:center;justify-content:space-between;margin-bottom:7px;}
+.tog-label{font-family:var(--font-mono);font-size:10px;color:var(--text2);}
+.tog{position:relative;width:28px;height:14px;flex-shrink:0;}
+.tog input{opacity:0;width:0;height:0;position:absolute;}
+.tog-track{position:absolute;inset:0;background:var(--border);border-radius:8px;cursor:pointer;transition:background .2s;}
+.tog input:checked+.tog-track{background:var(--accent2);}
+.tog-track::after{content:'';position:absolute;width:10px;height:10px;left:2px;top:2px;background:var(--text3);border-radius:50%;transition:transform .2s,background .2s;}
+.tog input:checked+.tog-track::after{transform:translateX(14px);background:var(--accent);}
+.canvas-wrap{flex:1;position:relative;overflow:hidden;background:#000;}
+canvas{display:block;width:100%;height:100%;}
+.img-slot{aspect-ratio:16/10;border:1px dashed var(--border2);border-radius:5px;display:flex;align-items:center;justify-content:center;cursor:pointer;overflow:hidden;position:relative;}
+.img-slot:hover{border-color:var(--accent2);}
+.img-slot img{width:100%;height:100%;object-fit:contain;}
+.img-slot .ph{font-family:var(--font-mono);font-size:10px;color:var(--text3);text-align:center;line-height:1.6;}
+.hint{position:absolute;bottom:10px;left:50%;transform:translateX(-50%);font-family:var(--font-mono);font-size:9px;color:var(--text3);pointer-events:none;white-space:nowrap;}
+.progress-bar{position:absolute;bottom:0;left:0;right:0;height:3px;background:var(--border);}
+.progress-fill{height:100%;background:var(--accent);width:0%;}
+.cmap-grid{display:grid;grid-template-columns:1fr 1fr;gap:4px;}
+.phase-label{position:absolute;top:10px;left:50%;transform:translateX(-50%);font-family:var(--font-mono);font-size:10px;color:var(--text2);background:rgba(12,18,14,.6);padding:3px 10px;border-radius:5px;border:1px solid var(--border);}
+.back-link{font-family:var(--font-mono);font-size:10px;color:var(--text3);text-decoration:none;}
+.back-link:hover{color:var(--accent);}
+</style>
+</head>
+<body>
+<header>
+  <a href="index.html" class="back-link">← 一覧</a>
+  <div class="logo">Vine <em>//</em> Draw (1枚)</div>
+  <span class="rec-dot" id="recDot"></span>
+  <div class="stats">
+    <div class="stat"><span class="stat-label">成長点</span><span class="stat-val" id="statTips">0</span></div>
+    <div class="stat"><span class="stat-label">達成</span><span class="stat-val" id="statReach">0%</span></div>
+    <div class="stat"><span class="stat-label">fps</span><span class="stat-val" id="statFps">—</span></div>
+  </div>
+</header>
+
+<div class="main">
+  <div class="sidebar">
+
+    <div class="sec">
+      <button class="play-btn running" id="btnPlay" onclick="togglePlay()">■ pause</button>
+      <div style="display:flex;gap:5px;margin-top:5px;">
+        <button style="flex:1" onclick="restart()">最初から</button>
+        <button class="rec-btn" id="btnRec" onclick="toggleRec()">● rec</button>
+        <button id="btnDL" onclick="downloadVid()" disabled>↓</button>
+      </div>
+    </div>
+
+    <div class="sec">
+      <div class="sec-title">描く画像（1枚）</div>
+      <div class="img-slot" id="slot" onclick="document.getElementById('file').click()">
+        <div class="ph">画像をクリック<br>この形を糸が描きます</div>
+      </div>
+      <input type="file" id="file" accept="image/*" style="display:none" onchange="loadImg(this)">
+      <div class="sl-row" style="margin-top:8px;">
+        <div class="sl-head"><span class="sl-name">点の密度</span><span class="sl-val" id="vN">6000</span></div>
+        <input type="range" min="800" max="24000" value="6000" step="200" id="sN" oninput="vN.textContent=this.value">
+      </div>
+      <div class="sl-row">
+        <div class="sl-head"><span class="sl-name">明るさしきい値</span><span class="sl-val" id="vLum">0.45</span></div>
+        <input type="range" min="0.1" max="0.9" value="0.45" step="0.05" id="sLum" oninput="vLum.textContent=(+this.value).toFixed(2);rebuildTargets()">
+      </div>
+      <div class="tog-row"><span class="tog-label">明暗を反転</span>
+        <label class="tog"><input type="checkbox" id="togInvert" onchange="rebuildTargets()"><div class="tog-track"></div></label>
+      </div>
+    </div>
+
+    <div class="sec">
+      <div class="sec-title">糸の発生</div>
+      <div class="cmap-grid">
+        <button class="on" id="seed-center" onclick="setSeed('center')">中央から</button>
+        <button id="seed-bottom" onclick="setSeed('bottom')">下から</button>
+        <button id="seed-edges" onclick="setSeed('edges')">縁から</button>
+        <button id="seed-scatter" onclick="setSeed('scatter')">画像内に散布</button>
+      </div>
+    </div>
+
+    <div class="sec">
+      <div class="sec-title">糸の成長</div>
+      <div class="sl-row">
+        <div class="sl-head"><span class="sl-name">伸びる速さ</span><span class="sl-val" id="vSpeed">1.8</span></div>
+        <input type="range" min="0.5" max="5" value="1.8" step="0.1" id="sSpeed" oninput="vSpeed.textContent=(+this.value).toFixed(1)">
+      </div>
+      <div class="sl-row">
+        <div class="sl-head"><span class="sl-name">しなやかさ（曲がり）</span><span class="sl-val" id="vFlex">0.10</span></div>
+        <input type="range" min="0.02" max="0.4" value="0.10" step="0.01" id="sFlex" oninput="vFlex.textContent=(+this.value).toFixed(2)">
+      </div>
+      <div class="sl-row">
+        <div class="sl-head"><span class="sl-name">蛇行（ゆらぎ）</span><span class="sl-val" id="vWander">0.5</span></div>
+        <input type="range" min="0" max="2" value="0.5" step="0.1" id="sWander" oninput="vWander.textContent=(+this.value).toFixed(1)">
+      </div>
+      <div class="sl-row">
+        <div class="sl-head"><span class="sl-name">分岐のしやすさ</span><span class="sl-val" id="vBranch">0.06</span></div>
+        <input type="range" min="0" max="0.25" value="0.06" step="0.01" id="sBranch" oninput="vBranch.textContent=(+this.value).toFixed(2)">
+      </div>
+      <div class="sl-row">
+        <div class="sl-head"><span class="sl-name">同時に伸びる本数</span><span class="sl-val" id="vMaxTips">90</span></div>
+        <input type="range" min="10" max="400" value="90" step="10" id="sMaxTips" oninput="vMaxTips.textContent=this.value">
+      </div>
+      <div class="sl-row">
+        <div class="sl-head"><span class="sl-name">到達半径</span><span class="sl-val" id="vReach">7</span></div>
+        <input type="range" min="3" max="20" value="7" step="1" id="sReach" oninput="vReach.textContent=this.value">
+      </div>
+    </div>
+
+    <div class="sec">
+      <div class="sec-title">完成後</div>
+      <div class="tog-row"><span class="tog-label">枯れて最初から繰り返す</span>
+        <label class="tog"><input type="checkbox" id="togLoop"><div class="tog-track"></div></label>
+      </div>
+      <div class="sl-row">
+        <div class="sl-head"><span class="sl-name">完成後の停留</span><span class="sl-val" id="vHold">150</span></div>
+        <input type="range" min="0" max="500" value="150" step="10" id="sHold" oninput="vHold.textContent=this.value">
+      </div>
+    </div>
+
+    <div class="sec">
+      <div class="sec-title">表示</div>
+      <div class="cmap-grid">
+        <button class="on" id="cm-img" onclick="setCmap('img')">画像の色</button>
+        <button id="cm-vine" onclick="setCmap('vine')">蔓(緑)</button>
+        <button id="cm-vein" onclick="setCmap('vein')">血管(赤)</button>
+        <button id="cm-gold" onclick="setCmap('gold')">金</button>
+      </div>
+      <div class="sl-row" style="margin-top:8px;">
+        <div class="sl-head"><span class="sl-name">糸の太さ</span><span class="sl-val" id="vThick">1.6</span></div>
+        <input type="range" min="0.5" max="5" value="1.6" step="0.1" id="sThick" oninput="vThick.textContent=(+this.value).toFixed(1)">
+      </div>
+      <div class="tog-row"><span class="tog-label">先端を光らせる</span>
+        <label class="tog"><input type="checkbox" id="togGlow" checked><div class="tog-track"></div></label>
+      </div>
+    </div>
+
+    <div class="sec" style="font-family:var(--font-mono);font-size:9px;color:var(--text3);line-height:1.9;">
+      Space: 一時停止<br>
+      糸の先端が画像の未踏領域へ蛇行しながら<br>
+      伸び、枝分かれして1枚の絵を描きます
+    </div>
+  </div>
+
+  <div class="canvas-wrap" id="canvasWrap">
+    <canvas id="c"></canvas>
+    <div class="phase-label" id="phaseLabel">成長中…</div>
+    <div class="hint">画像をアップロードしてください</div>
+    <div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div>
+  </div>
+</div>
+
+<canvas id="sampleCanvas" style="display:none;"></canvas>
+
+<script>
+const canvas=document.getElementById('c');
+const ctx=canvas.getContext('2d');
+const wrap=document.getElementById('canvasWrap');
+const sampleCanvas=document.getElementById('sampleCanvas');
+const sctx=sampleCanvas.getContext('2d',{willReadFrequently:true});
+
+let W=0,H=0;
+let srcImg=null;
+let targets=[];
+let tgGrid=null, tgCell=30, tgGW=0, tgGH=0;
+let tips=[];
+let running=true, tick=0;
+let phase='grow';
+let holdTimer=0, witherFrames=0;
+let cmap='img', seedMode='center';
+let fpsFrames=0,fpsLast=performance.now();
+let reachedCount=0;
+
+function loadImg(input){
+  const f=input.files[0];if(!f)return;
+  const img=new Image();
+  img.onload=()=>{srcImg=img;const slot=document.getElementById('slot');slot.innerHTML='';const im=document.createElement('img');im.src=img.src;slot.appendChild(im);restart();};
+  img.src=URL.createObjectURL(f);
+}
+function setCmap(c){cmap=c;['img','vine','vein','gold'].forEach(k=>document.getElementById('cm-'+k).classList.toggle('on',k===c));}
+function setSeed(s){seedMode=s;['center','bottom','edges','scatter'].forEach(k=>document.getElementById('seed-'+k).classList.toggle('on',k===s));restart();}
+
+function imgPoints(img,maxN){
+  if(!img)return[];
+  const sw=200,sh=Math.round(200*img.height/img.width);
+  sampleCanvas.width=sw;sampleCanvas.height=sh;
+  sctx.fillStyle='#000';sctx.fillRect(0,0,sw,sh);
+  sctx.drawImage(img,0,0,sw,sh);
+  const data=sctx.getImageData(0,0,sw,sh).data;
+  const lumThr=+document.getElementById('sLum').value;
+  const invert=document.getElementById('togInvert').checked;
+  const scale=Math.min(W/img.width,H/img.height)*0.85;
+  const dw=img.width*scale,dh=img.height*scale;
+  const ox=(W-dw)/2,oy=(H-dh)/2;
+  const all=[];
+  for(let y=0;y<sh;y++)for(let x=0;x<sw;x++){
+    const i=(y*sw+x)*4;
+    let l=(data[i]*0.299+data[i+1]*0.587+data[i+2]*0.114)/255;
+    if(invert)l=1-l;
+    if(l>lumThr)all.push({x:ox+(x/sw)*dw,y:oy+(y/sh)*dh,r:data[i],g:data[i+1],b:data[i+2]});
+  }
+  if(all.length>maxN){const out=[];const stp=all.length/maxN;for(let i=0;i<maxN;i++)out.push(all[(i*stp)|0]);return out;}
+  return all;
+}
+
+function buildTargetGrid(){
+  tgGW=Math.ceil(W/tgCell);tgGH=Math.ceil(H/tgCell);
+  tgGrid=new Array(tgGW*tgGH);
+  for(let i=0;i<tgGrid.length;i++)tgGrid[i]=[];
+  for(let i=0;i<targets.length;i++){
+    if(targets[i].reached)continue;
+    const gx=Math.min(tgGW-1,Math.max(0,Math.floor(targets[i].x/tgCell)));
+    const gy=Math.min(tgGH-1,Math.max(0,Math.floor(targets[i].y/tgCell)));
+    tgGrid[gy*tgGW+gx].push(i);
+  }
+}
+function nearestTarget(x,y){
+  if(!tgGrid)return -1;
+  const gx=Math.floor(x/tgCell),gy=Math.floor(y/tgCell);
+  let best=-1,bd=Infinity;
+  for(let ring=0;ring<Math.max(tgGW,tgGH);ring++){
+    for(let oy=-ring;oy<=ring;oy++)for(let ox=-ring;ox<=ring;ox++){
+      if(Math.max(Math.abs(ox),Math.abs(oy))!==ring)continue;
+      const nx=gx+ox,ny=gy+oy;
+      if(nx<0||ny<0||nx>=tgGW||ny>=tgGH)continue;
+      const arr=tgGrid[ny*tgGW+nx];
+      for(let k=0;k<arr.length;k++){
+        const ti=arr[k];if(targets[ti].reached)continue;
+        const dx=targets[ti].x-x,dy=targets[ti].y-y;const d=dx*dx+dy*dy;
+        if(d<bd){bd=d;best=ti;}
+      }
+    }
+    if(best>=0&&ring>0)break;
+  }
+  return best;
+}
+
+function rebuildTargets(){
+  if(W===0||!srcImg)return;
+  const n=+document.getElementById('sN').value;
+  const pts=imgPoints(srcImg,n);
+  targets=pts.map(p=>({x:p.x,y:p.y,r:p.r,g:p.g,b:p.b,reached:false}));
+  reachedCount=0;
+  buildTargetGrid();
+}
+
+function spawnTips(){
+  tips=[];
+  const maxTips=+document.getElementById('sMaxTips').value;
+  for(let i=0;i<maxTips;i++){
+    let x,y;
+    if(seedMode==='center'){x=W/2+(Math.random()-0.5)*30;y=H/2+(Math.random()-0.5)*30;}
+    else if(seedMode==='bottom'){x=Math.random()*W;y=H-5;}
+    else if(seedMode==='edges'){
+      const e=Math.floor(Math.random()*4);
+      if(e===0){x=Math.random()*W;y=2;}else if(e===1){x=Math.random()*W;y=H-2;}
+      else if(e===2){x=2;y=Math.random()*H;}else{x=W-2;y=Math.random()*H;}
+    } else { // scatter inside the image targets
+      if(targets.length){const t=targets[(Math.random()*targets.length)|0];x=t.x;y=t.y;}
+      else {x=Math.random()*W;y=Math.random()*H;}
+    }
+    tips.push({x,y,angle:Math.random()*Math.PI*2,ti:-1});
+  }
+}
+
+function restart(){
+  if(W===0)return;
+  ctx.fillStyle='#070b08';ctx.fillRect(0,0,W,H);
+  rebuildTargets();
+  spawnTips();
+  phase='grow';holdTimer=0;witherFrames=0;tick=0;
+  if(srcImg)document.querySelector('.hint').style.display='none';
+}
+
+function colorOf(tx){
+  if(cmap==='img'&&tx>=0&&targets[tx])return[targets[tx].r,targets[tx].g,targets[tx].b];
+  if(cmap==='vine')return[106,216,138];
+  if(cmap==='vein')return[224,90,90];
+  if(cmap==='gold')return[224,200,90];
+  return[106,216,138];
+}
+function noiseAng(x,y,t){return Math.sin(x*0.015+t*0.5)*1.6+Math.cos(y*0.013-t*0.4)*1.6;}
+
+function grow(){
+  const speed=+document.getElementById('sSpeed').value;
+  const flex=+document.getElementById('sFlex').value;
+  const wander=+document.getElementById('sWander').value;
+  const branchP=+document.getElementById('sBranch').value;
+  const maxTips=+document.getElementById('sMaxTips').value;
+  const reachR=+document.getElementById('sReach').value;
+  const thick=+document.getElementById('sThick').value;
+  const glow=document.getElementById('togGlow').checked;
+  const t=tick*0.01;
+  const newTips=[];
+
+  for(let i=tips.length-1;i>=0;i--){
+    const tip=tips[i];
+    if(tip.ti<0||targets[tip.ti].reached){
+      tip.ti=nearestTarget(tip.x,tip.y);
+      if(tip.ti<0){tips.splice(i,1);continue;}
+    }
+    const tg=targets[tip.ti];
+    const desired=Math.atan2(tg.y-tip.y,tg.x-tip.x);
+    let diff=desired-tip.angle;
+    while(diff>Math.PI)diff-=Math.PI*2;
+    while(diff<-Math.PI)diff+=Math.PI*2;
+    tip.angle+=diff*flex;
+    tip.angle+=Math.sin(noiseAng(tip.x,tip.y,t)+i)*wander*0.06;
+    tip.angle+=(Math.random()-0.5)*wander*0.08;
+
+    const px=tip.x,py=tip.y;
+    tip.x+=Math.cos(tip.angle)*speed;
+    tip.y+=Math.sin(tip.angle)*speed;
+
+    const col=colorOf(tip.ti);
+    ctx.strokeStyle=`rgb(${col[0]|0},${col[1]|0},${col[2]|0})`;
+    ctx.lineWidth=thick;ctx.lineCap='round';
+    ctx.beginPath();ctx.moveTo(px,py);ctx.lineTo(tip.x,tip.y);ctx.stroke();
+    if(glow){ctx.fillStyle=`rgba(${col[0]|0},${col[1]|0},${col[2]|0},0.5)`;ctx.beginPath();ctx.arc(tip.x,tip.y,thick*1.3,0,Math.PI*2);ctx.fill();}
+
+    const dx=tg.x-tip.x,dy=tg.y-tip.y;
+    if(dx*dx+dy*dy<reachR*reachR){
+      tg.reached=true;reachedCount++;tip.ti=-1;
+      if(reachedCount%40===0)buildTargetGrid();
+    }
+    if(tips.length+newTips.length<maxTips&&Math.random()<branchP){
+      newTips.push({x:tip.x,y:tip.y,angle:tip.angle+(Math.random()<0.5?1:-1)*(0.4+Math.random()*0.5),ti:-1});
+    }
+    if(tip.x<0||tip.x>=W||tip.y<0||tip.y>=H){
+      tip.angle=Math.atan2(H/2-tip.y,W/2-tip.x);
+      tip.x=Math.min(W-1,Math.max(0,tip.x));tip.y=Math.min(H-1,Math.max(0,tip.y));
+    }
+  }
+  for(const nt of newTips)tips.push(nt);
+
+  if(tips.length<8&&reachedCount<targets.length){
+    for(let k=0;k<6;k++){
+      const ti=nearestTarget(Math.random()*W,Math.random()*H);
+      if(ti<0)break;
+      tips.push({x:targets[ti].x+(Math.random()-0.5)*30,y:targets[ti].y+(Math.random()-0.5)*30,angle:Math.random()*Math.PI*2,ti:-1});
+    }
+  }
+
+  const prog=targets.length>0?reachedCount/targets.length:0;
+  document.getElementById('progressFill').style.width=(prog*100)+'%';
+  document.getElementById('statReach').textContent=Math.round(prog*100)+'%';
+  document.getElementById('statTips').textContent=tips.length;
+
+  if(reachedCount>=targets.length*0.985||tips.length===0){
+    phase='hold';holdTimer=+document.getElementById('sHold').value;
+    document.getElementById('phaseLabel').textContent='完成';
+  }
+}
+
+function loop(){
+  requestAnimationFrame(loop);
+  fpsFrames++;
+  const now=performance.now();
+  if(now-fpsLast>=1000){document.getElementById('statFps').textContent=fpsFrames;fpsFrames=0;fpsLast=now;}
+  if(running){
+    tick++;
+    if(phase==='grow'){document.getElementById('phaseLabel').textContent='成長中…';grow();}
+    else if(phase==='hold'){
+      if(holdTimer>0)holdTimer--;
+      else if(document.getElementById('togLoop').checked){phase='wither';document.getElementById('phaseLabel').textContent='枯れていく…';}
+    } else if(phase==='wither'){
+      ctx.fillStyle='rgba(7,11,8,0.04)';ctx.fillRect(0,0,W,H);
+      witherFrames++;
+      if(witherFrames>90){witherFrames=0;restart();}
+    }
+  }
+}
+
+function togglePlay(){running=!running;const btn=document.getElementById('btnPlay');btn.textContent=running?'■ pause':'▶ resume';btn.classList.toggle('running',running);}
+window.addEventListener('keydown',e=>{if(e.code==='Space'){e.preventDefault();togglePlay();}});
+function resize(){W=canvas.width=wrap.clientWidth;H=canvas.height=wrap.clientHeight;ctx.fillStyle='#070b08';ctx.fillRect(0,0,W,H);}
+window.addEventListener('resize',()=>{resize();restart();});
+wrap.addEventListener('dragover',e=>e.preventDefault());
+wrap.addEventListener('drop',e=>{e.preventDefault();const f=[...e.dataTransfer.files].find(f=>f.type.startsWith('image/'));if(f){const dt=new DataTransfer();dt.items.add(f);document.getElementById('file').files=dt.files;loadImg(document.getElementById('file'));}});
+
+let mediaRecorder=null,recChunks=[];
+function toggleRec(){if(!mediaRecorder||mediaRecorder.state==='inactive')startRec();else stopRec();}
+function startRec(){recChunks=[];const stream=canvas.captureStream(30);const opts={mimeType:'video/webm;codecs=vp9',videoBitsPerSecond:10000000};if(!MediaRecorder.isTypeSupported(opts.mimeType))opts.mimeType='video/webm';try{mediaRecorder=new MediaRecorder(stream,opts);}catch(e){mediaRecorder=new MediaRecorder(stream);}mediaRecorder.ondataavailable=e=>{if(e.data.size>0)recChunks.push(e.data);};mediaRecorder.onstop=()=>{document.getElementById('btnDL').disabled=false;document.getElementById('recDot').classList.remove('on');document.getElementById('btnRec').textContent='● rec';document.getElementById('btnRec').classList.remove('recording');};mediaRecorder.start(100);document.getElementById('recDot').classList.add('on');document.getElementById('btnRec').textContent='■ stop';document.getElementById('btnRec').classList.add('recording');}
+function stopRec(){if(mediaRecorder&&mediaRecorder.state!=='inactive')mediaRecorder.stop();}
+function downloadVid(){if(!recChunks.length)return;const blob=new Blob(recChunks,{type:'video/webm'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='vine_draw_'+Date.now()+'.webm';a.click();}
+
+resize();
+loop();
+</script>
+</body>
+</html>

@@ -1,0 +1,386 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Mycelium</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+JP:wght@300;400;500&display=swap');
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#0a0806;--surface:#13100c;--border:#26201a;--border2:#352c22;
+  --accent:#d8b888;--accent2:#a08550;
+  --text:#ece0cc;--text2:#8a7c64;--text3:#352c22;
+  --font-mono:'IBM Plex Mono',monospace;--font-ui:'IBM Plex Sans JP',sans-serif;
+}
+body{background:var(--bg);color:var(--text);font-family:var(--font-ui);height:100vh;display:flex;flex-direction:column;overflow:hidden;user-select:none;}
+header{display:flex;align-items:center;gap:14px;padding:8px 18px;border-bottom:1px solid var(--border);background:var(--surface);flex-shrink:0;}
+.logo{font-family:var(--font-mono);font-size:12px;font-weight:500;color:var(--accent);letter-spacing:.1em;text-transform:uppercase;}
+.logo em{color:var(--text3);font-style:normal;}
+.stats{margin-left:auto;display:flex;gap:18px;}
+.stat{display:flex;flex-direction:column;align-items:flex-end;}
+.stat-label{font-family:var(--font-mono);font-size:8px;color:var(--text3);letter-spacing:.1em;text-transform:uppercase;}
+.stat-val{font-family:var(--font-mono);font-size:13px;font-weight:500;color:var(--text);line-height:1.2;}
+.main{display:flex;flex:1;overflow:hidden;}
+.sidebar{width:256px;flex-shrink:0;background:var(--surface);border-right:1px solid var(--border);display:flex;flex-direction:column;overflow-y:auto;}
+.sidebar::-webkit-scrollbar{width:3px;}
+.sidebar::-webkit-scrollbar-thumb{background:var(--border2);border-radius:2px;}
+.sec{padding:11px 13px;border-bottom:1px solid var(--border);}
+.sec-title{font-family:var(--font-mono);font-size:8px;color:var(--text3);letter-spacing:.14em;text-transform:uppercase;margin-bottom:9px;}
+button{font-family:var(--font-mono);font-size:11px;font-weight:500;background:transparent;border:1px solid var(--border);color:var(--text2);padding:5px 10px;border-radius:3px;cursor:pointer;transition:all .15s;white-space:nowrap;}
+button:hover{border-color:var(--accent2);color:var(--accent);background:rgba(216,184,136,.07);}
+button.on{border-color:var(--accent)!important;color:var(--accent)!important;background:rgba(216,184,136,.14)!important;}
+.play-btn{width:100%;padding:7px;font-size:12px;border-color:var(--accent2);color:var(--accent);}
+.play-btn.running{background:rgba(216,184,136,.1);}
+.sl-row{margin-bottom:8px;}
+.sl-head{display:flex;justify-content:space-between;margin-bottom:3px;}
+.sl-name{font-family:var(--font-mono);font-size:10px;color:var(--text2);}
+.sl-val{font-family:var(--font-mono);font-size:10px;color:var(--accent);}
+input[type=range]{-webkit-appearance:none;width:100%;height:2px;background:var(--border);border-radius:1px;outline:none;}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:11px;height:11px;background:var(--accent);border-radius:50%;cursor:pointer;}
+.tog-row{display:flex;align-items:center;justify-content:space-between;margin-bottom:7px;}
+.tog-label{font-family:var(--font-mono);font-size:10px;color:var(--text2);}
+.tog{position:relative;width:28px;height:14px;flex-shrink:0;}
+.tog input{opacity:0;width:0;height:0;position:absolute;}
+.tog-track{position:absolute;inset:0;background:var(--border);border-radius:8px;cursor:pointer;transition:background .2s;}
+.tog input:checked+.tog-track{background:var(--accent2);}
+.tog-track::after{content:'';position:absolute;width:10px;height:10px;left:2px;top:2px;background:var(--text3);border-radius:50%;transition:transform .2s,background .2s;}
+.tog input:checked+.tog-track::after{transform:translateX(14px);background:var(--accent);}
+.canvas-wrap{flex:1;position:relative;overflow:hidden;background:#000;}
+canvas{display:block;width:100%;height:100%;}
+.hint{position:absolute;bottom:10px;left:50%;transform:translateX(-50%);font-family:var(--font-mono);font-size:9px;color:var(--text3);pointer-events:none;white-space:nowrap;}
+.preset-grid{display:grid;grid-template-columns:1fr 1fr;gap:4px;}
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">Mycelium <em>//</em> 菌糸</div>
+  <div class="stats">
+    <div class="stat"><span class="stat-label">成長点</span><span class="stat-val" id="statTips">0</span></div>
+    <div class="stat"><span class="stat-label">栄養源</span><span class="stat-val" id="statFood">0</span></div>
+    <div class="stat"><span class="stat-label">吸収</span><span class="stat-val" id="statAbsorbed">0</span></div>
+    <div class="stat"><span class="stat-label">fps</span><span class="stat-val" id="statFps">—</span></div>
+  </div>
+</header>
+
+<div class="main">
+  <div class="sidebar">
+
+    <div class="sec">
+      <button class="play-btn running" id="btnPlay" onclick="togglePlay()">■ pause</button>
+      <div style="display:flex;gap:5px;margin-top:5px;">
+        <button style="flex:1" onclick="reset()">リセット</button>
+        <button style="flex:1" onclick="clearFood()">栄養源消去</button>
+      </div>
+    </div>
+
+    <div class="sec">
+      <div class="sec-title">菌糸の成長</div>
+      <div class="sl-row">
+        <div class="sl-head"><span class="sl-name">成長速度</span><span class="sl-val" id="vGrow">1.6</span></div>
+        <input type="range" min="0.5" max="4" value="1.6" step="0.1" id="sGrow" oninput="vGrow.textContent=(+this.value).toFixed(1)">
+      </div>
+      <div class="sl-row">
+        <div class="sl-head"><span class="sl-name">分岐確率</span><span class="sl-val" id="vBranch">0.04</span></div>
+        <input type="range" min="0.005" max="0.2" value="0.04" step="0.005" id="sBranch" oninput="vBranch.textContent=(+this.value).toFixed(3)">
+      </div>
+      <div class="sl-row">
+        <div class="sl-head"><span class="sl-name">分岐角度°</span><span class="sl-val" id="vBranchAng">35</span></div>
+        <input type="range" min="10" max="80" value="35" step="1" id="sBranchAng" oninput="vBranchAng.textContent=this.value">
+      </div>
+      <div class="sl-row">
+        <div class="sl-head"><span class="sl-name">蛇行（ふらつき）</span><span class="sl-val" id="vWander">0.20</span></div>
+        <input type="range" min="0" max="0.6" value="0.20" step="0.02" id="sWander" oninput="vWander.textContent=(+this.value).toFixed(2)">
+      </div>
+      <div class="sl-row">
+        <div class="sl-head"><span class="sl-name">最大成長点数</span><span class="sl-val" id="vMaxTips">800</span></div>
+        <input type="range" min="100" max="3000" value="800" step="100" id="sMaxTips" oninput="vMaxTips.textContent=this.value">
+      </div>
+    </div>
+
+    <div class="sec">
+      <div class="sec-title">栄養走性（chemotropism）</div>
+      <div class="sl-row">
+        <div class="sl-head"><span class="sl-name">栄養への誘引</span><span class="sl-val" id="vAttract">2.0</span></div>
+        <input type="range" min="0" max="6" value="2.0" step="0.2" id="sAttract" oninput="vAttract.textContent=(+this.value).toFixed(1)">
+      </div>
+      <div class="sl-row">
+        <div class="sl-head"><span class="sl-name">感知距離</span><span class="sl-val" id="vSense">120</span></div>
+        <input type="range" min="20" max="300" value="120" step="10" id="sSense" oninput="vSense.textContent=this.value">
+      </div>
+      <div class="sl-row">
+        <div class="sl-head"><span class="sl-name">自己回避（既存菌糸）</span><span class="sl-val" id="vAvoid">0.6</span></div>
+        <input type="range" min="0" max="2" value="0.6" step="0.1" id="sAvoid" oninput="vAvoid.textContent=(+this.value).toFixed(1)">
+      </div>
+    </div>
+
+    <div class="sec">
+      <div class="sec-title">栄養源の配置</div>
+      <div class="preset-grid">
+        <button onclick="placeFood('scatter')">散在</button>
+        <button onclick="placeFood('clusters')">塊</button>
+        <button onclick="placeFood('ring')">円状</button>
+        <button onclick="placeFood('rich')">豊富</button>
+      </div>
+      <div style="font-family:var(--font-mono);font-size:9px;color:var(--text3);margin-top:6px;">クリックで栄養源を追加</div>
+    </div>
+
+    <div class="sec">
+      <div class="sec-title">表示</div>
+      <div class="tog-row"><span class="tog-label">成長点を強調</span>
+        <label class="tog"><input type="checkbox" id="togTips" checked><div class="tog-track"></div></label>
+      </div>
+      <div class="tog-row"><span class="tog-label">栄養輸送を色で表示</span>
+        <label class="tog"><input type="checkbox" id="togFlow" checked><div class="tog-track"></div></label>
+      </div>
+    </div>
+
+    <div class="sec" style="font-family:var(--font-mono);font-size:9px;color:var(--text3);line-height:1.9;">
+      Space: 一時停止<br>
+      菌糸の先端が栄養を感知して伸び、<br>
+      分岐しながらネットワークを作ります。<br>
+      栄養に到達した枝は太く明るくなります
+    </div>
+  </div>
+
+  <div class="canvas-wrap" id="canvasWrap">
+    <canvas id="c"></canvas>
+    <div class="hint">クリックで栄養源を追加 / Space: pause</div>
+  </div>
+</div>
+
+<script>
+const canvas=document.getElementById('c');
+const ctx=canvas.getContext('2d');
+const wrap=document.getElementById('canvasWrap');
+
+let W=0,H=0;
+let tips=[];   // active growing tips {x,y,angle,energy,gen}
+let foods=[];  // {x,y,amount}
+let occGrid;   // coarse occupancy for self-avoidance
+const OCC=8;
+let OGW=0,OGH=0;
+let running=true, tick=0;
+let fpsFrames=0,fpsLast=performance.now();
+let absorbed=0;
+
+function reset(){
+  W=canvas.width=wrap.clientWidth;
+  H=canvas.height=wrap.clientHeight;
+  OGW=Math.ceil(W/OCC); OGH=Math.ceil(H/OCC);
+  occGrid=new Uint16Array(OGW*OGH);
+  tips=[];
+  absorbed=0; tick=0;
+  ctx.fillStyle='#0a0806'; ctx.fillRect(0,0,W,H);
+
+  // Start from a few spores at center-bottom
+  const startN=3;
+  for(let i=0;i<startN;i++){
+    const x=W*(0.3+0.4*Math.random()), y=H*0.5+(Math.random()-0.5)*60;
+    for(let k=0;k<3;k++){
+      tips.push({x,y,angle:Math.random()*Math.PI*2,energy:30,gen:0});
+    }
+  }
+  if(foods.length===0) placeFood('scatter');
+  updateStats();
+}
+
+function clearFood(){foods=[];updateStats();}
+function updateStats(){
+  document.getElementById('statTips').textContent=tips.length;
+  document.getElementById('statFood').textContent=foods.length;
+  document.getElementById('statAbsorbed').textContent=absorbed;
+}
+
+function placeFood(kind){
+  foods=[];
+  if(kind==='scatter'){
+    for(let i=0;i<14;i++) foods.push({x:Math.random()*W,y:Math.random()*H,amount:60+Math.random()*60});
+  } else if(kind==='clusters'){
+    for(let c=0;c<4;c++){
+      const cx=W*(0.2+0.6*Math.random()), cy=H*(0.2+0.6*Math.random());
+      for(let i=0;i<5;i++) foods.push({x:cx+(Math.random()-0.5)*70,y:cy+(Math.random()-0.5)*70,amount:50+Math.random()*40});
+    }
+  } else if(kind==='ring'){
+    const cx=W/2,cy=H/2,rad=Math.min(W,H)*0.38;
+    for(let i=0;i<12;i++){const a=i/12*Math.PI*2;foods.push({x:cx+Math.cos(a)*rad,y:cy+Math.sin(a)*rad,amount:70});}
+  } else {
+    for(let i=0;i<30;i++) foods.push({x:Math.random()*W,y:Math.random()*H,amount:50+Math.random()*80});
+  }
+  updateStats();
+}
+
+function occAt(x,y){
+  const gx=Math.floor(x/OCC), gy=Math.floor(y/OCC);
+  if(gx<0||gx>=OGW||gy<0||gy>=OGH) return 0;
+  return occGrid[gy*OGW+gx];
+}
+function addOcc(x,y){
+  const gx=Math.floor(x/OCC), gy=Math.floor(y/OCC);
+  if(gx<0||gx>=OGW||gy<0||gy>=OGH) return;
+  occGrid[gy*OGW+gx]=Math.min(9999,occGrid[gy*OGW+gx]+1);
+}
+
+function step(){
+  tick++;
+  const grow=+document.getElementById('sGrow').value;
+  const branchP=+document.getElementById('sBranch').value;
+  const branchAng=+document.getElementById('sBranchAng').value*Math.PI/180;
+  const wander=+document.getElementById('sWander').value;
+  const maxTips=+document.getElementById('sMaxTips').value;
+  const attract=+document.getElementById('sAttract').value;
+  const sense=+document.getElementById('sSense').value;
+  const avoid=+document.getElementById('sAvoid').value;
+  const flowColor=document.getElementById('togFlow').checked;
+
+  const newTips=[];
+  for(let i=tips.length-1;i>=0;i--){
+    const tip=tips[i];
+
+    // Chemotropism: steer toward nearest strong food
+    let fx=0,fy=0;
+    for(const f of foods){
+      if(f.amount<=0) continue;
+      const dx=f.x-tip.x, dy=f.y-tip.y;
+      const d=Math.hypot(dx,dy);
+      if(d<sense && d>0.5){
+        const w=attract*f.amount/(d*d+200);
+        fx+=dx/d*w; fy+=dy/d*w;
+      }
+    }
+    // Self-avoidance: steer away from dense occupancy ahead
+    if(avoid>0){
+      const ax=tip.x+Math.cos(tip.angle)*OCC*2, ay=tip.y+Math.sin(tip.angle)*OCC*2;
+      const dens=occAt(ax,ay);
+      if(dens>2){
+        // turn perpendicular
+        const side=(tick+i)%2===0?1:-1;
+        tip.angle+=side*avoid*0.3;
+      }
+    }
+
+    // Apply chemo steering
+    if(fx!==0||fy!==0){
+      const targetAng=Math.atan2(fy,fx);
+      let diff=targetAng-tip.angle;
+      while(diff>Math.PI)diff-=Math.PI*2;
+      while(diff<-Math.PI)diff+=Math.PI*2;
+      tip.angle+=diff*0.18;
+    }
+    // Wander
+    tip.angle+=(Math.random()-0.5)*wander;
+
+    const px=tip.x, py=tip.y;
+    tip.x+=Math.cos(tip.angle)*grow;
+    tip.y+=Math.sin(tip.angle)*grow;
+    tip.energy-=0.25;
+
+    // Bounds: kill tip
+    if(tip.x<0||tip.x>=W||tip.y<0||tip.y>=H){ tips.splice(i,1); continue; }
+
+    addOcc(tip.x,tip.y);
+
+    // Eat food
+    let ate=0;
+    for(const f of foods){
+      if(f.amount<=0) continue;
+      const d=Math.hypot(f.x-tip.x,f.y-tip.y);
+      if(d<6){
+        const take=Math.min(f.amount,2);
+        f.amount-=take; tip.energy+=take*4; ate+=take; absorbed+=take|0;
+        if(f.amount<=0){/* depleted */}
+      }
+    }
+
+    // Draw segment
+    const thickness = ate>0 ? 2.4 : 0.8+Math.min(1.4,tip.energy/40);
+    let col;
+    if(flowColor){
+      const e=Math.min(1,tip.energy/50);
+      const r=140+e*100|0, g=110+e*90|0, b=70+e*40|0;
+      col=`rgba(${r},${g},${b},0.9)`;
+    } else col='rgba(200,175,130,0.85)';
+    ctx.strokeStyle=col;
+    ctx.lineWidth=thickness;
+    ctx.beginPath();ctx.moveTo(px,py);ctx.lineTo(tip.x,tip.y);ctx.stroke();
+
+    // Branch
+    if(tips.length+newTips.length<maxTips && Math.random()<branchP && tip.energy>10){
+      const side=Math.random()<0.5?1:-1;
+      newTips.push({x:tip.x,y:tip.y,angle:tip.angle+side*branchAng,energy:tip.energy*0.6,gen:tip.gen+1});
+      tip.energy*=0.7;
+    }
+
+    // Die if out of energy
+    if(tip.energy<=0){
+      // small chance to leave a spore-tip if very old
+      tips.splice(i,1);
+      continue;
+    }
+  }
+  for(const nt of newTips) tips.push(nt);
+
+  // If all tips died but food remains, occasionally sprout new from random existing hypha point... skip for simplicity
+  updateStats();
+}
+
+function renderFood(){
+  for(const f of foods){
+    if(f.amount<=0){
+      ctx.fillStyle='rgba(80,70,55,0.5)';
+      ctx.beginPath();ctx.arc(f.x,f.y,2,0,Math.PI*2);ctx.fill();
+      continue;
+    }
+    const sz=2+f.amount/25;
+    ctx.fillStyle='rgba(110,200,140,0.22)';
+    ctx.beginPath();ctx.arc(f.x,f.y,sz+4,0,Math.PI*2);ctx.fill();
+    ctx.fillStyle='rgba(140,230,160,0.9)';
+    ctx.beginPath();ctx.arc(f.x,f.y,sz,0,Math.PI*2);ctx.fill();
+  }
+}
+
+function renderTips(){
+  if(!document.getElementById('togTips').checked) return;
+  ctx.fillStyle='rgba(255,235,190,0.9)';
+  for(const tip of tips){
+    ctx.beginPath();ctx.arc(tip.x,tip.y,1.4,0,Math.PI*2);ctx.fill();
+  }
+}
+
+function loop(){
+  requestAnimationFrame(loop);
+  fpsFrames++;
+  const now=performance.now();
+  if(now-fpsLast>=1000){
+    document.getElementById('statFps').textContent=fpsFrames;
+    fpsFrames=0; fpsLast=now;
+  }
+  if(running){
+    // Fade food layer slightly is not needed; hyphae persist (no clearing)
+    step();
+  }
+  // redraw food markers on top each frame over a faint overlay
+  // We don't clear the canvas so hyphae accumulate; just redraw food+tips
+  renderFood();
+  renderTips();
+}
+
+function togglePlay(){
+  running=!running;
+  const btn=document.getElementById('btnPlay');
+  btn.textContent=running?'■ pause':'▶ resume';
+  btn.classList.toggle('running',running);
+}
+window.addEventListener('keydown',e=>{if(e.code==='Space'){e.preventDefault();togglePlay();}});
+window.addEventListener('resize',()=>reset());
+canvas.addEventListener('mousedown',e=>{
+  const rect=canvas.getBoundingClientRect();
+  foods.push({x:e.clientX-rect.left,y:e.clientY-rect.top,amount:80});
+  updateStats();
+});
+
+reset();
+loop();
+</script>
+</body>
+</html>
