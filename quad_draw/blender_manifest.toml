@@ -1,0 +1,14 @@
+schema_version = "1.0.0"
+
+id = "quad_draw"
+version = "1.0.0"
+name = "Quad Draw (Maya style)"
+tagline = "Maya Quad Draw retopology workflow for Blender"
+maintainer = "naturalart9797"
+type = "add-on"
+
+blender_version_min = "4.2.0"
+
+license = ["SPDX:GPL-3.0-or-later"]
+
+tags = ["Mesh", "Modeling"]
