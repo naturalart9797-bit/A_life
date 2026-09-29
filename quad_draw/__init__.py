@@ -48,6 +48,11 @@ class QuadDrawSettings(bpy.types.PropertyGroup):
         name="Strip Width", subtype='PIXEL', default=40, min=4, max=1000,
         description="Quad size in pixels for Tab + drag strips drawn on empty surface",
     )
+    extend_angle: IntProperty(
+        name="Border Extend Angle", subtype='NONE', default=30, min=0, max=180,
+        description="Tab + MMB extends the border edges connected to the grabbed edge until "
+                    "the border bends more than this angle (Tab + mouse wheel to change live)",
+    )
     pick_radius: IntProperty(
         name="Pick Radius", subtype='PIXEL', default=14, min=4, max=60,
         description="Screen distance used to pick components under the cursor",
@@ -133,6 +138,7 @@ class VIEW3D_PT_quad_draw(bpy.types.Panel):
         col.prop(s, "relax_boundary")
         col = layout.column(align=True)
         col.prop(s, "strip_width")
+        col.prop(s, "extend_angle")
         col.prop(s, "pick_radius")
         col.prop(s, "auto_weld")
         sub = col.row(align=True)
@@ -153,7 +159,8 @@ class VIEW3D_PT_quad_draw(bpy.types.Panel):
             "Ctrl+Shift: delete (drag paints)",
             "Tab+drag edge: extend strip",
             "Tab+drag surface: draw strip",
-            "Tab+MMB drag edge: extend whole border",
+            "Tab+MMB drag edge: extend border run",
+            "Tab+wheel: border run range",
             "B+drag: brush size",
             "Esc / Enter / Q: exit",
         ):

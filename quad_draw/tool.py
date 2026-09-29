@@ -19,6 +19,7 @@ Controls (identical to Maya):
     Esc / Enter / Q     exit tool
 """
 
+import math
 import traceback
 
 import bmesh
@@ -483,7 +484,7 @@ class MESH_OT_quad_draw(bpy.types.Operator):
         if self.tab:
             self.h_edge, _d, self.h_t = self._pick_edge(mouse, r * 1.5, only_open=True)
             if self.h_edge is not None:
-                verts, closed, _i = mesh_ops.border_chain(self.h_edge)
+                verts, closed, _i = mesh_ops.border_chain(self.h_edge, self._extend_angle())
                 self.h_chain = (verts, closed)
             return
         v, dv = self._pick_vert(mouse, r)
@@ -1032,7 +1033,7 @@ class MESH_OT_quad_draw(bpy.types.Operator):
 
     def _begin_extend(self, edge, whole_border=False):
         if whole_border:
-            verts, closed, grab = mesh_ops.border_chain(edge)
+            verts, closed, grab = mesh_ops.border_chain(edge, self._extend_angle())
         else:
             verts, closed, grab = list(edge.verts), False, 0
         pairs = self._chain_pairs(len(verts), closed)
@@ -1056,6 +1057,9 @@ class MESH_OT_quad_draw(bpy.types.Operator):
             "flipped": False,
         }
         self.drag["outs"] = self._chain_outward(verts, closed)
+
+    def _extend_angle(self):
+        return math.radians(self.settings.extend_angle)
 
     @staticmethod
     def _chain_pairs(n, closed):
@@ -1366,6 +1370,13 @@ class MESH_OT_quad_draw(bpy.types.Operator):
                     self.state = 'EXTEND'
                     self.drag_button = 'MIDDLEMOUSE'
                 return {'RUNNING_MODAL'}
+            if self.tab and etype in {'WHEELUPMOUSE', 'WHEELDOWNMOUSE'} and value == 'PRESS':
+                # Tab + wheel: widen / narrow the border run Tab+MMB will extend.
+                step = 5 if etype == 'WHEELUPMOUSE' else -5
+                s_ = self.settings
+                s_.extend_angle = min(max(s_.extend_angle + step, 0), 180)
+                self._update_hover()
+                return {'RUNNING_MODAL'}
             if etype in NAV_TYPES or etype.startswith('NDOF'):
                 if etype == 'MIDDLEMOUSE' and value == 'PRESS' and self.ctrl and not self.shift:
                     self._update_hover()
@@ -1608,6 +1619,10 @@ def _draw_2d(op, context):
                 and not op.drag.get("pending") and s.auto_weld:
             col = drawing.COL_WELD if op.drag.get("weld") else drawing.COL_BRUSH
             drawing.circle_2d(m, s.weld_distance, col, 1.5)
+        elif op.tab and op.in_region and op.h_edge is not None and op.state == 'IDLE':
+            n = len(op.h_chain[0]) - 1 + (1 if op.h_chain[1] else 0) if op.h_chain else 1
+            drawing.text(m[0] + 18, m[1] - 24,
+                         [f"MMB: {n} edges  (angle {s.extend_angle}°, Tab+wheel)"], size=12)
         elif op.tab and op.in_region and op.h_edge is None:
             drawing.circle_2d(m, s.strip_width * 0.5, drawing.COL_FILL_EDGE, 1.5)
         if s.show_hud:
