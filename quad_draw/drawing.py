@@ -19,6 +19,7 @@ COL_DELETE_FACE = (1.0, 0.15, 0.15, 0.3)
 COL_BRUSH = (1.0, 1.0, 1.0, 0.8)
 COL_RELAX = (0.3, 0.8, 1.0, 0.9)
 COL_TEXT = (1.0, 1.0, 1.0, 0.9)
+COL_WELD = (0.1, 1.0, 1.0, 1.0)
 
 
 def _shader(name, fallback=None):

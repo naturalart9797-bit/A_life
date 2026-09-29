@@ -596,6 +596,13 @@ class MESH_OT_quad_draw(bpy.types.Operator):
         if len(cands) < 3:
             return None
 
+        def swallows(poly):
+            """True if another candidate lies inside ``poly`` (wrong quad)."""
+            pts = [c.p for c in poly]
+            used = {(c.kind, id(c.ref) if c.kind == 'VERT' else c.ref) for c in poly}
+            return any(_point_in_poly(c.p, pts) for c in cands
+                       if (c.kind, id(c.ref) if c.kind == 'VERT' else c.ref) not in used)
+
         # 1) Maya-style: extend from the nearest border edge on its open side.
         e, _d, _t = self._pick_edge(mouse, FILL_RADIUS * 0.5, only_open=True)
         if e is not None:
@@ -626,11 +633,13 @@ class MESH_OT_quad_draw(bpy.types.Operator):
                         poly = [ca, cb, x, y]
                         if not _is_simple([c.p for c in poly]):
                             poly = [ca, cb, y, x]
-                        if self._fill_valid(poly) and _point_in_poly(mouse, [c.p for c in poly]):
+                        if self._fill_valid(poly) and _point_in_poly(mouse, [c.p for c in poly]) \
+                                and not swallows(poly):
                             return poly
                     if others:
                         poly = [ca, cb, others[0]]
-                        if self._fill_valid(poly) and _point_in_poly(mouse, [c.p for c in poly]):
+                        if self._fill_valid(poly) and _point_in_poly(mouse, [c.p for c in poly]) \
+                                and not swallows(poly):
                             return poly
 
         # 2) The nearest four (or three) components surrounding the cursor.
@@ -640,7 +649,8 @@ class MESH_OT_quad_draw(bpy.types.Operator):
             pick = cands[:n]
             c2 = sum((c.p for c in pick), Vector((0.0, 0.0))) / n
             pick.sort(key=lambda c: np.arctan2(c.p.y - c2.y, c.p.x - c2.x))
-            if self._fill_valid(pick) and _point_in_poly(mouse, [c.p for c in pick]):
+            if self._fill_valid(pick) and _point_in_poly(mouse, [c.p for c in pick]) \
+                    and not swallows(pick):
                 return pick
         return None
 
@@ -760,6 +770,13 @@ class MESH_OT_quad_draw(bpy.types.Operator):
             loc = self._hit_or_plane(self.mouse, self.dots[i])
             if drag["center"]:
                 loc.x = 0.0
+            drag["weld"] = None
+            if self.settings.auto_weld:
+                exclude = {j for j in (i, drag["mirror_dot"]) if j is not None}
+                target = self._weld_target_at(self.mouse, None, exclude)
+                if target is not None:
+                    drag["weld"] = target
+                    loc = self._weld_target_co(target)
             self.dots[i] = loc
             j = drag["mirror_dot"]
             if j is not None and j < len(self.dots):
@@ -771,6 +788,13 @@ class MESH_OT_quad_draw(bpy.types.Operator):
             loc = self._hit_or_plane(self.mouse, v.co)
             if v in drag["center"]:
                 loc.x = 0.0
+            drag["weld"] = None
+            if self.settings.auto_weld:
+                target = self._weld_target_at(self.mouse, v, ())
+                if target is not None:
+                    # Snap onto the vertex it will merge with (Maya behaviour).
+                    drag["weld"] = target
+                    loc = self._weld_target_co(target)
             v.co = loc
         else:
             start = drag["start_hit"]
@@ -801,14 +825,15 @@ class MESH_OT_quad_draw(bpy.types.Operator):
             if drag["new_dot"]:
                 self._push_undo("Add Dot")
             return
-        r = self.settings.pick_radius * 0.75
+        r = self.settings.weld_distance
         if self.settings.auto_weld:
             if kind == 'DOT':
                 i = drag["target"]
                 p = self._to2d(self.dots[i])
                 if p is not None:
+                    m = drag.get("mirror_dot")
                     v, _ = self._pick_vert(p, r)
-                    j, _ = self._pick_dot(p, r, exclude={i})
+                    j, _ = self._pick_dot(p, r, exclude={i} | ({m} if m is not None else set()))
                     if v is not None or j is not None:
                         # Dot dropped on a vertex/dot: it merges (disappears).
                         m = drag.get("mirror_dot")
@@ -817,11 +842,39 @@ class MESH_OT_quad_draw(bpy.types.Operator):
                                 self.dots.pop(k)
             elif kind == 'VERT':
                 v = drag["verts"][0]
-                self._weld_vert(v, r)
-                m = drag["mirror"].get(v)
+                v = self._weld_vert(v, r)
+                m = drag["mirror"].get(drag["verts"][0])
                 if m is not None and m.is_valid:
                     self._weld_vert(m, r)
         self._push_undo("Tweak")
+
+    def _weld_exclude(self, v):
+        """Vertices ``v`` must not merge with: itself and the verts across its
+        faces that are not joined to it by an edge (merging those would fold
+        the face). Edge neighbours are allowed: the edge collapses, as in Maya."""
+        exclude = {v}
+        neighbours = {e.other_vert(v) for e in v.link_edges}
+        for f in v.link_faces:
+            exclude.update(x for x in f.verts if x not in neighbours)
+        return exclude
+
+    def _weld_target_at(self, p, v, dot_exclude):
+        """Vertex (or dot index) within the weld distance of screen point ``p``."""
+        radius = self.settings.weld_distance
+        exclude = self._weld_exclude(v) if v is not None else ()
+        if v is not None and self.drag and self.drag.get("mirror", {}).get(v) is not None:
+            exclude = set(exclude) | {self.drag["mirror"][v]}
+        target, dv = self._pick_vert(p, radius, exclude=exclude)
+        dot, dd = self._pick_dot(p, radius, exclude=dot_exclude)
+        if dot is not None and dd < dv:
+            return ('DOT', dot)
+        if target is not None:
+            return ('VERT', target)
+        return None
+
+    def _weld_target_co(self, target):
+        kind, ref = target
+        return (self.dots[ref] if kind == 'DOT' else ref.co).copy()
 
     def _weld_vert(self, v, radius):
         """Merge ``v`` into a nearby vertex, or absorb a nearby dot."""
@@ -831,10 +884,7 @@ class MESH_OT_quad_draw(bpy.types.Operator):
         if p is None:
             return v
         self.mesh_dirty = True
-        exclude = {v}
-        for f in v.link_faces:
-            exclude.update(f.verts)
-        target, _ = self._pick_vert(p, radius, exclude=exclude)
+        target, _ = self._pick_vert(p, radius, exclude=self._weld_exclude(v))
         if target is not None:
             v = mesh_ops.merge_vert_into(self.bm, v, target)
             self.mesh_dirty = True
@@ -1141,7 +1191,7 @@ class MESH_OT_quad_draw(bpy.types.Operator):
     def _finalize_new_geometry(self, new_verts, faces):
         self._mesh_changed()
         if self.settings.auto_weld:
-            r = self.settings.pick_radius * 0.75
+            r = self.settings.weld_distance
             new_set = set(new_verts)
             for v in new_verts:
                 if not v.is_valid:
@@ -1513,6 +1563,13 @@ def _draw_3d(op, context):
             drawing.lines(segs, drawing.COL_DELETE, 4.0)
         if op.h_vert is not None and op.h_vert.is_valid:
             drawing.points([mw @ op.h_vert.co], col, 12.0)
+        # Auto-weld target while dragging a vertex / dot
+        if op.state == 'TWEAK' and op.drag and op.drag.get("weld"):
+            kind, ref = op.drag["weld"]
+            co = op.dots[ref] if kind == 'DOT' and ref < len(op.dots) else \
+                (ref.co if kind == 'VERT' and ref.is_valid else None)
+            if co is not None:
+                drawing.points([mw @ co], drawing.COL_WELD, 16.0)
         # Fill preview
         if op.fill:
             pts = [mw @ c.co for c in op.fill]
@@ -1547,6 +1604,10 @@ def _draw_2d(op, context):
             drawing.text(m[0] + s.brush_radius + 8, m[1], [f"Brush: {s.brush_radius}px"])
         elif op.state == 'RELAX' or (op.shift and not op.ctrl and op.in_region and op.state == 'IDLE'):
             drawing.circle_2d(m, s.brush_radius, drawing.COL_RELAX, 1.5)
+        elif op.state == 'TWEAK' and op.drag and op.drag.get("kind") in {'VERT', 'DOT'} \
+                and not op.drag.get("pending") and s.auto_weld:
+            col = drawing.COL_WELD if op.drag.get("weld") else drawing.COL_BRUSH
+            drawing.circle_2d(m, s.weld_distance, col, 1.5)
         elif op.tab and op.in_region and op.h_edge is None:
             drawing.circle_2d(m, s.strip_width * 0.5, drawing.COL_FILL_EDGE, 1.5)
         if s.show_hud:

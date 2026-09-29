@@ -50,7 +50,12 @@ class QuadDrawSettings(bpy.types.PropertyGroup):
     )
     pick_radius: IntProperty(
         name="Pick Radius", subtype='PIXEL', default=14, min=4, max=60,
-        description="Screen distance used to pick and auto-weld components",
+        description="Screen distance used to pick components under the cursor",
+    )
+    weld_distance: IntProperty(
+        name="Weld Distance", subtype='PIXEL', default=20, min=1, max=200,
+        description="Screen distance within which a dragged vertex / dot (or new "
+                    "extend / strip vertices) snaps and merges onto another vertex",
     )
     auto_weld: BoolProperty(
         name="Auto Weld", default=True,
@@ -130,6 +135,9 @@ class VIEW3D_PT_quad_draw(bpy.types.Panel):
         col.prop(s, "strip_width")
         col.prop(s, "pick_radius")
         col.prop(s, "auto_weld")
+        sub = col.row(align=True)
+        sub.active = s.auto_weld
+        sub.prop(s, "weld_distance")
         col = layout.column(align=True)
         col.prop(s, "retopology_overlay")
         col.prop(s, "show_hud")
