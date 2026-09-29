@@ -145,6 +145,7 @@ class VIEW3D_PT_quad_draw(bpy.types.Panel):
             "Ctrl+Shift: delete (drag paints)",
             "Tab+drag edge: extend strip",
             "Tab+drag surface: draw strip",
+            "Tab+MMB drag edge: extend whole border",
             "B+drag: brush size",
             "Esc / Enter / Q: exit",
         ):

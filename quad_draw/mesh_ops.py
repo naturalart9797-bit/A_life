@@ -207,13 +207,103 @@ def edge_loop(edge):
     return loop
 
 
+def border_chain(edge):
+    """Ordered vertices of the border edge loop through ``edge`` (connected
+    open edges, stopping at corners). Returns (verts, closed, index) where ``index`` is the position of
+    ``edge`` in the chain (edge = verts[index], verts[index + 1])."""
+    if not is_open_edge(edge):
+        a, b = edge.verts
+        return [a, b], False, 0
+
+    def is_corner(v):
+        # Like Maya's border edge loops, stop at corners (vertex of one face only).
+        return len(v.link_faces) == 1 and len(v.link_edges) == 2
+
+    def walk(start, prev_edge, stop, taken):
+        out = []
+        cur = start
+        while True:
+            if is_corner(cur):
+                return out, False
+            nxt = [e for e in cur.link_edges if e is not prev_edge and is_open_edge(e)]
+            if len(nxt) != 1:
+                return out, False
+            e = nxt[0]
+            v = e.other_vert(cur)
+            if v is stop:
+                return out, True
+            if v in taken:
+                return out, False
+            out.append(v)
+            taken.add(v)
+            prev_edge, cur = e, v
+
+    a, b = edge.verts
+    taken = {a, b}
+    fwd, closed = walk(b, edge, a, taken)
+    if closed:
+        return [a, b] + fwd, True, 0
+    bwd, _ = walk(a, edge, None, taken)
+    verts = list(reversed(bwd)) + [a, b] + fwd
+    return verts, False, len(bwd)
+
+
+def cleanup_after_delete(bm, edges, verts):
+    """Remove edges that lost all their faces and vertices left without edges,
+    so deleting never leaves stray wire edges behind (only ``edges``/``verts``
+    that had faces before the delete are considered)."""
+    wire = [e for e in edges if e.is_valid and not e.link_faces]
+    if wire:
+        bmesh.ops.delete(bm, geom=wire, context='EDGES')
+    loose = [v for v in verts if v.is_valid and not v.link_edges]
+    if loose:
+        bmesh.ops.delete(bm, geom=loose, context='VERTS')
+
+
+def affected_by(elems):
+    """Edges / verts of every face touching ``elems`` (verts, edges or faces)."""
+    faces = set()
+    for el in elems:
+        if isinstance(el, bmesh.types.BMFace):
+            faces.add(el)
+        else:
+            faces.update(el.link_faces)
+    edges = {e for f in faces for e in f.edges}
+    verts = {v for f in faces for v in f.verts}
+    return edges, verts
+
+
 def delete_edge_loop(bm, edge):
-    """Remove the edge loop through ``edge`` (Maya: Ctrl+Shift click edge)."""
-    if is_open_edge(edge):
+    """Remove the edge loop through ``edge`` (Maya: Ctrl+Shift click edge).
+
+    A border edge removes its face; nothing is left dangling."""
+    if not edge.link_faces:
+        verts = list(edge.verts)
         bmesh.ops.delete(bm, geom=[edge], context='EDGES')
+        cleanup_after_delete(bm, [], verts)
+        return
+    if is_open_edge(edge):
+        edges, verts = affected_by([edge])
+        bmesh.ops.delete(bm, geom=list(edge.link_faces), context='FACES_ONLY')
+        cleanup_after_delete(bm, edges, verts)
         return
     loop = edge_loop(edge)
+    edges, verts = affected_by(loop)
     bmesh.ops.dissolve_edges(bm, edges=loop, use_verts=True, use_face_split=False)
+    cleanup_after_delete(bm, edges, verts)
+
+
+def delete_verts(bm, verts):
+    """Delete vertices (and their faces) without leaving stray edges."""
+    edges, around = affected_by(verts)
+    bmesh.ops.delete(bm, geom=list(verts), context='VERTS')
+    cleanup_after_delete(bm, edges, around)
+
+
+def delete_faces(bm, faces):
+    edges, verts = affected_by(faces)
+    bmesh.ops.delete(bm, geom=list(faces), context='FACES_ONLY')
+    cleanup_after_delete(bm, edges, verts)
 
 
 # ---------------------------------------------------------------------------

@@ -13,6 +13,7 @@ Controls (identical to Maya):
     Ctrl+Shift + LMB    delete dot / vertex / edge loop / face (drag = paint)
     Tab + LMB drag      on a border edge: extend quad strip
                         on empty surface: draw a new quad strip
+    Tab + MMB drag      extend every connected border edge at once
     B + drag            resize brush
     Ctrl+Z / Ctrl+Shift+Z   undo / redo
     Esc / Enter / Q     exit tool
@@ -153,6 +154,7 @@ class MESH_OT_quad_draw(bpy.types.Operator):
         self.in_region = True
         self.changed = False
         self.drag = None
+        self.drag_button = 'LEFTMOUSE'
         self._clear_hover()
 
         self.mesh_dirty = True
@@ -175,7 +177,8 @@ class MESH_OT_quad_draw(bpy.types.Operator):
         context.window_manager.modal_handler_add(self)
         context.workspace.status_text_set(
             "Quad Draw | LMB: dot / tweak   Shift: fill · drag relax   Ctrl: edge loop   "
-            "Ctrl+Shift: delete   Tab+drag: extend / strip   B+drag: brush   Esc/Enter/Q: exit")
+            "Ctrl+Shift: delete   Tab+drag: extend / strip   Tab+MMB drag: extend border   "
+            "B+drag: brush   Esc/Enter/Q: exit")
         if self.surface is None:
             self.report({'WARNING'}, "Quad Draw: no live surface found, drawing on the 3D cursor plane")
         self._update_hover()
@@ -469,6 +472,7 @@ class MESH_OT_quad_draw(bpy.types.Operator):
         self.fill = None
         self.loop_preview = None
         self.del_target = None
+        self.h_chain = None
 
     def _update_hover(self):
         self._clear_hover()
@@ -478,6 +482,9 @@ class MESH_OT_quad_draw(bpy.types.Operator):
         r = self.settings.pick_radius
         if self.tab:
             self.h_edge, _d, self.h_t = self._pick_edge(mouse, r * 1.5, only_open=True)
+            if self.h_edge is not None:
+                verts, closed, _i = mesh_ops.border_chain(self.h_edge)
+                self.h_chain = (verts, closed)
             return
         v, dv = self._pick_vert(mouse, r)
         dot, dd = self._pick_dot(mouse, r)
@@ -938,7 +945,7 @@ class MESH_OT_quad_draw(bpy.types.Operator):
                 m = lookup.mirror_of(ref)
                 if m is not None and m is not ref:
                     geom.append(m)
-            bmesh.ops.delete(bm, geom=geom, context='VERTS')
+            mesh_ops.delete_verts(bm, geom)
         elif kind == 'EDGE':
             if not allow_edge or not ref.is_valid:
                 return False
@@ -965,37 +972,99 @@ class MESH_OT_quad_draw(bpy.types.Operator):
                     mf = bm.faces.get(mv)
                     if mf is not None and mf is not ref:
                         faces.append(mf)
-            bmesh.ops.delete(bm, geom=faces, context='FACES')
+            mesh_ops.delete_faces(bm, faces)
         self._mesh_changed()
         return True
 
     # ------------------------------------------------------------------
-    # Extend (Tab + drag on a border edge)
+    # Extend (Tab + LMB drag: one border edge / Tab + MMB drag: whole border)
     # ------------------------------------------------------------------
 
-    def _begin_extend(self, edge):
-        a, b = edge.verts
+    def _begin_extend(self, edge, whole_border=False):
+        if whole_border:
+            verts, closed, grab = mesh_ops.border_chain(edge)
+        else:
+            verts, closed, grab = list(edge.verts), False, 0
+        pairs = self._chain_pairs(len(verts), closed)
+        lengths = [(verts[i].co - verts[j].co).length for i, j in pairs]
         start = self._hit(self.mouse)[0]
         if start is None:
-            start = (a.co + b.co) * 0.5
+            start = (edge.verts[0].co + edge.verts[1].co) * 0.5
         self.drag = {
-            "edge": edge,
-            "base": (a, b),
-            "cur": None,  # (na, nb, face)
+            "base": verts,
+            "closed": closed,
+            "grab": grab,
+            # LMB: the new edge follows the cursor. MMB: the whole border grows
+            # outwards along each vertex's outward direction.
+            "mode": 'OUTWARD' if whole_border else 'TRANSLATE',
+            "row": None,  # {"verts": [...], "faces": [...]} being dragged
             "start": start,
-            "spacing": max((a.co - b.co).length, self.tol * 10),
+            "spacing": max(sum(lengths) / max(len(lengths), 1), self.tol * 10),
             "faces": [],
             "new_verts": [],
             "moved": False,
+            "flipped": False,
         }
+        self.drag["outs"] = self._chain_outward(verts, closed)
 
-    def _extend_new_quad(self):
+    @staticmethod
+    def _chain_pairs(n, closed):
+        pairs = [(i, i + 1) for i in range(n - 1)]
+        if closed and n > 2:
+            pairs.append((n - 1, 0))
+        return pairs
+
+    def _chain_outward(self, verts, closed):
+        """Per-vertex and per-edge outward directions (tangent to the surface)."""
+        pairs = self._chain_pairs(len(verts), closed)
+        edge_outs = []
+        for i, j in pairs:
+            a, b = verts[i], verts[j]
+            mid = (a.co + b.co) * 0.5
+            n = self.normal_at(mid) or Vector((0.0, 0.0, 1.0))
+            e = self.bm.edges.get((a, b))
+            if e is not None and e.link_faces:
+                out = mid - e.link_faces[0].calc_center_median()
+            else:
+                out = n.cross(b.co - a.co)
+            out -= n * out.dot(n)
+            edge_outs.append(out.normalized() if out.length > 1e-12 else Vector())
+        vert_outs = [Vector() for _ in verts]
+        for (i, j), o in zip(pairs, edge_outs):
+            vert_outs[i] += o
+            vert_outs[j] += o
+        vert_outs = [o.normalized() if o.length > 1e-12 else o for o in vert_outs]
+        has_faces = any(self.bm.edges.get((verts[i], verts[j])) is not None
+                        and self.bm.edges.get((verts[i], verts[j])).link_faces
+                        for i, j in pairs)
+        return {"verts": vert_outs, "edges": edge_outs, "has_faces": has_faces}
+
+    def _extend_offsets(self, delta):
         drag = self.drag
-        a, b = drag["base"]
-        na = self.bm.verts.new(a.co)
-        nb = self.bm.verts.new(b.co)
-        drag["new_verts"] += [na, nb]
-        drag["cur"] = [na, nb, None]
+        outs = drag["outs"]
+        if drag["mode"] == 'TRANSLATE':
+            return [delta] * len(drag["base"])
+        ref = outs["edges"][min(drag["grab"], len(outs["edges"]) - 1)] if outs["edges"] \
+            else Vector()
+        dist = delta.dot(ref)
+        if dist < 0.0 and not outs["has_faces"] and not drag["flipped"]:
+            # Wire border: grow towards whichever side the user drags.
+            outs["verts"] = [-o for o in outs["verts"]]
+            outs["edges"] = [-o for o in outs["edges"]]
+            drag["flipped"] = True
+            dist = -dist
+        dist = max(dist, 0.0)
+        return [o * dist for o in outs["verts"]]
+
+    def _extend_make_faces(self, base, new, closed):
+        faces = []
+        for i, j in self._chain_pairs(len(base), closed):
+            a, b, na, nb = base[i], base[j], new[i], new[j]
+            face = mesh_ops.create_face(self.bm, [a, b, nb, na],
+                                        self.normal_at((a.co + nb.co) * 0.5))
+            if face is not None:
+                faces.append(face)
+        return faces
 
     def _update_extend(self):
         drag = self.drag
@@ -1003,70 +1072,67 @@ class MESH_OT_quad_draw(bpy.types.Operator):
         cur = self._hit(self.mouse)[0]
         if cur is None:
             return
-        if drag["cur"] is None:
-            self._extend_new_quad()
-        a, b = drag["base"]
-        na, nb, face = drag["cur"]
-        delta = cur - drag["start"]
-        na.co = self.project(a.co + delta) or (a.co + delta)
-        nb.co = self.project(b.co + delta) or (b.co + delta)
-        if face is None and delta.length > drag["spacing"] * 0.05:
-            face = mesh_ops.create_face(self.bm, [a, b, nb, na],
-                                        self.normal_at((a.co + nb.co) * 0.5))
-            drag["cur"][2] = face
-            if face is not None:
-                drag["faces"].append(face)
-        mid_base = (a.co + b.co) * 0.5
-        mid_new = (na.co + nb.co) * 0.5
-        if face is not None and (mid_new - mid_base).length >= drag["spacing"]:
-            # Commit this quad and continue the strip from its outer edge.
-            drag["base"] = (na, nb)
+        base = drag["base"]
+        if drag["row"] is None:
+            new = [self.bm.verts.new(v.co) for v in base]
+            drag["new_verts"] += new
+            drag["row"] = {"verts": new, "faces": []}
+        row = drag["row"]
+        offsets = self._extend_offsets(cur - drag["start"])
+        for v, nv, off in zip(base, row["verts"], offsets):
+            co = v.co + off
+            nv.co = self.project(co) or co
+        dist = sum((nv.co - v.co).length for v, nv in zip(base, row["verts"])) / len(base)
+        if not row["faces"] and dist > drag["spacing"] * 0.05:
+            row["faces"] = self._extend_make_faces(base, row["verts"], drag["closed"])
+            drag["faces"] += row["faces"]
+        if row["faces"] and dist >= drag["spacing"]:
+            # Commit this row and continue from its outer edges.
+            drag["base"] = row["verts"]
+            drag["outs"] = self._chain_outward(row["verts"], drag["closed"])
             drag["start"] = cur
-            drag["cur"] = None
+            drag["row"] = None
         self._mesh_changed()
+
+    def _discard_row(self, row):
+        drag = self.drag
+        for f in row["faces"]:
+            if f.is_valid:
+                drag["faces"].remove(f)
+                self.bm.faces.remove(f)
+        for v in row["verts"]:
+            if v.is_valid and not v.link_faces:
+                self.bm.verts.remove(v)
 
     def _end_extend(self):
         drag = self.drag
-        self.drag = None
         if drag is None:
             return
         bm = self.bm
-        if not drag["moved"] or not drag["faces"]:
-            # Click (no drag): extrude one quad perpendicular to the edge.
-            for v in drag["new_verts"]:
-                if v.is_valid and not v.link_faces:
-                    bm.verts.remove(v)
-            edge = drag["edge"]
-            if not edge.is_valid or not edge.link_faces:
+        if not drag["faces"]:
+            # Click (no drag): extrude one row outwards by the edge length.
+            if drag["row"] is not None:
+                self._discard_row(drag["row"])
+            self.drag = None
+            base = [v for v in drag["base"] if v.is_valid]
+            outs = drag["outs"]
+            if len(base) != len(drag["base"]) or not outs["has_faces"]:
                 self._mesh_changed()
                 return
-            a, b = edge.verts
-            fc = edge.link_faces[0].calc_center_median()
-            mid = (a.co + b.co) * 0.5
-            n = self.normal_at(mid) or Vector((0, 0, 1))
-            out = mid - fc
-            out -= n * out.dot(n)
-            if out.length < 1e-12:
-                return
-            out = out.normalized() * drag["spacing"]
-            na = bm.verts.new(self.project(a.co + out) or (a.co + out))
-            nb = bm.verts.new(self.project(b.co + out) or (b.co + out))
-            face = mesh_ops.create_face(bm, [a, b, nb, na], n)
-            new_verts = [na, nb]
-            faces = [face] if face else []
+            new = []
+            for v, o in zip(base, outs["verts"]):
+                co = v.co + o * drag["spacing"]
+                new.append(bm.verts.new(self.project(co) or co))
+            faces = self._extend_make_faces(base, new, drag["closed"])
+            new_verts = new
         else:
-            cur = drag["cur"]
-            if cur is not None:
-                na, nb, face = cur
-                a, b = drag["base"]
-                if face is None or ((na.co + nb.co) * 0.5 - (a.co + b.co) * 0.5).length \
-                        < drag["spacing"] * 0.2:
-                    if face is not None and face.is_valid:
-                        drag["faces"].remove(face)
-                        bm.faces.remove(face)
-                    for v in (na, nb):
-                        if v.is_valid:
-                            bm.verts.remove(v)
+            row = drag["row"]
+            if row is not None:
+                base = drag["base"]
+                dist = sum((nv.co - v.co).length for v, nv in zip(base, row["verts"])) / len(base)
+                if not row["faces"] or dist < drag["spacing"] * 0.2:
+                    self._discard_row(row)
+            self.drag = None
             new_verts = [v for v in drag["new_verts"] if v.is_valid]
             faces = [f for f in drag["faces"] if f.is_valid]
         self._finalize_new_geometry(new_verts, faces)
@@ -1242,6 +1308,14 @@ class MESH_OT_quad_draw(bpy.types.Operator):
                 if etype == 'MOUSEMOVE':
                     self._clear_hover()
                 return {'PASS_THROUGH'}
+            if etype == 'MIDDLEMOUSE' and value == 'PRESS' and self.tab:
+                self.press_mouse = self.mouse.copy()
+                self._update_hover()
+                if self.h_edge is not None:
+                    self._begin_extend(self.h_edge, whole_border=True)
+                    self.state = 'EXTEND'
+                    self.drag_button = 'MIDDLEMOUSE'
+                return {'RUNNING_MODAL'}
             if etype in NAV_TYPES or etype.startswith('NDOF'):
                 if etype == 'MIDDLEMOUSE' and value == 'PRESS' and self.ctrl and not self.shift:
                     self._update_hover()
@@ -1274,7 +1348,7 @@ class MESH_OT_quad_draw(bpy.types.Operator):
             self._on_drag()
             self.last_mouse = self.mouse.copy()
             return {'RUNNING_MODAL'}
-        if etype == 'LEFTMOUSE' and value == 'RELEASE':
+        if etype == self.drag_button and value == 'RELEASE':
             self._on_release()
             self.state = 'IDLE'
             self._update_hover()
@@ -1294,6 +1368,7 @@ class MESH_OT_quad_draw(bpy.types.Operator):
 
     def _on_press(self):
         self.press_mouse = self.mouse.copy()
+        self.drag_button = 'LEFTMOUSE'
         self._update_hover()
         if self.tab:
             if self.h_edge is not None:
@@ -1419,6 +1494,11 @@ def _draw_3d(op, context):
             drawing.polygon(pts, drawing.COL_DELETE_FACE if deleting else drawing.COL_HOVER_FACE)
             if deleting:
                 drawing.polyline(pts, drawing.COL_DELETE, 2.0, closed=True)
+        if op.tab and op.h_chain and op.state == 'IDLE':
+            verts, closed = op.h_chain
+            if all(v.is_valid for v in verts):
+                drawing.polyline([mw @ v.co for v in verts],
+                                 (0.35, 0.75, 1.0, 0.45), 2.0, closed=closed)
         if op.h_edge is not None and op.h_edge.is_valid and op.loop_preview is None:
             drawing.lines([mw @ v.co for v in op.h_edge.verts],
                           drawing.COL_HOVER if not op.tab else drawing.COL_FILL_EDGE, 4.0)
@@ -1483,7 +1563,7 @@ def _draw_2d(op, context):
             drawing.text(20, 60, [
                 f"Quad Draw — {mode}{sym}",
                 "LMB dot/tweak · Shift fill/relax · Ctrl loop · Ctrl+Shift delete",
-                "Tab+drag extend/strip · B+drag brush · Ctrl+Z undo · Esc/Q exit",
+                "Tab+drag extend/strip · Tab+MMB extend border · B+drag brush · Ctrl+Z undo · Esc/Q exit",
             ], size=12)
         drawing.end()
     except ReferenceError:
