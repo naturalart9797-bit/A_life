@@ -19,7 +19,6 @@ Controls (identical to Maya):
     Esc / Enter / Q     exit tool
 """
 
-import math
 import traceback
 
 import bmesh
@@ -484,7 +483,7 @@ class MESH_OT_quad_draw(bpy.types.Operator):
         if self.tab:
             self.h_edge, _d, self.h_t = self._pick_edge(mouse, r * 1.5, only_open=True)
             if self.h_edge is not None:
-                verts, closed, _i = mesh_ops.border_chain(self.h_edge, self._extend_angle())
+                verts, closed, _i = mesh_ops.border_chain(self.h_edge)
                 self.h_chain = (verts, closed)
             return
         v, dv = self._pick_vert(mouse, r)
@@ -811,6 +810,8 @@ class MESH_OT_quad_draw(bpy.types.Operator):
                 if v in drag["center"]:
                     co.x = 0.0
                 v.co = co
+            if kind == 'EDGE':
+                self._snap_edge_weld(drag)
         for v, m in drag["mirror"].items():
             if v.is_valid and m.is_valid:
                 m.co = mesh_ops.mirror_co(v.co)
@@ -847,7 +848,44 @@ class MESH_OT_quad_draw(bpy.types.Operator):
                 m = drag["mirror"].get(drag["verts"][0])
                 if m is not None and m.is_valid:
                     self._weld_vert(m, r)
+            elif kind == 'EDGE':
+                for v, target in drag.get("weld_edge", {}).items():
+                    if v.is_valid and target.is_valid:
+                        mesh_ops.merge_vert_into(self.bm, v, target)
+                        self.mesh_dirty = True
+                # Mirrored side: weld the mirror of each welded vertex.
+                mirrors = set(drag["mirror"].values())
+                for v in drag.get("weld_edge", {}):
+                    m = drag["mirror"].get(v)
+                    if m is None or not m.is_valid:
+                        continue
+                    p = self._to2d(m.co)
+                    if p is None:
+                        continue
+                    self.mesh_dirty = True
+                    target, _ = self._pick_vert(p, r, exclude=self._weld_exclude(m) | mirrors)
+                    if target is not None:
+                        mesh_ops.merge_vert_into(self.bm, m, target)
         self._push_undo("Tweak")
+
+    def _snap_edge_weld(self, drag):
+        """While dragging an edge, snap each of its vertices onto a vertex
+        within the weld distance (merged on release), like a vertex drag."""
+        drag["weld_edge"] = {}
+        if not self.settings.auto_weld:
+            return
+        moving = set(drag["verts"]) | set(drag["mirror"].values())
+        used = set()
+        for v in drag["verts"]:
+            p = self._to2d(v.co)
+            if p is None:
+                continue
+            exclude = self._weld_exclude(v) | moving | used
+            target, _ = self._pick_vert(p, self.settings.weld_distance, exclude=exclude)
+            if target is not None:
+                drag["weld_edge"][v] = target
+                used.add(target)
+                v.co = target.co.copy()
 
     def _weld_exclude(self, v):
         """Vertices ``v`` must not merge with: itself and the verts across its
@@ -1033,7 +1071,7 @@ class MESH_OT_quad_draw(bpy.types.Operator):
 
     def _begin_extend(self, edge, whole_border=False):
         if whole_border:
-            verts, closed, grab = mesh_ops.border_chain(edge, self._extend_angle())
+            verts, closed, grab = mesh_ops.border_chain(edge)
         else:
             verts, closed, grab = list(edge.verts), False, 0
         pairs = self._chain_pairs(len(verts), closed)
@@ -1057,9 +1095,6 @@ class MESH_OT_quad_draw(bpy.types.Operator):
             "flipped": False,
         }
         self.drag["outs"] = self._chain_outward(verts, closed)
-
-    def _extend_angle(self):
-        return math.radians(self.settings.extend_angle)
 
     @staticmethod
     def _chain_pairs(n, closed):
@@ -1370,13 +1405,6 @@ class MESH_OT_quad_draw(bpy.types.Operator):
                     self.state = 'EXTEND'
                     self.drag_button = 'MIDDLEMOUSE'
                 return {'RUNNING_MODAL'}
-            if self.tab and etype in {'WHEELUPMOUSE', 'WHEELDOWNMOUSE'} and value == 'PRESS':
-                # Tab + wheel: widen / narrow the border run Tab+MMB will extend.
-                step = 5 if etype == 'WHEELUPMOUSE' else -5
-                s_ = self.settings
-                s_.extend_angle = min(max(s_.extend_angle + step, 0), 180)
-                self._update_hover()
-                return {'RUNNING_MODAL'}
             if etype in NAV_TYPES or etype.startswith('NDOF'):
                 if etype == 'MIDDLEMOUSE' and value == 'PRESS' and self.ctrl and not self.shift:
                     self._update_hover()
@@ -1575,6 +1603,9 @@ def _draw_3d(op, context):
         if op.h_vert is not None and op.h_vert.is_valid:
             drawing.points([mw @ op.h_vert.co], col, 12.0)
         # Auto-weld target while dragging a vertex / dot
+        if op.state == 'TWEAK' and op.drag and op.drag.get("weld_edge"):
+            drawing.points([mw @ t.co for t in op.drag["weld_edge"].values() if t.is_valid],
+                           drawing.COL_WELD, 16.0)
         if op.state == 'TWEAK' and op.drag and op.drag.get("weld"):
             kind, ref = op.drag["weld"]
             co = op.dots[ref] if kind == 'DOT' and ref < len(op.dots) else \
@@ -1622,7 +1653,7 @@ def _draw_2d(op, context):
         elif op.tab and op.in_region and op.h_edge is not None and op.state == 'IDLE':
             n = len(op.h_chain[0]) - 1 + (1 if op.h_chain[1] else 0) if op.h_chain else 1
             drawing.text(m[0] + 18, m[1] - 24,
-                         [f"MMB: {n} edges  (angle {s.extend_angle}°, Tab+wheel)"], size=12)
+                         [f"MMB: {n} edges"], size=12)
         elif op.tab and op.in_region and op.h_edge is None:
             drawing.circle_2d(m, s.strip_width * 0.5, drawing.COL_FILL_EDGE, 1.5)
         if s.show_hud:

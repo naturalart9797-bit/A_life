@@ -5,8 +5,6 @@ Everything in this module works in the *local space of the retopo object* and
 does not depend on the viewport, so it can be tested headless.
 """
 
-import math
-
 import bmesh
 from mathutils import Vector
 from mathutils.kdtree import KDTree
@@ -209,72 +207,49 @@ def edge_loop(edge):
     return loop
 
 
-def border_chain(edge, max_angle=None):
-    """Ordered vertices of the border edge loop through ``edge``.
+def border_chain(edge):
+    """Ordered vertices of the border edge loop through ``edge`` (Maya rule).
 
-    Walks connected open edges and stops at corners (vertex of one face only)
-    and, when ``max_angle`` (radians) is given, wherever the border bends more
-    than that angle -- like Maya, only the run of border that continues the
-    grabbed edge is taken. Returns (verts, closed, index) where ``index`` is
-    the position of ``edge`` in the chain (edge = verts[index], verts[index + 1]).
+    The loop only passes through *regular* border vertices -- 3 edges: two
+    border edges plus one edge going into the mesh. It stops at convex corners
+    (2 edges, one face) and at concave corners / poles (4+ edges), i.e. wherever
+    the border turns a corner topologically. Wire edges (no faces) continue
+    through vertices with 2 edges. Returns (verts, closed, index) where
+    ``index`` is the position of ``edge`` (edge = verts[index], verts[index + 1]).
     """
     if not is_open_edge(edge):
         a, b = edge.verts
         return [a, b], False, 0
 
-    def is_corner(v):
-        return len(v.link_faces) == 1 and len(v.link_edges) == 2
+    def passes(v):
+        if v.link_faces:
+            return len(v.link_edges) == 3
+        return len(v.link_edges) == 2
 
-    def bends(prev_v, cur, nxt_v, ref):
-        """Stop where the border bends more than ``max_angle`` locally, or
-        has drifted more than twice that from the grabbed edge (``ref``) so a
-        gentle curve does not wrap all the way round."""
-        if max_angle is None:
-            return False
-        d0 = cur.co - prev_v.co
-        d1 = nxt_v.co - cur.co
-        n = Vector()
-        for f in cur.link_faces:
-            n += f.normal
-        if n.length > 1e-12:
-            n.normalize()
-            d0 -= n * d0.dot(n)
-            d1 -= n * d1.dot(n)
-            ref = ref - n * ref.dot(n)
-        if d0.length < 1e-12 or d1.length < 1e-12:
-            return False
-        if d0.angle(d1) > max_angle:
-            return True
-        return ref.length > 1e-12 and ref.angle(d1) > min(max_angle * 2.0, math.pi)
-
-    def walk(prev_v, start, prev_edge, stop, taken):
-        ref = start.co - prev_v.co
+    def walk(start, prev_edge, stop, taken):
         out = []
         cur = start
-        while True:
-            if is_corner(cur):
-                return out, False
+        while passes(cur):
             nxt = [e for e in cur.link_edges if e is not prev_edge and is_open_edge(e)]
             if len(nxt) != 1:
-                return out, False
+                break
             e = nxt[0]
             v = e.other_vert(cur)
-            if bends(prev_v, cur, v, ref):
-                return out, False
             if v is stop:
                 return out, True
             if v in taken:
-                return out, False
+                break
             out.append(v)
             taken.add(v)
-            prev_v, prev_edge, cur = cur, e, v
+            prev_edge, cur = e, v
+        return out, False
 
     a, b = edge.verts
     taken = {a, b}
-    fwd, closed = walk(a, b, edge, a, taken)
+    fwd, closed = walk(b, edge, a, taken)
     if closed:
         return [a, b] + fwd, True, 0
-    bwd, _ = walk(b, a, edge, None, taken)
+    bwd, _ = walk(a, edge, None, taken)
     verts = list(reversed(bwd)) + [a, b] + fwd
     return verts, False, len(bwd)
 
