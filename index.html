@@ -124,6 +124,13 @@ const CATEGORIES=[
       {file:'vine_growth_morph.html', name:'蔓モーフ（2枚）', en:'Vine Growth Morph', desc:'AからBへ糸が伸びて形を描き替える成長モーフ。', tags:['先端成長','2枚モーフ'], vis:'vine'},
     ]
   },
+  {
+    title:'対戦シミュレーション', en:'Battle Simulation', color:'#e06a4a',
+    desc:'個体ごとの能力と物理的な押し合い・投げ合いから勝敗が決まる、観戦型の対戦ゲーム。',
+    items:[
+      {file:'beetle_battle.html', name:'甲虫バトル', en:'Beetle Battle', desc:'カブトムシ×クワガタ全16種が切り株の上で押し合い・投げ合う。じゃんけん介入・トーナメント付き。', tags:['ゲーム','物理','じゃんけん'], vis:'beetle', feat:true},
+    ]
+  },
 ];
 
 // ─────────────────────────────────────────────
@@ -257,6 +264,26 @@ function drawPreview(p){
     // reaction-diffusion-ish spots
     if(!p.state){p.state=[];for(let i=0;i<24;i++)p.state.push({x:Math.random()*w,y:Math.random()*h,r:3+Math.random()*5,ph:Math.random()*6.28});}
     for(const s of p.state){const rr=s.r*(1+0.3*Math.sin(t*2+s.ph));ctx.fillStyle=`rgba(${cr},${cg},${cb},0.6)`;ctx.beginPath();ctx.arc(s.x,s.y,rr,0,6.28);ctx.fill();}
+  } else if(vis==='beetle'){
+    // two beetles pushing on a stump
+    const cx=w/2,cy=h/2,R=Math.min(w,h)*0.44;
+    ctx.fillStyle='#05060a';ctx.fillRect(0,0,w,h);
+    ctx.fillStyle='#7a5530';ctx.beginPath();ctx.arc(cx,cy,R,0,6.28);ctx.fill();
+    ctx.strokeStyle='rgba(40,22,8,0.5)';ctx.lineWidth=1;
+    for(let r=R*0.2;r<R;r+=R*0.18){ctx.beginPath();ctx.arc(cx,cy,r,0,6.28);ctx.stroke();}
+    const push=Math.sin(t*1.3)*R*0.3, rot=Math.sin(t*0.4)*0.6;
+    for(const s of [-1,1]){
+      const d=R*0.24*s+push, x=cx+Math.cos(rot)*d, y=cy+Math.sin(rot)*d, a=rot+(s<0?0:Math.PI);
+      ctx.save();ctx.translate(x,y);ctx.rotate(a);
+      ctx.strokeStyle='#1a1008';ctx.lineWidth=1.2;
+      for(let i=-1;i<=1;i++){ctx.beginPath();ctx.moveTo(i*4,-5);ctx.lineTo(i*5+Math.sin(t*8+i)*2,-10);ctx.moveTo(i*4,5);ctx.lineTo(i*5-Math.sin(t*8+i)*2,10);ctx.stroke();}
+      ctx.fillStyle=s<0?'#5a2a14':'#141416';ctx.beginPath();ctx.ellipse(-2,0,9,6,0,0,6.28);ctx.fill();
+      ctx.beginPath();ctx.ellipse(8,0,4,4,0,0,6.28);ctx.fill();
+      ctx.strokeStyle=s<0?'#3a1a0c':'#0c0c0e';ctx.lineWidth=s<0?2.4:1.8;ctx.beginPath();
+      if(s<0){ctx.moveTo(10,0);ctx.lineTo(22,0);}else{ctx.moveTo(10,-3);ctx.quadraticCurveTo(18,-7,21,-1);ctx.moveTo(10,3);ctx.quadraticCurveTo(18,7,21,1);}
+      ctx.stroke();ctx.restore();
+    }
+    ctx.strokeStyle=`rgba(${cr},${cg},${cb},0.9)`;ctx.lineWidth=1.5;ctx.beginPath();ctx.arc(cx,cy,R,0,6.28);ctx.stroke();
   } else {
     // default
     ctx.fillStyle=`rgba(${cr},${cg},${cb},0.6)`;
