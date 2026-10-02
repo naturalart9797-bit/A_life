@@ -34,12 +34,14 @@
 
   .main { display: flex; flex: 1; overflow: hidden; }
 
-  .sidebar { width: 230px; flex-shrink: 0; background: var(--surface); border-right: 1px solid var(--border); display: flex; flex-direction: column; overflow-y: auto; z-index: 5; }
+  .sidebar { width: 250px; flex-shrink: 0; background: var(--surface); border-right: 1px solid var(--border); display: flex; flex-direction: column; overflow-y: auto; z-index: 5; }
   .sidebar::-webkit-scrollbar { width: 4px; }
   .sidebar::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
 
   .section { padding: 14px 16px; border-bottom: 1px solid var(--border); }
   .section-title { font-family: var(--font-mono); font-size: 9px; color: var(--text3); letter-spacing: 0.12em; text-transform: uppercase; margin-bottom: 12px; }
+  .sub-title { font-family: var(--font-mono); font-size: 10px; color: var(--text2); margin: 4px 0 8px; display: flex; align-items: center; gap: 6px; }
+  .sub-title::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: var(--c, var(--accent)); }
 
   button { font-family: var(--font-mono); font-size: 11px; font-weight: 500; background: transparent; border: 1px solid var(--border); color: var(--text2); padding: 6px 12px; border-radius: 3px; cursor: pointer; letter-spacing: 0.05em; transition: all 0.15s; white-space: nowrap; }
   button:hover { border-color: var(--accent2); color: var(--accent); background: rgba(224,160,80,0.06); }
@@ -47,6 +49,8 @@
   .play-btn { width: 100%; padding: 8px; font-size: 12px; border-color: var(--accent2); color: var(--accent); letter-spacing: 0.1em; }
   .row { display: flex; gap: 6px; margin-top: 6px; }
   .row button { flex: 1; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; }
+  .grid2 button { padding: 6px 4px; font-size: 10px; }
 
   .slider-row { margin-bottom: 10px; }
   .slider-header { display: flex; justify-content: space-between; margin-bottom: 5px; }
@@ -55,6 +59,20 @@
   input[type=range] { -webkit-appearance: none; appearance: none; width: 100%; height: 2px; background: var(--border); border-radius: 1px; outline: none; }
   input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 12px; height: 12px; background: var(--accent); border-radius: 50%; cursor: pointer; }
   input[type=range]::-moz-range-thumb { width: 12px; height: 12px; background: var(--accent); border: none; border-radius: 50%; cursor: pointer; }
+
+  select { width: 100%; font-family: var(--font-mono); font-size: 11px; background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 3px; padding: 5px 6px; outline: none; }
+  select:focus { border-color: var(--accent2); }
+  .field { margin-bottom: 8px; }
+  .field label { display: block; font-family: var(--font-mono); font-size: 10px; color: var(--text2); margin-bottom: 4px; }
+  .field-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+
+  .drop { border: 1px dashed var(--border); border-radius: 4px; padding: 9px 8px; text-align: center; font-family: var(--font-mono); font-size: 10px; color: var(--text2); cursor: pointer; line-height: 1.6; margin-bottom: 8px; transition: all .15s; }
+  .drop:hover, .drop.over { border-color: var(--accent); color: var(--accent); background: rgba(224,160,80,0.05); }
+  .drop small { color: var(--text3); display: block; font-size: 9px; }
+  .model-status { font-family: var(--font-mono); font-size: 9px; color: var(--text3); line-height: 1.6; min-height: 14px; margin-bottom: 8px; word-break: break-all; }
+  .model-status.err { color: #e06060; }
+  .model-status.busy { color: var(--accent); }
+  .model-block + .model-block { margin-top: 14px; padding-top: 12px; border-top: 1px dashed var(--border); }
 
   .preset-list { display: flex; flex-direction: column; gap: 3px; }
   .preset-btn { text-align: left; padding: 6px 10px; font-size: 11px; width: 100%; }
@@ -70,14 +88,28 @@
   .hint { position: absolute; bottom: 14px; left: 50%; transform: translateX(-50%); font-family: var(--font-mono); font-size: 10px; color: var(--text3); letter-spacing: 0.08em; pointer-events: none; white-space: nowrap; }
   .loading { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-family: var(--font-mono); font-size: 12px; color: var(--text3); letter-spacing: 0.1em; }
 
+  /* first-person overlay */
+  .pov { position: absolute; inset: 0; pointer-events: none; display: none; }
+  .pov.on { display: block; }
+  .pov .vignette { position: absolute; inset: 0; background: radial-gradient(ellipse at center, transparent 55%, rgba(0,0,0,0.55) 100%); }
+  .pov .reticle { position: absolute; left: 50%; top: 50%; width: 34px; height: 34px; margin: -17px 0 0 -17px; border: 1px solid rgba(255,120,90,0.55); border-radius: 50%; }
+  .pov .reticle::after { content: ''; position: absolute; left: 50%; top: 50%; width: 3px; height: 3px; margin: -1.5px 0 0 -1.5px; background: rgba(255,120,90,0.9); border-radius: 50%; }
+  .pov .reticle.hidden { display: none; }
+  .pov .steer { position: absolute; width: 8px; height: 8px; margin: -4px 0 0 -4px; border: 1px solid rgba(255,200,150,0.7); border-radius: 50%; display: none; }
+  .pov .hud { position: absolute; left: 16px; top: 14px; font-family: var(--font-mono); font-size: 11px; color: rgba(255,210,170,0.85); letter-spacing: 0.08em; line-height: 1.8; text-shadow: 0 0 6px rgba(0,0,0,0.8); }
+  .pov .hud b { font-weight: 500; color: #ff9b6b; }
+  .pov .hud-hint { position: absolute; bottom: 14px; left: 50%; transform: translateX(-50%); font-family: var(--font-mono); font-size: 10px; color: rgba(255,210,170,0.6); white-space: nowrap; text-shadow: 0 0 6px rgba(0,0,0,0.8); }
+  .drop-overlay { position: absolute; inset: 10px; border: 2px dashed var(--accent); border-radius: 10px; display: none; align-items: center; justify-content: center; font-family: var(--font-mono); font-size: 13px; color: var(--accent); background: rgba(7,8,13,0.6); pointer-events: none; }
+  .drop-overlay.on { display: flex; }
+
   @media (max-width: 700px) {
     header { padding: 8px 12px; gap: 10px; }
     .stats { gap: 12px; }
     .stat-val { font-size: 13px; }
-    .badge { display: none; }
+    .badge, .stat.optional { display: none; }
     .main { flex-direction: column-reverse; }
-    .sidebar { width: 100%; height: 38vh; border-right: none; border-top: 1px solid var(--border); }
-    .hint { display: none; }
+    .sidebar { width: 100%; height: 40vh; border-right: none; border-top: 1px solid var(--border); }
+    .hint, .pov .hud-hint { display: none; }
   }
 </style>
 </head>
@@ -90,7 +122,8 @@
   <div class="stats">
     <div class="stat"><span class="stat-label">個体数</span><span class="stat-val" id="stCount">0</span></div>
     <div class="stat"><span class="stat-label">秩序度</span><span class="stat-val" id="stOrder">—</span></div>
-    <div class="stat"><span class="stat-label">FPS</span><span class="stat-val" id="stFps">—</span></div>
+    <div class="stat"><span class="stat-label">捕獲</span><span class="stat-val" id="stCatch">0</span></div>
+    <div class="stat optional"><span class="stat-label">FPS</span><span class="stat-val" id="stFps">—</span></div>
   </div>
 </header>
 
@@ -106,12 +139,49 @@
     </div>
 
     <div class="section">
+      <div class="section-title">視点</div>
+      <div class="grid2" id="viewBtns">
+        <button data-view="orbit" class="active">俯瞰</button>
+        <button data-view="predFP">捕食者の目</button>
+        <button data-view="predChase">捕食者を追跡</button>
+        <button data-view="boidFP">群れの1羽</button>
+      </div>
+      <div class="row"><button id="btnNextTarget">次の個体へ ⇥</button></div>
+      <div style="margin-top:10px">
+        <label class="check"><input type="checkbox" id="chkPilot">捕食者を操縦する</label>
+        <label class="check"><input type="checkbox" id="chkRotate" checked>カメラ自動回転（俯瞰）</label>
+        <label class="check"><input type="checkbox" id="chkFollow">群れを追跡（俯瞰）</label>
+        <label class="check"><input type="checkbox" id="chkBounds">境界球を表示</label>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-title">3Dモデル</div>
+      <div id="modelBlocks"></div>
+      <div class="slider-row" style="margin-top:4px">
+        <div class="slider-header"><span class="slider-name">群れの色付け</span><span class="slider-val" id="tintOut"></span></div>
+        <input type="range" id="tint" min="0" max="1" step="0.05">
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-title">空・環境</div>
+      <select id="themeSel">
+        <option value="night">夜</option>
+        <option value="dusk">夕暮れ</option>
+        <option value="day">昼の空</option>
+        <option value="ocean">海中</option>
+      </select>
+    </div>
+
+    <div class="section">
       <div class="section-title">群れのルール</div>
       <div id="sliders"></div>
     </div>
 
     <div class="section">
       <div class="section-title">捕食者</div>
+      <label class="check"><input type="checkbox" id="chkHunt" checked>捕食する（捕まった個体は遠くで再出現）</label>
       <div id="sliders2"></div>
     </div>
 
@@ -120,18 +190,15 @@
       <div class="preset-list" id="presets"></div>
     </div>
 
-    <div class="section">
-      <div class="section-title">表示</div>
-      <label class="check"><input type="checkbox" id="chkRotate" checked>カメラ自動回転</label>
-      <label class="check"><input type="checkbox" id="chkFollow">群れを追跡</label>
-      <label class="check"><input type="checkbox" id="chkBounds">境界球を表示</label>
-    </div>
-
     <div class="section note">
-      ドラッグ: 回転<br>
-      スクロール / ピンチ: ズーム<br>
+      俯瞰: ドラッグで回転 / ホイール・ピンチでズーム<br>
+      捕食者・1羽の視点: ドラッグで見回し<br>
+      操縦中: マウスの方向へ旋回、押下 / Shift で加速<br>
       クリック: その地点で驚かす<br>
-      Space: 一時停止<br><br>
+      Space: 一時停止　Tab: 次の個体<br><br>
+      モデルは .glb / .gltf / .fbx / .obj に対応。<br>
+      テクスチャや .mtl は一緒に選択・ドロップ。<br>
+      内蔵アニメーションは自動で使われます。<br><br>
       秩序度 = 全個体の向きの揃い具合<br>(0: ばらばら 〜 1: 完全に整列)
     </div>
 
@@ -140,11 +207,28 @@
   <div class="canvas-wrap" id="wrap">
     <div class="loading" id="loading">LOADING...</div>
     <canvas id="c"></canvas>
-    <div class="hint">分離・整列・結合の3つの局所ルールだけで、群れ全体のうねりが創発します</div>
+    <div class="pov" id="pov">
+      <div class="vignette"></div>
+      <div class="reticle" id="reticle"></div>
+      <div class="steer" id="steerDot"></div>
+      <div class="hud" id="hud"></div>
+      <div class="hud-hint" id="hudHint"></div>
+    </div>
+    <div class="hint" id="hint">分離・整列・結合の3つの局所ルールだけで、群れ全体のうねりが創発します</div>
+    <div class="drop-overlay" id="dropOverlay">ここにドロップで「群れ」のモデルに設定</div>
   </div>
 </div>
 
+<input type="file" id="fileInput" multiple style="display:none" accept=".glb,.gltf,.fbx,.obj,.mtl,.bin,.png,.jpg,.jpeg,.webp,.tga,.bmp">
+
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/libs/fflate.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/DRACOLoader.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/FBXLoader.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/OBJLoader.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/MTLLoader.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/environments/RoomEnvironment.js"></script>
 <script>
 // ─────────────────────────────────────────────
 //  PARAMETERS
@@ -152,6 +236,7 @@
 const MAX_BOIDS = 6000;
 const MAX_PRED = 6;
 const BOUND = 42;          // soft boundary radius
+const TRI_BUDGET = 3e6;    // caps flock size for heavy models
 
 const P = {
   count: 2000,
@@ -163,6 +248,8 @@ const P = {
   predators: 1,
   fear: 1.0,
   predSpeed: 1.15,
+  tint: 1,
+  hunt: true,
 };
 
 const SLIDERS = [
@@ -185,16 +272,41 @@ const PRESETS = [
   { name:'散り散り',       en:'chaos',    v:{ separation:3.5, alignment:0.0, cohesion:0.1, radius:2.5, maxSpeed:1.0,  predators:3, fear:2.5 } },
 ];
 
+// Sample models are fetched at runtime from their public repositories (see README/licence notes below).
+const THREE_MODELS = 'https://raw.githubusercontent.com/mrdoob/three.js/r128/examples/models/gltf/';
+const KHRONOS = 'https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Models/master/2.0/';
+const SAMPLES = {
+  cone:     { name:'円錐（軽量）' },
+  parrot:   { name:'オウム（羽ばたき）',       url: THREE_MODELS + 'Parrot.glb',   forward:'+Z', up:'+Y', size:{ boid:1.4, pred:3.2 } },
+  stork:    { name:'コウノトリ（羽ばたき）',   url: THREE_MODELS + 'Stork.glb',    forward:'+Z', up:'+Y', size:{ boid:1.6, pred:3.6 } },
+  flamingo: { name:'フラミンゴ（羽ばたき）',   url: THREE_MODELS + 'Flamingo.glb', forward:'+Z', up:'+Y', size:{ boid:1.6, pred:3.6 } },
+  fish:     { name:'バラマンディ（魚・12MB）', url: KHRONOS + 'BarramundiFish/glTF-Binary/BarramundiFish.glb', forward:'+Z', up:'+Y', motion:'swim', size:{ boid:1.3, pred:3.4 } },
+  fox:      { name:'キツネ（走る）',           url: KHRONOS + 'Fox/glTF-Binary/Fox.glb', forward:'+Z', up:'+Y', clip:/run/i, size:{ boid:1.4, pred:3.4 } },
+};
+const SAMPLE_CREDITS = {
+  parrot: 'Parrot — three.js examples (mirada / ro.me)',
+  stork: 'Stork — three.js examples (mirada / ro.me)',
+  flamingo: 'Flamingo — three.js examples (mirada / ro.me)',
+  fish: 'BarramundiFish — Microsoft, CC0',
+  fox: 'Fox — PixelMannen (CC0), rig/anim @tomkranis (CC-BY 4.0)',
+};
+
 // ─────────────────────────────────────────────
 //  STATE
 // ─────────────────────────────────────────────
 const pos  = new Float32Array(MAX_BOIDS * 3);
 const vel  = new Float32Array(MAX_BOIDS * 3);
 const nvel = new Float32Array(MAX_BOIDS * 3);
-const panic = new Float32Array(MAX_BOIDS);   // 0..1, decays; tints color
+const bank = new Float32Array(MAX_BOIDS * 3);   // smoothed lateral acceleration, used to roll into turns
+const panic = new Float32Array(MAX_BOIDS);      // 0..1, decays; tints color
+const phase = new Float32Array(MAX_BOIDS);      // animation cycle position
 
 const ppos = new Float32Array(MAX_PRED * 3);
 const pvel = new Float32Array(MAX_PRED * 3);
+const pbank = new Float32Array(MAX_PRED * 3);
+const pphase = new Float32Array(MAX_PRED);
+const pcool = new Float32Array(MAX_PRED);       // cooldown after a catch
+let catches = 0;
 
 function rand(a, b) { return a + Math.random() * (b - a); }
 
@@ -209,6 +321,21 @@ function spawnBoid(i) {
   vel[i*3]   = Math.cos(a) * 0.5;
   vel[i*3+1] = rand(-0.1, 0.1);
   vel[i*3+2] = Math.sin(a) * 0.5;
+  bank[i*3] = bank[i*3+1] = bank[i*3+2] = 0;
+  panic[i] = 0;
+  phase[i] = Math.random();
+}
+
+// re-enter from the far side of the arena, heading inward
+function respawnAway(i, fromX, fromY, fromZ) {
+  const l = Math.hypot(fromX, fromY, fromZ) + 1e-3;
+  const a = rand(-0.8, 0.8);
+  let dx = -fromX / l, dz = -fromZ / l;
+  const c = Math.cos(a), s = Math.sin(a);
+  [dx, dz] = [dx * c - dz * s, dx * s + dz * c];
+  const r = BOUND * 1.15;
+  pos[i*3] = dx * r; pos[i*3+1] = rand(-8, 8); pos[i*3+2] = dz * r;
+  vel[i*3] = -dx * P.maxSpeed * 0.7; vel[i*3+1] = 0; vel[i*3+2] = -dz * P.maxSpeed * 0.7;
   panic[i] = 0;
 }
 
@@ -217,12 +344,16 @@ function spawnPredator(k) {
   ppos[k*3]   = Math.cos(a) * BOUND;
   ppos[k*3+1] = rand(-10, 10);
   ppos[k*3+2] = Math.sin(a) * BOUND;
-  pvel[k*3] = pvel[k*3+1] = pvel[k*3+2] = 0;
+  pvel[k*3] = -Math.cos(a) * 0.3; pvel[k*3+1] = 0; pvel[k*3+2] = -Math.sin(a) * 0.3;
+  pbank[k*3] = pbank[k*3+1] = pbank[k*3+2] = 0;
+  pphase[k] = Math.random();
+  pcool[k] = 0;
 }
 
 function resetAll() {
   for (let i = 0; i < MAX_BOIDS; i++) spawnBoid(i);
   for (let k = 0; k < MAX_PRED; k++) spawnPredator(k);
+  catches = 0;
 }
 
 // ─────────────────────────────────────────────
@@ -280,6 +411,7 @@ function stepBoids(dt) {
   const maxF = 0.03 * maxS / 0.75;
   const fearR = 16, fearR2 = fearR * fearR;
   const nPred = P.predators;
+  const bankK = Math.min(1, 0.08 * dt);
 
   let sumX = 0, sumY = 0, sumZ = 0;
 
@@ -354,10 +486,9 @@ function stepBoids(dt) {
       }
     }
 
-    // panic: excited boids move faster and spread the excitement
+    // panic: excited boids move faster and turn harder
     if (fearSum > 0) panic[i] = Math.min(1, panic[i] + fearSum * 0.15 * P.fear);
 
-    // steering limit (panicked boids may turn harder)
     const lim = maxF * (1 + panic[i] * 2);
     const fl = Math.sqrt(fx*fx + fy*fy + fz*fz);
     if (fl > lim) { const s = lim / fl; fx *= s; fy *= s; fz *= s; }
@@ -370,54 +501,125 @@ function stepBoids(dt) {
     nx *= ts / sp; ny *= ts / sp; nz *= ts / sp;
     nvel[ix] = nx; nvel[ix+1] = ny; nvel[ix+2] = nz;
 
+    // smoothed turning acceleration → banking
+    const lim1 = 1 / (maxF + 1e-6);
+    bank[ix]   += ((nx - vx) * lim1 - bank[ix])   * bankK;
+    bank[ix+1] += ((ny - vy) * lim1 - bank[ix+1]) * bankK;
+    bank[ix+2] += ((nz - vz) * lim1 - bank[ix+2]) * bankK;
+
     sumX += nx / ts; sumY += ny / ts; sumZ += nz / ts;
   }
 
+  const rate = models.boid ? models.boid.cycleRate : 2;
   for (let i = 0; i < n; i++) {
     const ix = i*3;
     vel[ix] = nvel[ix]; vel[ix+1] = nvel[ix+1]; vel[ix+2] = nvel[ix+2];
     pos[ix] += vel[ix] * dt; pos[ix+1] += vel[ix+1] * dt; pos[ix+2] += vel[ix+2] * dt;
+    // faster / frightened animals beat their wings (or tails) faster
+    const sp = Math.hypot(vel[ix], vel[ix+1], vel[ix+2]) / maxS;
+    phase[i] = (phase[i] + rate * (0.55 + 0.6 * sp + panic[i] * 0.9) * dt / 60) % 1;
     panic[i] *= Math.pow(0.97, dt);
   }
 
   polarization = n ? Math.sqrt(sumX*sumX + sumY*sumY + sumZ*sumZ) / n : 0;
 }
 
+// pilot input, in [-1, 1] screen-space offsets from the center
+const pilot = { x: 0, y: 0, boost: false, active: false };
+
 function stepPredators(dt) {
   const n = P.count;
   const speed = P.maxSpeed * P.predSpeed;
+  const rate = models.pred ? models.pred.cycleRate : 2;
+  const catchR = (models.pred ? models.pred.size : 3) * 0.35 + 0.6;
+  const catchR2 = catchR * catchR;
+
   for (let k = 0; k < P.predators; k++) {
     const kx = k*3;
     const px = ppos[kx], py = ppos[kx+1], pz = ppos[kx+2];
-    // hunt the nearest boid out of a random sample (cheap and slightly erratic)
-    let best = -1, bd = Infinity;
-    for (let s = 0; s < 64; s++) {
-      const j = (Math.random() * n) | 0, jx = j*3;
-      const dx = pos[jx] - px, dy = pos[jx+1] - py, dz = pos[jx+2] - pz;
-      const d2 = dx*dx + dy*dy + dz*dz;
-      if (d2 < bd) { bd = d2; best = j; }
+    const ovx = pvel[kx], ovy = pvel[kx+1], ovz = pvel[kx+2];
+    let vx, vy, vz, sp = speed;
+
+    if (opts.pilot && k === view.predIdx && isPredView()) {
+      // player-controlled: yaw/pitch toward the pointer
+      let dx = ovx, dy = ovy, dz = ovz;
+      let l = Math.hypot(dx, dy, dz) || 1; dx /= l; dy /= l; dz /= l;
+      let rx = -dz, rz = dx;                       // right = dir × worldUp
+      let rl = Math.hypot(rx, rz) || 1; rx /= rl; rz /= rl;
+      const ux = -rz * dy, uy = rz * dx - rx * dz, uz = rx * dy;  // up = right × dir
+      const turn = 0.05 * dt;
+      dx += (rx * pilot.x - ux * pilot.y) * turn;
+      dy += (-uy * pilot.y) * turn;
+      dz += (rz * pilot.x - uz * pilot.y) * turn;
+      // gently pull back if flying far away
+      const dist = Math.hypot(px, py * 1.6, pz);
+      if (dist > BOUND * 2) { const g = 0.02 * dt / dist; dx -= px * g; dy -= py * g; dz -= pz * g; }
+      l = Math.hypot(dx, dy, dz) || 1;
+      sp = speed * (pilot.boost ? 1.7 : 1.05);
+      vx = dx / l * sp; vy = dy / l * sp; vz = dz / l * sp;
+    } else {
+      // hunt the nearest boid out of a random sample (cheap and slightly erratic)
+      let best = -1, bd = Infinity;
+      for (let s = 0; s < 64; s++) {
+        const j = (Math.random() * n) | 0, jx = j*3;
+        const dx = pos[jx] - px, dy = pos[jx+1] - py, dz = pos[jx+2] - pz;
+        const d2 = dx*dx + dy*dy + dz*dz;
+        if (d2 < bd) { bd = d2; best = j; }
+      }
+      let tx = 0, ty = 0, tz = 0;
+      if (best >= 0) {
+        const jx = best*3;
+        tx = pos[jx] - px; ty = pos[jx+1] - py; tz = pos[jx+2] - pz;
+      }
+      // keep predators apart from each other
+      for (let m = 0; m < P.predators; m++) {
+        if (m === k) continue;
+        const ox = px - ppos[m*3], oy = py - ppos[m*3+1], oz = pz - ppos[m*3+2];
+        const d2 = ox*ox + oy*oy + oz*oz;
+        if (d2 < 100) { tx += ox * 2; ty += oy * 2; tz += oz * 2; }
+      }
+      const tl = Math.sqrt(tx*tx + ty*ty + tz*tz) + 1e-6;
+      const turn = 0.05 * dt;
+      vx = ovx + tx / tl * speed * turn;
+      vy = ovy + ty / tl * speed * turn;
+      vz = ovz + tz / tl * speed * turn;
+      const vl = Math.sqrt(vx*vx + vy*vy + vz*vz) + 1e-6;
+      if (vl > speed) { vx *= speed / vl; vy *= speed / vl; vz *= speed / vl; }
     }
-    let tx = 0, ty = 0, tz = 0;
-    if (best >= 0) {
-      const jx = best*3;
-      tx = pos[jx] - px; ty = pos[jx+1] - py; tz = pos[jx+2] - pz;
-    }
-    // keep predators apart from each other
-    for (let m = 0; m < P.predators; m++) {
-      if (m === k) continue;
-      const ox = px - ppos[m*3], oy = py - ppos[m*3+1], oz = pz - ppos[m*3+2];
-      const d2 = ox*ox + oy*oy + oz*oz;
-      if (d2 < 100) { tx += ox * 2; ty += oy * 2; tz += oz * 2; }
-    }
-    const tl = Math.sqrt(tx*tx + ty*ty + tz*tz) + 1e-6;
-    const turn = 0.025 * dt;
-    let vx = pvel[kx] + tx / tl * speed * turn * 2;
-    let vy = pvel[kx+1] + ty / tl * speed * turn * 2;
-    let vz = pvel[kx+2] + tz / tl * speed * turn * 2;
-    const vl = Math.sqrt(vx*vx + vy*vy + vz*vz) + 1e-6;
-    if (vl > speed) { vx *= speed / vl; vy *= speed / vl; vz *= speed / vl; }
+
+    const bankK = Math.min(1, 0.08 * dt), inv = 1 / (0.05 * speed + 1e-6);
+    pbank[kx]   += ((vx - ovx) * inv - pbank[kx])   * bankK;
+    pbank[kx+1] += ((vy - ovy) * inv - pbank[kx+1]) * bankK;
+    pbank[kx+2] += ((vz - ovz) * inv - pbank[kx+2]) * bankK;
+
     pvel[kx] = vx; pvel[kx+1] = vy; pvel[kx+2] = vz;
     ppos[kx] += vx * dt; ppos[kx+1] += vy * dt; ppos[kx+2] += vz * dt;
+    pphase[k] = (pphase[k] + rate * (0.6 + 0.5 * Math.hypot(vx, vy, vz) / speed) * dt / 60) % 1;
+
+    // catch: look only in the predator's grid cell neighbourhood
+    pcool[k] = Math.max(0, pcool[k] - dt);
+    if (P.hunt && pcool[k] <= 0 && n > 0) {
+      const qx = ppos[kx], qy = ppos[kx+1], qz = ppos[kx+2];
+      const gx = cellCoord(qx), gy = cellCoord(qy), gz = cellCoord(qz);
+      let caught = -1;
+      outer:
+      for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++) for (let dz = -1; dz <= 1; dz++) {
+        const xx = gx + dx, yy = gy + dy, zz = gz + dz;
+        if (xx < 0 || yy < 0 || zz < 0 || xx >= gdim || yy >= gdim || zz >= gdim) continue;
+        const c = (xx * gdim + yy) * gdim + zz;
+        for (let s = cellStart[c], e = cellStart[c+1]; s < e; s++) {
+          const j = sorted[s]; if (j >= n) continue;
+          const ox = pos[j*3] - qx, oy = pos[j*3+1] - qy, oz = pos[j*3+2] - qz;
+          if (ox*ox + oy*oy + oz*oz < catchR2) { caught = j; break outer; }
+        }
+      }
+      if (caught >= 0) {
+        respawnAway(caught, qx, qy, qz);
+        catches++;
+        pcool[k] = 20;
+        if (k === view.predIdx && isPredView()) flashCatch();
+      }
+    }
   }
 }
 
@@ -444,58 +646,500 @@ const canvas = document.getElementById('c');
 const wrap = document.getElementById('wrap');
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.outputEncoding = THREE.sRGBEncoding;
 
 const scene = new THREE.Scene();
-const BG = new THREE.Color(0x07080d);
-scene.background = BG;
-scene.fog = new THREE.Fog(BG, 70, 190);
+scene.fog = new THREE.Fog(0x07080d, 70, 190);
 
-const camera = new THREE.PerspectiveCamera(55, 1, 0.1, 500);
+const camera = new THREE.PerspectiveCamera(55, 1, 0.1, 600);
 
-scene.add(new THREE.HemisphereLight(0xb8c4ff, 0x1a1208, 0.9));
+// soft studio reflections so metallic / PBR models (glTF) are not rendered black
+if (THREE.RoomEnvironment) {
+  const pmrem = new THREE.PMREMGenerator(renderer);
+  scene.environment = pmrem.fromScene(new THREE.RoomEnvironment(), 0.04).texture;
+  pmrem.dispose();
+}
+
+const hemi = new THREE.HemisphereLight(0xb8c4ff, 0x1a1208, 0.9);
+scene.add(hemi);
 const sun = new THREE.DirectionalLight(0xffd8a0, 0.9);
 sun.position.set(40, 60, 20);
 scene.add(sun);
 
-// boids: one instanced cone each, tip pointing along +Z
-const boidGeo = new THREE.ConeGeometry(0.22, 1.0, 5);
-boidGeo.rotateX(Math.PI / 2);
-const boidMat = new THREE.MeshLambertMaterial({ color: 0xffffff });
-const boids = new THREE.InstancedMesh(boidGeo, boidMat, MAX_BOIDS);
-boids.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-boids.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(MAX_BOIDS * 3), 3);
-boids.instanceColor.setUsage(THREE.DynamicDrawUsage);
-boids.frustumCulled = false;
-scene.add(boids);
+// sky dome with a vertical gradient (follows the camera so it is always "infinitely" far)
+const skyMat = new THREE.ShaderMaterial({
+  side: THREE.BackSide, depthWrite: false, fog: false,
+  uniforms: { top: { value: new THREE.Color() }, mid: { value: new THREE.Color() }, bot: { value: new THREE.Color() } },
+  vertexShader: `varying vec3 vP; void main(){ vP = normalize(position); gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }`,
+  fragmentShader: `uniform vec3 top; uniform vec3 mid; uniform vec3 bot; varying vec3 vP;
+    void main(){ float h = vP.y; vec3 c = h > 0.0 ? mix(mid, top, pow(h, 0.6)) : mix(mid, bot, pow(-h, 0.5));
+      gl_FragColor = vec4(c, 1.0);
+      #include <encodings_fragment>
+    }`,
+});
+const sky = new THREE.Mesh(new THREE.SphereGeometry(450, 32, 16), skyMat);
+sky.renderOrder = -1;
+scene.add(sky);
 
-const predGeo = new THREE.ConeGeometry(0.7, 2.8, 6);
-predGeo.rotateX(Math.PI / 2);
-const predMat = new THREE.MeshLambertMaterial({ color: 0xff4a3a, emissive: 0x551008 });
-const preds = new THREE.InstancedMesh(predGeo, predMat, MAX_PRED);
-preds.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-preds.frustumCulled = false;
-scene.add(preds);
-
-// faint dust for depth cues
+// faint dust / plankton for depth cues
+const dustMat = new THREE.PointsMaterial({ color: 0x3a3f52, size: 1.5, sizeAttenuation: false, transparent: true });
 {
-  const N = 1500, g = new THREE.BufferGeometry(), a = new Float32Array(N * 3);
+  const N = 1800, g = new THREE.BufferGeometry(), a = new Float32Array(N * 3);
   for (let i = 0; i < N; i++) {
-    const r = rand(60, 160), th = rand(0, Math.PI * 2), ph = Math.acos(rand(-1, 1));
+    const r = rand(20, 160), th = rand(0, Math.PI * 2), ph = Math.acos(rand(-1, 1));
     a[i*3] = r * Math.sin(ph) * Math.cos(th); a[i*3+1] = r * Math.cos(ph); a[i*3+2] = r * Math.sin(ph) * Math.sin(th);
   }
   g.setAttribute('position', new THREE.BufferAttribute(a, 3));
-  scene.add(new THREE.Points(g, new THREE.PointsMaterial({ color: 0x3a3f52, size: 0.3, sizeAttenuation: true })));
+  scene.add(new THREE.Points(g, dustMat));
 }
 
 const boundMesh = new THREE.Mesh(
   new THREE.SphereGeometry(BOUND, 32, 16),
-  new THREE.MeshBasicMaterial({ color: 0x262a38, wireframe: true, transparent: true, opacity: 0.25 })
+  new THREE.MeshBasicMaterial({ color: 0x8890b0, wireframe: true, transparent: true, opacity: 0.12 })
 );
 boundMesh.scale.y = 1 / 1.6;
 boundMesh.visible = false;
 scene.add(boundMesh);
 
-// click ripples
+// ─────────────────────────────────────────────
+//  THEMES
+// ─────────────────────────────────────────────
+const THEMES = {
+  night: { top:0x05060a, mid:0x0b0e18, bot:0x040508, fog:[0x090b13, 70, 200], hemi:[0xb8c4ff, 0x1a1208, 0.9], sun:[0xffd8a0, 0.9],
+           ramp:[0x3b4a9a, 0xcfe2ff, 0xffa040], dust:[0x3a3f52, 1.5, 1] },
+  dusk:  { top:0x1b2350, mid:0xe88a5a, bot:0x2a1a24, fog:[0xb87060, 80, 230], hemi:[0xffc8a0, 0x302030, 0.8], sun:[0xffa060, 1.2],
+           ramp:[0x141018, 0x3a2a30, 0xffb060], dust:[0xffd0b0, 1.2, 0.25] },
+  day:   { top:0x2f6fc0, mid:0xb8d8f0, bot:0x8090a0, fog:[0xb8d0e8, 90, 260], hemi:[0xffffff, 0x8a7a60, 1.0], sun:[0xffffff, 1.0],
+           ramp:[0x202430, 0x505a70, 0xff8030], dust:[0xffffff, 1.0, 0.0] },
+  ocean: { top:0x3aa0c8, mid:0x0a4a6a, bot:0x020c18, fog:[0x0a3a55, 25, 140], hemi:[0x9fe0ff, 0x02101a, 1.1], sun:[0xbfefff, 0.7],
+           ramp:[0x6a8aa0, 0xe0f4ff, 0xffd060], dust:[0xa8e0f0, 2.0, 0.8] },
+};
+const cSlow = new THREE.Color(), cFast = new THREE.Color(), cPanic = new THREE.Color();
+// theme colours are authored in sRGB; the renderer works in linear space
+const lin = (c, hex) => c.set(hex).convertSRGBToLinear();
+function applyTheme(name) {
+  const t = THEMES[name];
+  lin(skyMat.uniforms.top.value, t.top); lin(skyMat.uniforms.mid.value, t.mid); lin(skyMat.uniforms.bot.value, t.bot);
+  lin(scene.fog.color, t.fog[0]); scene.fog.near = t.fog[1]; scene.fog.far = t.fog[2];
+  lin(hemi.color, t.hemi[0]); lin(hemi.groundColor, t.hemi[1]); hemi.intensity = t.hemi[2];
+  lin(sun.color, t.sun[0]); sun.intensity = t.sun[1];
+  lin(cSlow, t.ramp[0]); lin(cFast, t.ramp[1]); lin(cPanic, t.ramp[2]);
+  lin(dustMat.color, t.dust[0]); dustMat.size = t.dust[1]; dustMat.opacity = t.dust[2];
+}
+
+// ─────────────────────────────────────────────
+//  MODEL PIPELINE
+//  Any model (cone / glTF / FBX / OBJ) is flattened into one geometry and its
+//  animation (skinning or morph targets) is baked into a "vertex animation
+//  texture". Each instance then reads its own frame from the texture in the
+//  vertex shader, so thousands of animated animals cost one draw call.
+// ─────────────────────────────────────────────
+const VAT_HEADER = `
+uniform sampler2D vatPos;
+uniform sampler2D vatNor;
+uniform vec3 vatDim;          // texture width, rows per frame, frame count
+uniform mat3 uOrient;
+uniform float uSize;
+uniform float uMotion;        // 0 none/baked, 1 flap, 2 swim
+uniform float uAmp;
+uniform vec2 uHalf;           // half width (x), half length (z) of the oriented model
+attribute float vIdx;
+attribute float aPhase;
+vec2 vatUV(float f) {
+  float x = mod(vIdx, vatDim.x);
+  float row = floor(vIdx / vatDim.x) + f * vatDim.y;
+  return vec2((x + 0.5) / vatDim.x, (row + 0.5) / (vatDim.y * vatDim.z));
+}
+vec3 vatRead(sampler2D tex) {
+  float vf = fract(aPhase) * vatDim.z;
+  float f0 = floor(vf);
+  float f1 = mod(f0 + 1.0, vatDim.z);
+  return mix(texture2D(tex, vatUV(f0)).xyz, texture2D(tex, vatUV(f1)).xyz, vf - f0);
+}
+`;
+const VAT_NORMAL = `
+vec3 objectNormal = normalize(uOrient * vatRead(vatNor));
+#ifdef USE_TANGENT
+  vec3 objectTangent = vec3( tangent.xyz );
+#endif
+`;
+const VAT_POSITION = `
+vec3 transformed = uOrient * vatRead(vatPos);
+{
+  float ph = aPhase * 6.2831853;
+  if (uMotion > 0.5 && uMotion < 1.5) {
+    float ax = clamp(abs(transformed.x) / uHalf.x, 0.0, 1.0);
+    transformed.y += sin(ph) * uAmp * ax * ax;
+  } else if (uMotion > 1.5) {
+    float tz = clamp((uHalf.y - transformed.z) / (2.0 * uHalf.y), 0.0, 1.0);
+    transformed.x += sin(ph - transformed.z / uHalf.y * 3.0) * uAmp * tz * tz;
+  }
+}
+transformed *= uSize;
+`;
+
+function patchMaterial(mat, uniforms) {
+  mat.onBeforeCompile = sh => {
+    Object.assign(sh.uniforms, uniforms);
+    sh.vertexShader = sh.vertexShader
+      .replace('#include <common>', '#include <common>\n' + VAT_HEADER)
+      .replace('#include <beginnormal_vertex>', VAT_NORMAL)
+      .replace('#include <begin_vertex>', VAT_POSITION);
+  };
+  mat.customProgramCacheKey = () => 'vat-v1';
+  return mat;
+}
+
+function makeMaterial(src, hasColor) {
+  let m;
+  if (src && (src.isMeshStandardMaterial || src.isMeshPhongMaterial || src.isMeshLambertMaterial || src.isMeshToonMaterial)) {
+    m = src.clone();
+  } else {
+    m = new THREE.MeshStandardMaterial({
+      color: src && src.color ? src.color.clone() : 0xcccccc,
+      map: src && src.map || null, roughness: 0.7, metalness: 0,
+    });
+  }
+  m.skinning = false; m.morphTargets = false; m.morphNormals = false;
+  // merged geometry has no tangent attribute: fall back to derivative normal mapping,
+  // undoing the normalScale.y flip GLTFLoader applies for vertex tangents
+  if (m.vertexTangents) { m.vertexTangents = false; if (m.normalScale) m.normalScale.y *= -1; }
+  m.vertexColors = !!(hasColor && src && src.vertexColors);
+  return m;
+}
+
+const AXES = { '+X':[1,0,0], '-X':[-1,0,0], '+Y':[0,1,0], '-Y':[0,-1,0], '+Z':[0,0,1], '-Z':[0,0,-1] };
+// rotation that maps the model's forward axis to +Z and its up axis to +Y
+function orientMatrix(fwd, up) {
+  const f = new THREE.Vector3(...AXES[fwd]);
+  let u = new THREE.Vector3(...AXES[up]);
+  if (Math.abs(f.dot(u)) > 0.5) u = Math.abs(f.y) > 0.5 ? new THREE.Vector3(0, 0, 1) : new THREE.Vector3(0, 1, 0);
+  const r = new THREE.Vector3().crossVectors(u, f);
+  return new THREE.Matrix3().set(r.x, r.y, r.z, u.x, u.y, u.z, f.x, f.y, f.z);
+}
+
+// Component reader that also handles normalized (quantized) attributes,
+// which r128's getX/getY/... return undenormalized.
+const GETTERS = ['getX', 'getY', 'getZ', 'getW'];
+function reader(attr) {
+  const arr = attr.array || (attr.data && attr.data.array);
+  let k = 1;
+  if (attr.normalized && arr) {
+    if (arr instanceof Uint8Array || arr instanceof Uint8ClampedArray) k = 1 / 255;
+    else if (arr instanceof Uint16Array) k = 1 / 65535;
+    else if (arr instanceof Int8Array) k = 1 / 127;
+    else if (arr instanceof Int16Array) k = 1 / 32767;
+  }
+  return (i, c) => attr[GETTERS[c]](i) * k;
+}
+const readVec = (r, i, v) => v.set(r(i, 0), r(i, 1), r(i, 2));
+
+// Bake every mesh under `root` into merged geometry + position/normal textures.
+function bakeModel(root, clip) {
+  root.updateMatrixWorld(true);
+  const meshes = [];
+  root.traverse(o => { if (o.isMesh && o.geometry && o.geometry.attributes.position) meshes.push(o); });
+  if (!meshes.length) throw new Error('メッシュが見つかりません');
+
+  let V = 0;
+  meshes.forEach(m => V += m.geometry.attributes.position.count);
+  const hasUV = meshes.some(m => m.geometry.attributes.uv);
+  const hasColor = meshes.some(m => m.geometry.attributes.color);
+
+  // static attributes + index + material groups
+  const uv = hasUV ? new Float32Array(V * 2) : null;
+  const col = hasColor ? new Float32Array(V * 3).fill(1) : null;
+  const index = [], groups = [], srcMats = [];
+  let off = 0;
+  for (const m of meshes) {
+    const g = m.geometry, n = g.attributes.position.count;
+    if (uv && g.attributes.uv) { const r = reader(g.attributes.uv); for (let i = 0; i < n; i++) { uv[(off+i)*2] = r(i, 0); uv[(off+i)*2+1] = r(i, 1); } }
+    if (col && g.attributes.color) { const r = reader(g.attributes.color); for (let i = 0; i < n; i++) { col[(off+i)*3] = r(i, 0); col[(off+i)*3+1] = r(i, 1); col[(off+i)*3+2] = r(i, 2); } }
+    const idx = g.index ? g.index.array : null;
+    const icount = idx ? idx.length : n;
+    const mats = Array.isArray(m.material) ? m.material : [m.material];
+    const grps = Array.isArray(m.material) && g.groups.length ? g.groups : [{ start: 0, count: icount, materialIndex: 0 }];
+    for (const gr of grps) {
+      const start = index.length, end = Math.min(gr.start + gr.count, icount);
+      for (let k = gr.start; k < end; k++) index.push((idx ? idx[k] : k) + off);
+      const sm = mats[gr.materialIndex] || mats[0];
+      let mi = srcMats.indexOf(sm);
+      if (mi < 0) { mi = srcMats.length; srcMats.push(sm); }
+      groups.push({ start, count: index.length - start, mi });
+    }
+    off += n;
+  }
+
+  // frames
+  let F = 1, mixer = null, dur = 0;
+  if (clip && clip.duration > 0) {
+    mixer = new THREE.AnimationMixer(root);
+    mixer.clipAction(clip).play();
+    dur = clip.duration;
+    F = Math.max(6, Math.min(40, Math.round(dur * 24)));
+  }
+  const maxTex = renderer.capabilities.maxTextureSize;
+  const W = Math.min(V, 1024), rows = Math.ceil(V / W);
+  while (F > 1 && (rows * F > maxTex || V * F > 6e6)) F--;
+  if (rows > maxTex) throw new Error('頂点数が多すぎます (' + V + ')');
+
+  const raw = new Float32Array(V * 3 * F), rawN = new Float32Array(V * 3 * F);
+  const v = new THREE.Vector3(), nrm = new THREE.Vector3(), tv = new THREE.Vector3(), tn = new THREE.Vector3();
+  const mt = new THREE.Vector3(), nm3 = new THREE.Matrix3(), bm3 = new THREE.Matrix3(), skinM = new THREE.Matrix4();
+  for (let f = 0; f < F; f++) {
+    if (mixer) mixer.setTime(f / F * dur);
+    root.updateMatrixWorld(true);
+    let o = 0;
+    for (const m of meshes) {
+      const g = m.geometry, Pa = g.attributes.position, Na = g.attributes.normal;
+      const rP = reader(Pa), rN = Na && reader(Na);
+      const mp = g.morphAttributes.position, mn = g.morphAttributes.normal, infl = m.morphTargetInfluences;
+      const rMP = mp && mp.map(reader), rMN = mn && mn.map(reader);
+      const rSW = g.attributes.skinWeight && reader(g.attributes.skinWeight);
+      const rel = g.morphTargetsRelative;
+      const skinned = m.isSkinnedMesh && m.skeleton && g.attributes.skinIndex;
+      let boneM = null;
+      if (skinned) { m.skeleton.update(); boneM = m.skeleton.boneMatrices; }
+      nm3.getNormalMatrix(m.matrixWorld);
+      if (skinned) bm3.setFromMatrix4(m.bindMatrix);
+      for (let i = 0; i < Pa.count; i++) {
+        readVec(rP, i, v);
+        if (Na) readVec(rN, i, nrm); else nrm.set(0, 1, 0);
+        if (mp && infl) {
+          tv.copy(v); tn.copy(nrm);
+          for (let t = 0; t < mp.length; t++) {
+            const w = infl[t]; if (!w) continue;
+            readVec(rMP[t], i, mt);
+            if (rel) v.addScaledVector(mt, w); else v.addScaledVector(mt.sub(tv), w);
+            if (rMN && rMN[t]) { readVec(rMN[t], i, mt); if (rel) nrm.addScaledVector(mt, w); else nrm.addScaledVector(mt.sub(tn), w); }
+          }
+        }
+        if (skinned) {
+          v.applyMatrix4(m.bindMatrix); nrm.applyMatrix3(bm3);
+          const e = skinM.elements; e.fill(0);
+          for (let c = 0; c < 4; c++) {
+            const w = rSW(i, c); if (!w) continue;
+            const b = g.attributes.skinIndex[GETTERS[c]](i) * 16;
+            for (let q = 0; q < 16; q++) e[q] += boneM[b + q] * w;
+          }
+          v.applyMatrix4(skinM).applyMatrix4(m.bindMatrixInverse);
+          nrm.transformDirection(skinM).transformDirection(m.bindMatrixInverse);
+        }
+        v.applyMatrix4(m.matrixWorld);
+        nrm.applyMatrix3(nm3).normalize();
+        const p = (f * V + o + i) * 3;
+        raw[p] = v.x; raw[p+1] = v.y; raw[p+2] = v.z;
+        rawN[p] = nrm.x; rawN[p+1] = nrm.y; rawN[p+2] = nrm.z;
+      }
+      o += Pa.count;
+    }
+  }
+  if (mixer) { mixer.stopAllAction(); mixer.setTime(0); }
+
+  // normalise: center frame 0 and scale its largest dimension to 1
+  const box = new THREE.Box3();
+  for (let i = 0; i < V; i++) box.expandByPoint(v.set(raw[i*3], raw[i*3+1], raw[i*3+2]));
+  const c = box.getCenter(new THREE.Vector3()), s = box.getSize(new THREE.Vector3());
+  const inv = 1 / Math.max(s.x, s.y, s.z, 1e-6);
+  for (let i = 0; i < V * F; i++) {
+    raw[i*3] = (raw[i*3] - c.x) * inv; raw[i*3+1] = (raw[i*3+1] - c.y) * inv; raw[i*3+2] = (raw[i*3+2] - c.z) * inv;
+  }
+
+  // textures
+  const texP = new Float32Array(W * rows * F * 4), texN = new Float32Array(W * rows * F * 4);
+  for (let f = 0; f < F; f++) for (let i = 0; i < V; i++) {
+    const src = (f * V + i) * 3, dst = (f * rows * W + i) * 4;
+    texP[dst] = raw[src]; texP[dst+1] = raw[src+1]; texP[dst+2] = raw[src+2]; texP[dst+3] = 1;
+    texN[dst] = rawN[src]; texN[dst+1] = rawN[src+1]; texN[dst+2] = rawN[src+2]; texN[dst+3] = 0;
+  }
+  const mkTex = d => { const t = new THREE.DataTexture(d, W, rows * F, THREE.RGBAFormat, THREE.FloatType); t.magFilter = t.minFilter = THREE.NearestFilter; t.needsUpdate = true; return t; };
+
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(raw.slice(0, V * 3), 3));
+  geo.setAttribute('normal', new THREE.BufferAttribute(rawN.slice(0, V * 3), 3));
+  if (uv) geo.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
+  if (uv) geo.setAttribute('uv2', geo.attributes.uv);   // r128 reads aoMap / lightMap from uv2
+  if (col) geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  const vi = new Float32Array(V); for (let i = 0; i < V; i++) vi[i] = i;
+  geo.setAttribute('vIdx', new THREE.BufferAttribute(vi, 1));
+  geo.setIndex(index);
+  groups.forEach(g => geo.addGroup(g.start, g.count, g.mi));
+
+  return { geo, srcMats, hasColor, texPos: mkTex(texP), texNor: mkTex(texN), frames: F, duration: dur, verts: V, tris: index.length / 3 };
+}
+
+// ── model slots: 'boid' (the flock) and 'pred' (predators)
+const models = { boid: null, pred: null };
+const slotState = {
+  boid: { sample: 'cone', fwd: '+Z', up: '+Y', motion: 'none', size: 1.0, clips: [], clipIdx: 0, root: null, label: '' },
+  pred: { sample: 'cone', fwd: '+Z', up: '+Y', motion: 'none', size: 3.0, clips: [], clipIdx: 0, root: null, label: '' },
+};
+const quat = new THREE.Quaternion(), mat4 = new THREE.Matrix4(), vPos = new THREE.Vector3(), vDir = new THREE.Vector3(), vUp = new THREE.Vector3();
+const ZERO = new THREE.Vector3();
+
+function buildSlotMesh(slot) {
+  const st = slotState[slot];
+  const clip = st.motion === 'anim' ? st.clips[st.clipIdx] : null;
+  const baked = bakeModel(st.root, clip);
+  const cap = slot === 'boid' ? MAX_BOIDS : MAX_PRED;
+
+  const uniforms = {
+    vatPos: { value: baked.texPos }, vatNor: { value: baked.texNor },
+    vatDim: { value: new THREE.Vector3(Math.min(baked.verts, 1024), Math.ceil(baked.verts / Math.min(baked.verts, 1024)), baked.frames) },
+    uOrient: { value: orientMatrix(st.fwd, st.up) },
+    uSize: { value: st.size },
+    uMotion: { value: st.motion === 'flap' ? 1 : st.motion === 'swim' ? 2 : 0 },
+    uAmp: { value: st.motion === 'flap' ? 0.28 : 0.1 },
+    uHalf: { value: new THREE.Vector2(0.5, 0.5) },
+  };
+  updateHalfExtents(baked.geo, uniforms);
+
+  const mats = baked.srcMats.map(sm => patchMaterial(makeMaterial(sm, baked.hasColor), uniforms));
+  if (st.sample === 'cone' && slot === 'pred') mats.forEach(m => { lin(m.color, 0xff4a3a); if (m.emissive) lin(m.emissive, 0x551008); });
+  const mesh = new THREE.InstancedMesh(baked.geo, mats.length === 1 ? mats[0] : mats, cap);
+  mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+  const ph = new THREE.InstancedBufferAttribute(new Float32Array(cap), 1);
+  ph.setUsage(THREE.DynamicDrawUsage);
+  baked.geo.setAttribute('aPhase', ph);
+  if (slot === 'boid') {
+    mesh.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(cap * 3).fill(1), 3);
+    mesh.instanceColor.setUsage(THREE.DynamicDrawUsage);
+  }
+  mesh.frustumCulled = false;
+  mesh.count = 0;
+
+  const old = models[slot];
+  if (old) {
+    scene.remove(old.mesh);
+    old.mesh.geometry.dispose();
+    (Array.isArray(old.mesh.material) ? old.mesh.material : [old.mesh.material]).forEach(m => m.dispose());
+    old.uniforms.vatPos.value.dispose(); old.uniforms.vatNor.value.dispose();
+  }
+  scene.add(mesh);
+  const cycleRate = clip ? 1 / baked.duration : (st.motion === 'swim' ? 2.2 : 3.0);
+  models[slot] = { mesh, uniforms, cycleRate, tris: baked.tris, frames: baked.frames, size: st.size };
+  if (slot === 'boid') applyTriBudget();
+  return baked;
+}
+
+// half extents of the oriented frame-0 model drive the procedural flap/swim
+function updateHalfExtents(geo, uniforms) {
+  const p = geo.attributes.position, v = new THREE.Vector3();
+  let hx = 1e-3, hz = 1e-3;
+  for (let i = 0; i < p.count; i++) {
+    v.fromBufferAttribute(p, i).applyMatrix3(uniforms.uOrient.value);
+    hx = Math.max(hx, Math.abs(v.x)); hz = Math.max(hz, Math.abs(v.z));
+  }
+  uniforms.uHalf.value.set(hx, hz);
+}
+
+function applyTriBudget() {
+  const m = models.boid;
+  const maxCount = Math.max(100, Math.min(MAX_BOIDS, Math.floor(TRI_BUDGET / Math.max(1, m.tris) / 100) * 100));
+  const el = sliderEls.count;
+  if (el) { el.input.max = maxCount; }
+  if (P.count > maxCount) setParam('count', maxCount);
+}
+
+// ── loading
+const manager = new THREE.LoadingManager();
+let fileMap = null;   // name → blob URL for multi-file uploads
+manager.setURLModifier(url => {
+  if (!fileMap) return url;
+  const name = decodeURIComponent(url.split(/[\\/]/).pop().split('?')[0]);
+  return fileMap[name] || fileMap[name.toLowerCase()] || url;
+});
+const draco = new THREE.DRACOLoader(manager);
+draco.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.4.1/');
+const gltfLoader = new THREE.GLTFLoader(manager); gltfLoader.setDRACOLoader(draco);
+const fbxLoader = new THREE.FBXLoader(manager);
+const objLoader = new THREE.OBJLoader(manager);
+const mtlLoader = new THREE.MTLLoader(manager);
+
+function loadURL(url, ext) {
+  return new Promise((res, rej) => {
+    const done = obj => res(obj.scene ? { root: obj.scene, clips: obj.animations || [] } : { root: obj, clips: obj.animations || [] });
+    if (ext === 'glb' || ext === 'gltf') gltfLoader.load(url, done, undefined, rej);
+    else if (ext === 'fbx') fbxLoader.load(url, done, undefined, rej);
+    else if (ext === 'obj') objLoader.load(url, done, undefined, rej);
+    else rej(new Error('未対応の形式: .' + ext));
+  });
+}
+
+function makeConeRoot() {
+  const g = new THREE.ConeGeometry(0.22, 1.0, 5);
+  g.rotateX(Math.PI / 2);
+  return { root: new THREE.Mesh(g, new THREE.MeshLambertMaterial({ color: 0xffffff })), clips: [] };
+}
+
+const extOf = name => name.split('.').pop().toLowerCase();
+
+async function loadFiles(slot, files) {
+  files = [...files];
+  const main = files.find(f => ['glb', 'gltf', 'fbx', 'obj'].includes(extOf(f.name)));
+  if (!main) { setStatus(slot, 'モデルファイル (.glb/.gltf/.fbx/.obj) が含まれていません', 'err'); return; }
+  if (fileMap) Object.values(fileMap).forEach(u => URL.revokeObjectURL(u));
+  fileMap = {};
+  files.forEach(f => { const u = URL.createObjectURL(f); fileMap[f.name] = u; fileMap[f.name.toLowerCase()] = u; });
+  setStatus(slot, '読み込み中… ' + main.name, 'busy');
+  try {
+    const ext = extOf(main.name);
+    const mtl = files.find(f => extOf(f.name) === 'mtl');
+    if (ext === 'obj' && mtl) {
+      const mats = await new Promise((res, rej) => mtlLoader.load(fileMap[mtl.name], res, undefined, rej));
+      mats.preload(); objLoader.setMaterials(mats);
+    } else objLoader.setMaterials(null);
+    const loaded = await loadURL(fileMap[main.name], ext);
+    useLoaded(slot, loaded, { sample: 'file', label: main.name, fwd: '+Z', up: '+Y' });
+  } catch (e) {
+    console.error(e);
+    setStatus(slot, '読み込み失敗: ' + (e.message || e), 'err');
+  }
+}
+
+async function loadSample(slot, id) {
+  const s = SAMPLES[id];
+  if (id === 'cone') { useLoaded(slot, makeConeRoot(), { sample: 'cone', label: '円錐', fwd: '+Z', up: '+Y', size: slot === 'boid' ? 1.0 : 3.0 }); return; }
+  setStatus(slot, '読み込み中… ' + s.name, 'busy');
+  fileMap = null;
+  try {
+    const loaded = await loadURL(s.url, extOf(s.url));
+    useLoaded(slot, loaded, { sample: id, label: s.name, fwd: s.forward, up: s.up, motion: s.motion, clip: s.clip, size: s.size[slot] });
+  } catch (e) {
+    console.error(e);
+    setStatus(slot, 'サンプルを取得できませんでした（ネット接続を確認）', 'err');
+  }
+}
+
+function useLoaded(slot, { root, clips }, o) {
+  const st = slotState[slot];
+  st.root = root; st.clips = clips; st.sample = o.sample; st.label = o.label;
+  st.fwd = o.fwd; st.up = o.up;
+  st.clipIdx = 0;
+  if (o.clip) { const k = clips.findIndex(c => o.clip.test(c.name)); if (k >= 0) st.clipIdx = k; }
+  st.motion = clips.length ? 'anim' : (o.motion || 'none');
+  if (o.size) st.size = o.size;
+  if (slot === 'boid') setParam('tint', o.sample === 'cone' ? 1 : 0.35);
+  rebuild(slot);
+  syncSlotUI(slot);
+}
+
+function rebuild(slot) {
+  const st = slotState[slot];
+  try {
+    const b = buildSlotMesh(slot);
+    const credit = SAMPLE_CREDITS[st.sample] ? '<br>' + SAMPLE_CREDITS[st.sample] : '';
+    const anim = st.motion === 'anim' ? ` · アニメ ${b.frames}コマ` : '';
+    setStatus(slot, `${st.label} · ${b.verts.toLocaleString()}頂点 · ${Math.round(b.tris).toLocaleString()}面${anim}${credit}`);
+  } catch (e) {
+    console.error(e);
+    setStatus(slot, '変換に失敗: ' + (e.message || e), 'err');
+  }
+}
+
+// ─────────────────────────────────────────────
+//  CLICK RIPPLES
+// ─────────────────────────────────────────────
 const ripples = [];
 const rippleGeo = new THREE.SphereGeometry(1, 24, 12);
 function spawnRipple(x, y, z, radius) {
@@ -516,86 +1160,193 @@ function updateRipples(dt) {
   }
 }
 
-// color ramp by speed: deep indigo → pale sky; panic shifts toward amber
-const cSlow = new THREE.Color(0x3b4a9a), cFast = new THREE.Color(0xcfe2ff), cPanic = new THREE.Color(0xffa040);
-const tmpC = new THREE.Color();
-const mat4 = new THREE.Matrix4(), quat = new THREE.Quaternion(), vPos = new THREE.Vector3(), vDir = new THREE.Vector3(), vScale = new THREE.Vector3(1, 1, 1);
-const FORWARD = new THREE.Vector3(0, 0, 1);
+// ─────────────────────────────────────────────
+//  INSTANCE SYNC
+// ─────────────────────────────────────────────
+const tmpC = new THREE.Color(), WHITE = new THREE.Color(1, 1, 1);
+const WORLD_UP = new THREE.Vector3(0, 1, 0);
+
+// orientation: +Z along velocity, up tilted by the turning acceleration (banking)
+function composeAgent(x, y, z, vx, vy, vz, bx, by, bz, hide) {
+  vPos.set(x, y, z);
+  vDir.set(vx, vy, vz);
+  if (vDir.lengthSq() < 1e-10) vDir.set(0, 0, 1);
+  vDir.normalize();
+  vUp.set(bx * 0.9, 1 + by * 0.9, bz * 0.9);
+  mat4.lookAt(vDir, ZERO, vUp);
+  if (hide) mat4.scale(vDir.set(1e-4, 1e-4, 1e-4));
+  mat4.setPosition(vPos);
+  return mat4;
+}
 
 function syncMeshes() {
   const n = P.count;
-  const colors = boids.instanceColor.array;
-  const maxS = P.maxSpeed, minS = maxS * 0.45;
-  for (let i = 0; i < n; i++) {
-    const ix = i*3;
-    vPos.set(pos[ix], pos[ix+1], pos[ix+2]);
-    vDir.set(vel[ix], vel[ix+1], vel[ix+2]);
-    const sp = vDir.length();
-    vDir.multiplyScalar(1 / (sp + 1e-6));
-    quat.setFromUnitVectors(FORWARD, vDir);
-    mat4.compose(vPos, quat, vScale);
-    boids.setMatrixAt(i, mat4);
+  const mb = models.boid, mp = models.pred;
+  const hideBoid = view.mode === 'boidFP' ? view.boidIdx : -1;
+  const hidePred = view.mode === 'predFP' ? view.predIdx : -1;
 
-    const t = Math.min(1, Math.max(0, (sp - minS) / (maxS - minS + 1e-6)));
-    tmpC.copy(cSlow).lerp(cFast, t).lerp(cPanic, panic[i] * 0.85);
-    colors[ix] = tmpC.r; colors[ix+1] = tmpC.g; colors[ix+2] = tmpC.b;
+  if (mb) {
+    const colors = mb.mesh.instanceColor.array;
+    const phs = mb.mesh.geometry.attributes.aPhase.array;
+    const maxS = P.maxSpeed, minS = maxS * 0.45;
+    for (let i = 0; i < n; i++) {
+      const ix = i*3;
+      mb.mesh.setMatrixAt(i, composeAgent(pos[ix], pos[ix+1], pos[ix+2], vel[ix], vel[ix+1], vel[ix+2], bank[ix], bank[ix+1], bank[ix+2], i === hideBoid));
+      phs[i] = phase[i];
+      const sp = Math.hypot(vel[ix], vel[ix+1], vel[ix+2]);
+      const t = Math.min(1, Math.max(0, (sp - minS) / (maxS - minS + 1e-6)));
+      tmpC.copy(cSlow).lerp(cFast, t).lerp(cPanic, panic[i] * 0.85);
+      tmpC.lerp(WHITE, 1 - P.tint);
+      colors[ix] = tmpC.r; colors[ix+1] = tmpC.g; colors[ix+2] = tmpC.b;
+    }
+    mb.mesh.count = n;
+    mb.mesh.instanceMatrix.needsUpdate = true;
+    mb.mesh.instanceColor.needsUpdate = true;
+    mb.mesh.geometry.attributes.aPhase.needsUpdate = true;
   }
-  boids.count = n;
-  boids.instanceMatrix.needsUpdate = true;
-  boids.instanceColor.needsUpdate = true;
 
-  for (let k = 0; k < P.predators; k++) {
-    const kx = k*3;
-    vPos.set(ppos[kx], ppos[kx+1], ppos[kx+2]);
-    vDir.set(pvel[kx], pvel[kx+1], pvel[kx+2]);
-    if (vDir.lengthSq() < 1e-8) vDir.set(0, 0, 1);
-    vDir.normalize();
-    quat.setFromUnitVectors(FORWARD, vDir);
-    mat4.compose(vPos, quat, vScale);
-    preds.setMatrixAt(k, mat4);
+  if (mp) {
+    const phs = mp.mesh.geometry.attributes.aPhase.array;
+    for (let k = 0; k < P.predators; k++) {
+      const kx = k*3;
+      mp.mesh.setMatrixAt(k, composeAgent(ppos[kx], ppos[kx+1], ppos[kx+2], pvel[kx], pvel[kx+1], pvel[kx+2], pbank[kx], pbank[kx+1], pbank[kx+2], k === hidePred));
+      phs[k] = pphase[k];
+    }
+    mp.mesh.count = P.predators;
+    mp.mesh.instanceMatrix.needsUpdate = true;
+    mp.mesh.geometry.attributes.aPhase.needsUpdate = true;
   }
-  preds.count = P.predators;
-  preds.instanceMatrix.needsUpdate = true;
 }
 
 // ─────────────────────────────────────────────
-//  CAMERA (custom orbit)
+//  CAMERA
 // ─────────────────────────────────────────────
 const cam = { theta: 0.6, phi: 1.25, dist: 110, target: new THREE.Vector3() };
-const opts = { autoRotate: true, follow: false };
+const opts = { autoRotate: true, follow: false, pilot: false };
+const view = {
+  mode: 'orbit', predIdx: 0, boidIdx: 0,
+  dir: new THREE.Vector3(0, 0, 1), up: new THREE.Vector3(0, 1, 0), pos: new THREE.Vector3(),
+  lookYaw: 0, lookPitch: 0, snap: true,
+};
+const isPredView = () => view.mode === 'predFP' || view.mode === 'predChase';
 
-function updateCamera() {
-  const { theta, phi, dist, target } = cam;
-  camera.position.set(
-    target.x + dist * Math.sin(phi) * Math.sin(theta),
-    target.y + dist * Math.cos(phi),
-    target.z + dist * Math.sin(phi) * Math.cos(theta)
-  );
-  camera.lookAt(target);
+const tA = new THREE.Vector3(), tB = new THREE.Vector3(), tC = new THREE.Vector3();
+function updateCamera(dt) {
+  if (view.mode === 'orbit') {
+    camera.fov = 55;
+    const { theta, phi, dist, target } = cam;
+    camera.up.set(0, 1, 0);
+    camera.position.set(
+      target.x + dist * Math.sin(phi) * Math.sin(theta),
+      target.y + dist * Math.cos(phi),
+      target.z + dist * Math.sin(phi) * Math.cos(theta)
+    );
+    camera.lookAt(target);
+  } else {
+    // pick the followed agent
+    let p, v, b, size;
+    if (isPredView()) {
+      if (P.predators === 0) setParam('predators', 1);
+      view.predIdx %= P.predators;
+      const k = view.predIdx * 3;
+      p = tA.set(ppos[k], ppos[k+1], ppos[k+2]); v = tB.set(pvel[k], pvel[k+1], pvel[k+2]); b = tC.set(pbank[k], pbank[k+1], pbank[k+2]);
+      size = models.pred ? models.pred.size : 3;
+    } else {
+      view.boidIdx %= P.count;
+      const i = view.boidIdx * 3;
+      p = tA.set(pos[i], pos[i+1], pos[i+2]); v = tB.set(vel[i], vel[i+1], vel[i+2]); b = tC.set(bank[i], bank[i+1], bank[i+2]);
+      size = models.boid ? models.boid.size : 1;
+    }
+    if (v.lengthSq() < 1e-10) v.set(0, 0, 1);
+    v.normalize();
+    const up = vDir.set(b.x * 0.9, 1 + b.y * 0.9, b.z * 0.9).normalize();
+    const k = view.snap ? 1 : Math.min(1, 0.12 * dt), ku = view.snap ? 1 : Math.min(1, 0.06 * dt);
+    view.dir.lerp(v, k).normalize();
+    view.up.lerp(up, ku).normalize();
+    view.snap = false;
+
+    // free-look offset from dragging, springs back when released
+    if (!dragging) { view.lookYaw *= Math.pow(0.9, dt); view.lookPitch *= Math.pow(0.9, dt); }
+    const look = vUp.copy(view.dir)
+      .applyAxisAngle(view.up, view.lookYaw);
+    const right = vPos.crossVectors(look, view.up).normalize();
+    look.applyAxisAngle(right, view.lookPitch);
+
+    if (view.mode === 'predChase') {
+      camera.fov = 65;
+      camera.position.copy(p).addScaledVector(look, -size * 3.2).addScaledVector(view.up, size * 0.9);
+      camera.up.copy(view.up);
+      camera.lookAt(tB.copy(p).addScaledVector(look, size * 4));
+    } else {
+      camera.fov = 78;
+      camera.position.copy(p).addScaledVector(view.dir, size * 0.45).addScaledVector(view.up, size * 0.08);
+      camera.up.copy(view.up);
+      camera.lookAt(tB.copy(camera.position).add(look));
+    }
+  }
+  camera.updateProjectionMatrix();
+  sky.position.copy(camera.position);
 }
 
+function setView(mode) {
+  view.mode = mode;
+  view.snap = true; view.lookYaw = view.lookPitch = 0;
+  if (mode === 'boidFP') view.boidIdx = (Math.random() * P.count) | 0;
+  document.querySelectorAll('#viewBtns button').forEach(b => b.classList.toggle('active', b.dataset.view === mode));
+  povEl.classList.toggle('on', mode !== 'orbit');
+  hintEl.style.display = mode === 'orbit' ? '' : 'none';
+  updatePovHint();
+}
+
+function nextTarget() {
+  if (isPredView()) view.predIdx = (view.predIdx + 1) % Math.max(1, P.predators);
+  else if (view.mode === 'boidFP') view.boidIdx = (Math.random() * P.count) | 0;
+  view.snap = true;
+}
+
+// ─────────────────────────────────────────────
+//  INPUT
+// ─────────────────────────────────────────────
 const pointers = new Map();
-let dragMoved = 0, pinchDist = 0;
+let dragMoved = 0, pinchDist = 0, dragging = false;
+
+function updatePilotFromPointer(e) {
+  const r = canvas.getBoundingClientRect();
+  const x = (e.clientX - r.left) / r.width * 2 - 1, y = (e.clientY - r.top) / r.height * 2 - 1;
+  const dz = v => Math.abs(v) < 0.06 ? 0 : Math.sign(v) * Math.min(1, (Math.abs(v) - 0.06) / 0.7);
+  pilot.x = dz(x); pilot.y = dz(y);
+  steerDot.style.left = (e.clientX - r.left) + 'px';
+  steerDot.style.top = (e.clientY - r.top) + 'px';
+}
+const piloting = () => opts.pilot && isPredView();
 
 canvas.addEventListener('pointerdown', e => {
   canvas.setPointerCapture(e.pointerId);
   pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
   dragMoved = 0;
+  dragging = true;
+  if (piloting()) { pilot.boost = e.pointerType === 'mouse'; updatePilotFromPointer(e); }
   if (pointers.size === 2) {
     const [a, b] = [...pointers.values()];
     pinchDist = Math.hypot(a.x - b.x, a.y - b.y);
   }
 });
 canvas.addEventListener('pointermove', e => {
+  if (piloting() && (e.pointerType === 'mouse' || pointers.has(e.pointerId))) updatePilotFromPointer(e);
   const p = pointers.get(e.pointerId);
   if (!p) return;
   const dx = e.clientX - p.x, dy = e.clientY - p.y;
   p.x = e.clientX; p.y = e.clientY;
   if (pointers.size === 1) {
     dragMoved += Math.abs(dx) + Math.abs(dy);
-    cam.theta -= dx * 0.006;
-    cam.phi = Math.min(Math.PI - 0.05, Math.max(0.05, cam.phi - dy * 0.006));
-  } else if (pointers.size === 2) {
+    if (view.mode === 'orbit') {
+      cam.theta -= dx * 0.006;
+      cam.phi = Math.min(Math.PI - 0.05, Math.max(0.05, cam.phi - dy * 0.006));
+    } else if (!piloting()) {
+      view.lookYaw = Math.max(-2.6, Math.min(2.6, view.lookYaw - dx * 0.005));
+      view.lookPitch = Math.max(-1.2, Math.min(1.2, view.lookPitch - dy * 0.005));
+    }
+  } else if (pointers.size === 2 && view.mode === 'orbit') {
     dragMoved += 10;
     const [a, b] = [...pointers.values()];
     const d = Math.hypot(a.x - b.x, a.y - b.y);
@@ -604,15 +1355,17 @@ canvas.addEventListener('pointermove', e => {
   }
 });
 function endPointer(e) {
-  if (pointers.has(e.pointerId) && pointers.size === 1 && dragMoved < 6) clickScare(e);
+  if (pointers.has(e.pointerId) && pointers.size === 1 && dragMoved < 6 && !piloting()) clickScare(e);
   pointers.delete(e.pointerId);
+  if (!pointers.size) { dragging = false; pilot.boost = false; if (e.pointerType !== 'mouse') pilot.x = pilot.y = 0; }
   pinchDist = 0;
 }
 canvas.addEventListener('pointerup', endPointer);
-canvas.addEventListener('pointercancel', e => { pointers.delete(e.pointerId); pinchDist = 0; });
+canvas.addEventListener('pointercancel', e => { pointers.delete(e.pointerId); pinchDist = 0; dragging = pointers.size > 0; });
+canvas.addEventListener('pointerleave', e => { if (e.pointerType === 'mouse') pilot.x = pilot.y = 0; });
 canvas.addEventListener('wheel', e => {
   e.preventDefault();
-  cam.dist = Math.min(260, Math.max(15, cam.dist * Math.exp(e.deltaY * 0.001)));
+  if (view.mode === 'orbit') cam.dist = Math.min(260, Math.max(15, cam.dist * Math.exp(e.deltaY * 0.001)));
 }, { passive: false });
 
 // click → scare at the point on the camera ray closest to the flock's center
@@ -628,13 +1381,36 @@ function clickScare(e) {
   ndc.set((e.clientX - r.left) / r.width * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
   raycaster.setFromCamera(ndc, camera);
   const p = new THREE.Vector3();
-  raycaster.ray.closestPointToPoint(computeCentroid(), p);
+  raycaster.ray.closestPointToPoint(view.mode === 'orbit' ? computeCentroid() : tA.copy(camera.position).addScaledVector(raycaster.ray.direction, 20), p);
   scareAt(p.x, p.y, p.z);
 }
+
+window.addEventListener('keydown', e => {
+  if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
+  if (e.code === 'Space') { e.preventDefault(); togglePlay(); }
+  if (e.code === 'Tab') { e.preventDefault(); nextTarget(); }
+  if (e.key === 'Shift') pilot.boost = true;
+});
+window.addEventListener('keyup', e => { if (e.key === 'Shift') pilot.boost = false; });
 
 // ─────────────────────────────────────────────
 //  UI
 // ─────────────────────────────────────────────
+const povEl = document.getElementById('pov'), hintEl = document.getElementById('hint');
+const hudEl = document.getElementById('hud'), hudHint = document.getElementById('hudHint');
+const steerDot = document.getElementById('steerDot'), reticle = document.getElementById('reticle');
+
+function updatePovHint() {
+  const pil = piloting();
+  steerDot.style.display = pil ? 'block' : 'none';
+  reticle.classList.toggle('hidden', view.mode === 'boidFP');
+  hudHint.textContent = pil
+    ? 'マウスの方向へ旋回 · クリック長押し / Shift で加速 · Tab で別の捕食者'
+    : view.mode === 'boidFP' ? 'ドラッグで見回す · Tab で別の1羽へ' : 'ドラッグで見回す · 「捕食者を操縦する」で自分で狩る · Tab で別の捕食者';
+}
+let catchFlash = 0;
+function flashCatch() { catchFlash = 1; }
+
 const sliderEls = {};
 SLIDERS.forEach(s => {
   const row = document.createElement('div');
@@ -647,11 +1423,14 @@ SLIDERS.forEach(s => {
   input.addEventListener('input', () => {
     P[s.key] = +input.value;
     out.textContent = s.fmt(P[s.key]);
-    if (s.key === 'predators') for (let k = 0; k < MAX_PRED; k++) if (k >= P.predators) spawnPredator(k);
+    if (s.key === 'predators') for (let k = P.predators; k < MAX_PRED; k++) spawnPredator(k);
   });
   sliderEls[s.key] = { input, out, s };
   document.getElementById(s.target).appendChild(row);
 });
+const tintIn = document.getElementById('tint'), tintOut = document.getElementById('tintOut');
+sliderEls.tint = { input: tintIn, out: tintOut, s: { fmt: v => Math.round(v * 100) + '%' } };
+tintIn.addEventListener('input', () => { P.tint = +tintIn.value; tintOut.textContent = Math.round(P.tint * 100) + '%'; });
 
 function setParam(key, v) {
   P[key] = v;
@@ -666,11 +1445,95 @@ PRESETS.forEach((pr, idx) => {
   b.innerHTML = `${pr.name}<small>${pr.en}</small>`;
   b.addEventListener('click', () => {
     Object.entries(pr.v).forEach(([k, v]) => setParam(k, v));
+    for (let k = P.predators; k < MAX_PRED; k++) spawnPredator(k);
     presetWrap.querySelectorAll('button').forEach(x => x.classList.toggle('active', x === b));
   });
   presetWrap.appendChild(b);
 });
 
+// ── model blocks
+const statusEls = {}, slotUI = {};
+const fileInput = document.getElementById('fileInput');
+let fileTarget = 'boid';
+fileInput.addEventListener('change', () => { if (fileInput.files.length) loadFiles(fileTarget, fileInput.files); fileInput.value = ''; });
+
+function setStatus(slot, html, cls = '') {
+  statusEls[slot].innerHTML = html;
+  statusEls[slot].className = 'model-status ' + cls;
+}
+
+[['boid', '群れの個体', '#7c9cff'], ['pred', '捕食者', '#ff6a50']].forEach(([slot, title, color]) => {
+  const st = slotState[slot];
+  const blk = document.createElement('div');
+  blk.className = 'model-block';
+  blk.innerHTML = `
+    <div class="sub-title" style="--c:${color}">${title}</div>
+    <div class="field"><select class="sample">
+      ${Object.entries(SAMPLES).map(([id, s]) => `<option value="${id}">${s.name}</option>`).join('')}
+      <option value="file" disabled>読み込んだファイル</option>
+    </select></div>
+    <div class="drop">ファイルを選択 / ドロップ<small>glb · gltf · fbx · obj（+テクスチャ・mtl）</small></div>
+    <div class="field-pair">
+      <div class="field"><label>前方向</label><select class="fwd">${Object.keys(AXES).map(a => `<option>${a}</option>`).join('')}</select></div>
+      <div class="field"><label>上方向</label><select class="up">${Object.keys(AXES).map(a => `<option>${a}</option>`).join('')}</select></div>
+    </div>
+    <div class="field"><label>動き</label><select class="motion">
+      <option value="anim">モデル内蔵アニメーション</option>
+      <option value="flap">羽ばたき（自動生成）</option>
+      <option value="swim">泳ぎ（自動生成）</option>
+      <option value="none">なし</option>
+    </select></div>
+    <div class="field clipField" style="display:none"><label>アニメーション</label><select class="clip"></select></div>
+    <div class="slider-row"><div class="slider-header"><span class="slider-name">大きさ</span><span class="slider-val sizeOut"></span></div>
+      <input type="range" class="size" min="0.3" max="${slot === 'boid' ? 4 : 10}" step="0.1"></div>
+    <div class="model-status"></div>`;
+  document.getElementById('modelBlocks').appendChild(blk);
+  const q = s => blk.querySelector(s);
+  statusEls[slot] = q('.model-status');
+  const ui = slotUI[slot] = { sample: q('.sample'), fwd: q('.fwd'), up: q('.up'), motion: q('.motion'), clip: q('.clip'), clipField: q('.clipField'), size: q('.size'), sizeOut: q('.sizeOut') };
+
+  ui.sample.addEventListener('change', () => loadSample(slot, ui.sample.value));
+  const drop = q('.drop');
+  drop.addEventListener('click', () => { fileTarget = slot; fileInput.click(); });
+  drop.addEventListener('dragover', e => { e.preventDefault(); e.stopPropagation(); drop.classList.add('over'); });
+  drop.addEventListener('dragleave', () => drop.classList.remove('over'));
+  drop.addEventListener('drop', e => { e.preventDefault(); e.stopPropagation(); drop.classList.remove('over'); loadFiles(slot, e.dataTransfer.files); });
+
+  const reorient = () => {
+    st.fwd = ui.fwd.value; st.up = ui.up.value;
+    const m = models[slot]; if (!m) return;
+    m.uniforms.uOrient.value.copy(orientMatrix(st.fwd, st.up));
+    updateHalfExtents(m.mesh.geometry, m.uniforms);
+  };
+  ui.fwd.addEventListener('change', reorient);
+  ui.up.addEventListener('change', reorient);
+  ui.motion.addEventListener('change', () => { st.motion = ui.motion.value; if (st.root) rebuild(slot); syncSlotUI(slot); });
+  ui.clip.addEventListener('change', () => { st.clipIdx = +ui.clip.value; if (st.root) rebuild(slot); });
+  ui.size.addEventListener('input', () => {
+    st.size = +ui.size.value; ui.sizeOut.textContent = st.size.toFixed(1);
+    const m = models[slot]; if (m) { m.uniforms.uSize.value = st.size; m.size = st.size; }
+  });
+});
+
+function syncSlotUI(slot) {
+  const st = slotState[slot], ui = slotUI[slot];
+  ui.sample.value = st.sample;
+  ui.fwd.value = st.fwd; ui.up.value = st.up;
+  ui.motion.querySelector('[value=anim]').disabled = !st.clips.length;
+  ui.motion.value = st.motion;
+  ui.clipField.style.display = st.clips.length > 1 && st.motion === 'anim' ? '' : 'none';
+  ui.clip.innerHTML = st.clips.map((c, i) => `<option value="${i}">${c.name || 'clip ' + i}</option>`).join('');
+  ui.clip.value = st.clipIdx;
+  ui.size.value = st.size; ui.sizeOut.textContent = st.size.toFixed(1);
+}
+
+// whole-canvas drop → flock model
+const dropOverlay = document.getElementById('dropOverlay');
+wrap.addEventListener('dragover', e => { e.preventDefault(); dropOverlay.classList.add('on'); });
+wrap.addEventListener('dragleave', e => { if (e.target === wrap || !wrap.contains(e.relatedTarget)) dropOverlay.classList.remove('on'); });
+wrap.addEventListener('drop', e => { e.preventDefault(); dropOverlay.classList.remove('on'); loadFiles('boid', e.dataTransfer.files); });
+
+// ── misc controls
 let running = true;
 const btnPlay = document.getElementById('btnPlay');
 function togglePlay() {
@@ -683,12 +1546,19 @@ document.getElementById('btnScare').addEventListener('click', () => {
   const c = computeCentroid();
   scareAt(c.x, c.y, c.z, 22);
 });
+document.querySelectorAll('#viewBtns button').forEach(b => b.addEventListener('click', () => setView(b.dataset.view)));
+document.getElementById('btnNextTarget').addEventListener('click', nextTarget);
+document.getElementById('chkPilot').addEventListener('change', e => {
+  opts.pilot = e.target.checked;
+  pilot.x = pilot.y = 0;
+  if (opts.pilot && !isPredView()) setView('predChase');
+  updatePovHint();
+});
 document.getElementById('chkRotate').addEventListener('change', e => opts.autoRotate = e.target.checked);
 document.getElementById('chkFollow').addEventListener('change', e => opts.follow = e.target.checked);
 document.getElementById('chkBounds').addEventListener('change', e => boundMesh.visible = e.target.checked);
-window.addEventListener('keydown', e => {
-  if (e.code === 'Space' && e.target === document.body) { e.preventDefault(); togglePlay(); }
-});
+document.getElementById('chkHunt').addEventListener('change', e => P.hunt = e.target.checked);
+document.getElementById('themeSel').addEventListener('change', e => applyTheme(e.target.value));
 
 function resize() {
   const w = wrap.clientWidth, h = wrap.clientHeight;
@@ -701,7 +1571,8 @@ window.addEventListener('resize', resize);
 // ─────────────────────────────────────────────
 //  LOOP
 // ─────────────────────────────────────────────
-const stCount = document.getElementById('stCount'), stOrder = document.getElementById('stOrder'), stFps = document.getElementById('stFps');
+const stCount = document.getElementById('stCount'), stOrder = document.getElementById('stOrder');
+const stFps = document.getElementById('stFps'), stCatch = document.getElementById('stCatch');
 let last = performance.now(), fpsAcc = 0, fpsFrames = 0, uiTimer = 0;
 
 function frame(now) {
@@ -716,25 +1587,39 @@ function frame(now) {
   }
   updateRipples(dt);
 
-  if (opts.autoRotate) cam.theta += 0.0015 * dt;
-  if (opts.follow) cam.target.lerp(computeCentroid(), 0.04 * dt);
-  else cam.target.lerp(vPos.set(0, 0, 0), 0.04 * dt);
-  updateCamera();
+  if (view.mode === 'orbit') {
+    if (opts.autoRotate) cam.theta += 0.0015 * dt;
+    if (opts.follow) cam.target.lerp(computeCentroid(), 0.04 * dt);
+    else cam.target.lerp(vPos.set(0, 0, 0), 0.04 * dt);
+  }
+  updateCamera(dt);
 
   syncMeshes();
   renderer.render(scene, camera);
 
+  if (catchFlash > 0) catchFlash = Math.max(0, catchFlash - 0.04 * dt);
   fpsAcc += ms; fpsFrames++; uiTimer += ms;
-  if (uiTimer > 400) {
+  if (uiTimer > 250) {
     stCount.textContent = P.count;
     stOrder.textContent = polarization.toFixed(2);
+    stCatch.textContent = catches;
     stFps.textContent = Math.round(1000 * fpsFrames / fpsAcc);
+    if (view.mode !== 'orbit') {
+      const who = isPredView() ? `捕食者 #${view.predIdx + 1}` : `個体 #${view.boidIdx}`;
+      const v = isPredView() ? Math.hypot(pvel[view.predIdx*3], pvel[view.predIdx*3+1], pvel[view.predIdx*3+2]) : 0;
+      hudEl.innerHTML = `${who}${isPredView() ? `<br>速度 <b>${(v * 60).toFixed(1)}</b><br>捕獲 <b>${catches}</b>` : ''}${opts.pilot && isPredView() ? '<br><b>操縦中</b>' : ''}`;
+    }
     fpsAcc = 0; fpsFrames = 0; uiTimer = 0;
   }
+  povEl.style.boxShadow = catchFlash > 0 ? `inset 0 0 ${80 * catchFlash}px rgba(255,90,60,${0.5 * catchFlash})` : 'none';
 }
 
 setupGrid();
 resetAll();
+applyTheme('night');
+setParam('tint', 1);
+useLoaded('boid', makeConeRoot(), { sample: 'cone', label: '円錐', fwd: '+Z', up: '+Y', size: 1.0 });
+useLoaded('pred', makeConeRoot(), { sample: 'cone', label: '円錐', fwd: '+Z', up: '+Y', size: 3.0 });
 resize();
 document.getElementById('loading').remove();
 requestAnimationFrame(frame);
