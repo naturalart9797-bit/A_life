@@ -316,25 +316,18 @@ def delete_faces(bm, faces):
 # Relax
 # ---------------------------------------------------------------------------
 
-def relax_verts(verts_weights, project=None, relax_boundary=True):
+def relax_verts(verts_weights, project=None):
     """Laplacian relax. ``verts_weights`` is a list of (vert, weight 0..1).
 
-    Border vertices only move along the border. ``project`` (optional) maps a
+    Border (and loose) vertices never move. ``project`` (optional) maps a
     coordinate back onto the reference surface."""
     new = []
     for v, w in verts_weights:
-        if w <= 0.0 or not v.link_faces:
+        if w <= 0.0 or not v.link_faces or v.is_boundary:
             continue
-        if v.is_boundary:
-            if not relax_boundary:
-                continue
-            nbs = [e.other_vert(v) for e in v.link_edges if e.is_boundary]
-            if len(nbs) != 2:
-                continue
-        else:
-            nbs = [e.other_vert(v) for e in v.link_edges]
-            if len(nbs) < 3:
-                continue
+        nbs = [e.other_vert(v) for e in v.link_edges]
+        if len(nbs) < 3:
+            continue
         avg = Vector()
         for n in nbs:
             avg += n.co

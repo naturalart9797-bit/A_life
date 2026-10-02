@@ -11,7 +11,7 @@ Controls (identical to Maya):
     Ctrl + LMB (drag)   insert edge loop (drag to slide before release)
     Ctrl + MMB          insert centred edge loop
     Ctrl+Shift + LMB    delete dot / vertex / edge loop / face (drag = paint)
-    Tab + LMB drag      on a border edge: extend quad strip
+    Tab + LMB drag      on a border edge: extend one quad (follows the cursor)
                         on empty surface: draw a new quad strip
     Tab + MMB drag      extend every connected border edge at once
     B + drag            resize brush
@@ -963,8 +963,7 @@ class MESH_OT_quad_draw(bpy.types.Operator):
                 continue
             f = 1.0 - (d[i] / radius) ** 2
             vw.append((v, strength * f))
-        moved = mesh_ops.relax_verts(vw, self.project if self.surface else None,
-                                     self.settings.relax_boundary)
+        moved = mesh_ops.relax_verts(vw, self.project if self.surface else None)
         mirror = self.drag["mirror"]
         if mirror:
             moved_set = set(moved)
@@ -1175,12 +1174,8 @@ class MESH_OT_quad_draw(bpy.types.Operator):
         if not row["faces"] and dist > drag["spacing"] * 0.05:
             row["faces"] = self._extend_make_faces(base, row["verts"], drag["closed"])
             drag["faces"] += row["faces"]
-        if row["faces"] and dist >= drag["spacing"]:
-            # Commit this row and continue from its outer edges.
-            drag["base"] = row["verts"]
-            drag["outs"] = self._chain_outward(row["verts"], drag["closed"])
-            drag["start"] = cur
-            drag["row"] = None
+        # One row follows the cursor for the whole drag; no rows are added
+        # automatically (extend again from the new border for another row).
         self._mesh_changed()
 
     def _discard_row(self, row):
@@ -1218,8 +1213,7 @@ class MESH_OT_quad_draw(bpy.types.Operator):
             row = drag["row"]
             if row is not None:
                 base = drag["base"]
-                dist = sum((nv.co - v.co).length for v, nv in zip(base, row["verts"])) / len(base)
-                if not row["faces"] or dist < drag["spacing"] * 0.2:
+                if not row["faces"]:
                     self._discard_row(row)
             self.drag = None
             new_verts = [v for v in drag["new_verts"] if v.is_valid]

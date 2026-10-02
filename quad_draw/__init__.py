@@ -40,10 +40,6 @@ class QuadDrawSettings(bpy.types.PropertyGroup):
     relax_strength: FloatProperty(
         name="Relax Strength", default=0.5, min=0.0, max=1.0, subtype='FACTOR',
     )
-    relax_boundary: BoolProperty(
-        name="Relax Border", default=True,
-        description="Border vertices slide along the border when relaxing",
-    )
     strip_width: IntProperty(
         name="Strip Width", subtype='PIXEL', default=40, min=4, max=1000,
         description="Quad size in pixels for Tab + drag strips drawn on empty surface",
@@ -130,7 +126,6 @@ class VIEW3D_PT_quad_draw(bpy.types.Panel):
         col = layout.column(align=True)
         col.prop(s, "brush_radius")
         col.prop(s, "relax_strength")
-        col.prop(s, "relax_boundary")
         col = layout.column(align=True)
         col.prop(s, "strip_width")
         col.prop(s, "pick_radius")
@@ -151,7 +146,7 @@ class VIEW3D_PT_quad_draw(bpy.types.Panel):
             "Ctrl: insert edge loop (drag slides)",
             "Ctrl+MMB: centred edge loop",
             "Ctrl+Shift: delete (drag paints)",
-            "Tab+drag edge: extend strip",
+            "Tab+drag edge: extend quad",
             "Tab+drag surface: draw strip",
             "Tab+MMB drag edge: extend border run",
             "B+drag: brush size",
