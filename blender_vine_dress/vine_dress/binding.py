@@ -44,6 +44,7 @@ def attach(obj, body):
     obj.parent = body
     obj.matrix_parent_inverse.identity()
     obj.matrix_basis.identity()
+    obj.matrix_world = body.matrix_world.copy()
 
 
 def add_armature(obj, body):

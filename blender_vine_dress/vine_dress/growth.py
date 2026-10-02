@@ -19,7 +19,7 @@ class VinePath:
     """
 
     __slots__ = ("points", "normals", "radii", "kind", "depth", "weights", "sway", "hits",
-                 "closed", "tparams")
+                 "closed", "tparams", "leaf_scale")
 
     def __init__(self, kind, depth=0):
         self.points = []
@@ -32,6 +32,7 @@ class VinePath:
         self.hits = []
         self.closed = False
         self.tparams = None
+        self.leaf_scale = 1.0
 
 
 class SpatialHash:
@@ -223,9 +224,8 @@ def _advance(g, sampler, P, rng, hsh, step, spacing, grace, cand_step, in_region
     return False
 
 
-def finalize_body_paths(paths, sampler, P, scale):
-    """Smooth, re-project to the surface and assign radii."""
-    r_base = P.radius * scale
+def finalize_body_paths(paths, sampler, P):
+    """Smooth, re-project to the surface and assign relative radii (1.0 = base)."""
     for path in paths:
         pts = path.points
         for _ in range(2):
@@ -235,16 +235,6 @@ def finalize_body_paths(paths, sampler, P, scale):
         path.points = [h.loc for h in hits]
         path.normals = [h.normal for h in hits]
         path.hits = hits
-        r0 = r_base * (P.branch_radius ** path.depth)
+        r0 = P.branch_radius ** path.depth
         count = len(pts)
-        radii = []
-        for i in range(count):
-            t = i / (count - 1)
-            r = r0 * max(0.2, 1.0 - P.taper * t)
-            tip = count - 1 - i
-            if tip < 4:
-                r *= 0.35 + 0.65 * tip / 4.0
-            radii.append(r)
-        path.radii = radii
-        off = P.surface_offset * scale
-        path.points = [p + n * (off + r) for p, n, r in zip(path.points, path.normals, radii)]
+        path.radii = [r0 * max(0.2, 1.0 - P.taper * i / (count - 1)) for i in range(count)]

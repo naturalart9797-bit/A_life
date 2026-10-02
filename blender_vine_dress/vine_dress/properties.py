@@ -113,6 +113,32 @@ class VineDressSettings(bpy.types.PropertyGroup):
     sway_speed: FloatProperty(name="ゆらめき速度", default=0.01, min=0.0, soft_max=0.2,
                               description="1フレームあたりのノイズ移動量")
 
+    # --- guides --------------------------------------------------------
+    gen_body_guides: BoolProperty(name="上半身ガイド", default=True,
+                                  description="体表面を這うガイドカーブを自動生成する")
+    gen_skirt_guides: BoolProperty(name="スカートガイド", default=True,
+                                   description="水中スカートのガイドカーブを自動生成する")
+    replace_auto_guides: BoolProperty(
+        name="自動ガイドを置き換え", default=True,
+        description="以前に自動生成したガイドを削除してから生成する（手描きのガイドは残る）")
+    guide_point_spacing: FloatProperty(
+        name="制御点の間隔", default=0.05, min=0.005, soft_max=0.5, unit="LENGTH",
+        description="自動生成ガイドの制御点の間隔。大きいほど編集しやすい（点が少ない）")
+    snap_on_build: BoolProperty(
+        name="生成時に体へ吸着", default=True,
+        description="「体表面」ガイドからつるを作るとき、曲線を体の表面に吸着させる")
+
+    # --- vines built along guides ---------------------------------------
+    strands: IntProperty(name="1ガイドのつる本数", default=1, min=1, max=12,
+                         description="1本のガイドに沿って絡み合うつるの本数")
+    strand_spread: FloatProperty(name="絡みの幅", default=2.0, min=0.0, soft_max=10.0,
+                                 description="ガイドからの広がり（つるの太さに対する倍率）")
+    strand_twist: FloatProperty(name="絡みの回転数(/m)", default=6.0, min=0.0, soft_max=50.0)
+    strand_radius: FloatProperty(name="絡むつるの太さ比", default=0.7, min=0.05, max=2.0)
+    tendril_density: FloatProperty(name="巻きひげ(本/m)", default=3.0, min=0.0, soft_max=50.0)
+    tendril_size: FloatProperty(name="巻きひげの長さ", default=0.06, min=0.001, soft_max=0.5,
+                                unit="LENGTH")
+
     # --- output --------------------------------------------------------
-    replace_existing: BoolProperty(name="既存を置き換え", default=True,
-                                   description="同じ人物に以前生成したつるを削除してから生成する")
+    replace_existing: BoolProperty(name="既存のつるを置き換え", default=True,
+                                   description="同じ人物に以前生成したつるメッシュを削除してから生成する")

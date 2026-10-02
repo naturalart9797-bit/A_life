@@ -125,7 +125,6 @@ def build_skirt(sampler, view, P, rng, scale, z_top, z_bot):
         _emit(path, shape, rs, thetas, zs, ts, P, scale, closed=True)
         paths.append(path)
 
-    _assign_skirt_weights(paths, shape, P)
     return paths
 
 
@@ -141,7 +140,7 @@ def _smooth_radii(rs, thetas, zs, shape, P):
 
 
 def _emit(path, shape, rs, thetas, zs, ts, P, scale, closed):
-    r0 = P.radius * scale * P.skirt_radius
+    r0 = 1.0  # relative; the absolute thickness is applied when building the mesh
     path.closed = closed
     count = len(rs)
     for i, (r, th, z, t) in enumerate(zip(rs, thetas, zs, ts)):
@@ -156,48 +155,71 @@ def _emit(path, shape, rs, thetas, zs, ts, P, scale, closed):
     path.tparams = list(ts)
 
 
-def _assign_skirt_weights(paths, shape, P):
-    """Skirt points follow the nearest body part near the waist and blend toward
+class SkirtField:
+    """Bone weights / normals / height parameter for free-floating (skirt) vines.
+
+    Skirt points follow the nearest body part near the waist and blend toward
     the waist (pelvis) further down, so the hem is not torn apart between the
     legs. Weights are sampled on an (angle, height) grid and blurred around the
     circle so neighbouring vines move coherently."""
-    view = shape.view
-    na, nt = 48, 12
-    grid = []
-    anchors = []
-    for a in range(na):
-        th = math.tau * a / na
-        r = shape.top_radius(th)
-        hit = view.nearest(shape.point(th, r, shape.z_top))
-        anchors.append(view.weights_at(hit) if hit else {})
-    for j in range(nt + 1):
-        t = j / nt
-        z = shape.z_top + (shape.z_bot - shape.z_top) * t
-        row = []
+
+    NA, NT = 48, 12
+
+    def __init__(self, shape, P):
+        self.shape = shape
+        view = shape.view
+        na, nt = self.NA, self.NT
+        anchors = []
         for a in range(na):
             th = math.tau * a / na
-            r = max(shape.hull(z, th), shape.top_radius(th) * 0.5)
-            hit = view.nearest(shape.point(th, r, z))
-            near = view.weights_at(hit) if hit else {}
-            row.append(blend_weights(near, anchors[a], P.skirt_stiffness * smoothstep(t * 1.5)))
-        for _ in range(2 + j // 3):
-            row = [blend_weights(blend_weights(row[a - 1], row[(a + 1) % na], 0.5), row[a], 0.5)
-                   for a in range(na)]
-        grid.append(row)
+            hit = view.nearest(shape.point(th, shape.top_radius(th), shape.z_top))
+            anchors.append(view.weights_at(hit) if hit else {})
+        self.grid = []
+        for j in range(nt + 1):
+            t = j / nt
+            z = shape.z_top + (shape.z_bot - shape.z_top) * t
+            row = []
+            for a in range(na):
+                th = math.tau * a / na
+                r = max(shape.hull(z, th), shape.top_radius(th) * 0.5)
+                hit = view.nearest(shape.point(th, r, z))
+                near = view.weights_at(hit) if hit else {}
+                row.append(blend_weights(near, anchors[a], P.skirt_stiffness * smoothstep(t * 1.5)))
+            for _ in range(2 + j // 3):
+                row = [blend_weights(blend_weights(row[a - 1], row[(a + 1) % na], 0.5), row[a], 0.5)
+                       for a in range(na)]
+            self.grid.append(row)
 
-    def lookup(p, t):
-        th = math.atan2(p.y - shape.center.y, p.x - shape.center.x) % math.tau
+    def t_of(self, p):
+        sh = self.shape
+        span = sh.z_top - sh.z_bot
+        if abs(span) < 1e-9:
+            return 0.0
+        return (sh.z_top - p.z) / span
+
+    def normal(self, p):
+        d = Vector((p.x - self.shape.center.x, p.y - self.shape.center.y, 0.0))
+        if d.length_squared < 1e-12:
+            return Vector((1.0, 0.0, 0.0))
+        return d.normalized()
+
+    def weights(self, p):
+        sh = self.shape
+        t = self.t_of(p)
+        if t < 0.0:
+            # Above the waist: just follow the nearest body part.
+            hit = sh.view.nearest(p)
+            return sh.view.weights_at(hit) if hit else {}
+        na, nt, grid = self.NA, self.NT, self.grid
+        th = math.atan2(p.y - sh.center.y, p.x - sh.center.x) % math.tau
         fa = th / math.tau * na
         a0 = int(fa) % na
         a1 = (a0 + 1) % na
         ua = fa - int(fa)
-        ft = max(0.0, min(1.0, t)) * nt
+        ft = min(1.0, t) * nt
         j0 = min(int(ft), nt)
         j1 = min(j0 + 1, nt)
         ut = ft - j0
         lo = blend_weights(grid[j0][a0], grid[j0][a1], ua)
         hi = blend_weights(grid[j1][a0], grid[j1][a1], ua)
         return blend_weights(lo, hi, ut)
-
-    for path in paths:
-        path.weights = [lookup(p, t) for p, t in zip(path.points, path.tparams)]

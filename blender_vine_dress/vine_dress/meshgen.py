@@ -131,14 +131,15 @@ _LEAF_STATIONS = ((0.0, 0.0), (0.25, 0.42), (0.55, 0.5), (0.82, 0.32), (1.0, 0.0
 
 
 def add_leaves(b, path, P, rng, scale):
-    if not P.use_leaves or P.leaf_density <= 0.0:
+    density = P.leaf_density * path.leaf_scale
+    if not P.use_leaves or density <= 0.0:
         return
     pts = path.points
     n = len(pts)
     if n < 3:
         return
     tans = _tangents(pts, path.closed)
-    interval = 1.0 / (P.leaf_density / scale)
+    interval = 1.0 / (density / scale)
     next_at = interval * rng.uniform(0.3, 1.0)
     acc = 0.0
     side = 1.0 if rng.random() < 0.5 else -1.0
