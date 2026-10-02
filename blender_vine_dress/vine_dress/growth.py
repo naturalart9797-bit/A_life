@@ -19,7 +19,7 @@ class VinePath:
     """
 
     __slots__ = ("points", "normals", "radii", "kind", "depth", "weights", "sway", "hits",
-                 "closed", "tparams", "leaf_scale")
+                 "closed", "tparams", "leaf_scale", "attrs")
 
     def __init__(self, kind, depth=0):
         self.points = []
@@ -33,6 +33,7 @@ class VinePath:
         self.closed = False
         self.tparams = None
         self.leaf_scale = 1.0
+        self.attrs = None
 
 
 class SpatialHash:

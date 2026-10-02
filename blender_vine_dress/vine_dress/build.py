@@ -1,13 +1,87 @@
-"""Build VinePaths (centre lines with weights) from guide curves."""
+"""Guide splines -> vine centre lines, driven by per-batch attributes (node graph)."""
 
+import copy
 import math
 
-from mathutils import Quaternion, Vector
+from mathutils import Quaternion, Vector, noise
 
 from . import guides
 from .growth import VinePath
 
 
+class Attrs:
+    """Look attributes carried by a batch of guides through the node graph.
+
+    Lengths are in metres for a 1.7 m tall body (multiplied by the body scale)."""
+
+    def __init__(self):
+        self.radius = 0.005
+        self.radius_mult = 1.0
+        self.taper = 0.0
+        self.snap = True
+        self.surface_offset = 0.002
+        self.strands = 1
+        self.strand_spread = 2.0
+        self.strand_twist = 6.0
+        self.strand_radius = 0.7
+        self.tendril_density = 0.0
+        self.tendril_size = 0.06
+        self.use_leaves = False
+        self.leaf_density = 40.0
+        self.leaf_size = 0.045
+        self.leaf_size_var = 0.35
+        self.leaf_width = 0.55
+        self.leaf_tilt = 0.25
+        self.leaf_curl = 0.2
+        self.noise_amp = 0.0
+        self.noise_freq = 8.0
+        self.noise_seed = 0
+        self.stem_color = (0.12, 0.18, 0.06)
+        self.leaf_color = (0.12, 0.35, 0.08)
+        self.color_var = 0.5
+
+    def copy(self):
+        return copy.copy(self)
+
+
+class GuideSpline:
+    """One guide spline after resampling (world space)."""
+
+    __slots__ = ("kind", "points", "radii", "closed")
+
+    def __init__(self, kind, pts, rad, closed):
+        self.kind = kind
+        self.points = pts
+        self.radii = rad
+        self.closed = closed
+
+
+class Batch:
+    """A set of guide splines plus the attributes the vines are built with."""
+
+    def __init__(self, splines, attrs, label=""):
+        self.splines = splines
+        self.attrs = attrs
+        self.label = label
+
+    def with_attrs(self, **kw):
+        a = self.attrs.copy()
+        for k, v in kw.items():
+            setattr(a, k, v)
+        return Batch(self.splines, a, self.label)
+
+
+def read_group(obj, step):
+    kind = obj.vine_guide.kind
+    out = []
+    for pts, rad, closed in guides.read_splines(obj):
+        rp, rr = guides.resample(pts, rad, step, closed)
+        if len(rp) >= 2:
+            out.append(GuideSpline(kind, rp, rr, closed))
+    return out
+
+
+# ----------------------------------------------------------------------
 def _tangent(pts, i, closed):
     n = len(pts)
     if closed:
@@ -28,65 +102,82 @@ def _frame(t, n):
     return ref, t.cross(ref)
 
 
-def _tip_taper(radii, closed):
-    if closed:
-        return radii
+def _tip_taper(radii, closed, extra):
     n = len(radii)
     out = list(radii)
     for i in range(n):
+        if extra > 0.0 and not closed:
+            out[i] *= max(0.05, 1.0 - extra * i / max(1, n - 1))
         tip = n - 1 - i
-        if tip < 4:
+        if not closed and tip < 4:
             out[i] *= 0.35 + 0.65 * tip / 4.0
     return out
 
 
-class GuideSpline:
-    """One spline of a guide object after resampling."""
+def _normal_at(p, kind, sampler, field):
+    if kind == guides.KIND_BODY or field is None:
+        hit = sampler.nearest(p)
+        if kind == guides.KIND_BODY:
+            return hit.normal
+        d = p - hit.loc
+        return d.normalized() if d.length_squared > 1e-12 else hit.normal
+    return field.normal(p)
 
-    def __init__(self, kind, pts, rad, closed, gs):
-        self.kind = kind
-        self.points = pts
-        self.radii = rad
-        self.closed = closed
-        self.settings = gs  # GuideSettings of the owning object
 
-
-def collect(body, P, scale):
-    step = P.step_length * scale
-    out = []
-    for obj in guides.guide_objects(body, only_enabled=True):
-        gs = obj.vine_guide
-        for pts, rad, closed in guides.read_splines(obj):
-            rp, rr = guides.resample(pts, rad, step, closed)
-            if len(rp) >= 2:
-                out.append(GuideSpline(gs.kind, rp, rr, closed, gs))
+# ----------------------------------------------------------------------
+# Spline-level operations (node graph)
+# ----------------------------------------------------------------------
+def scatter(splines, sampler, field, count, radius, length_var, wobble, rng, scale):
+    """Add child guides around each guide (like Yeti's guide interpolation)."""
+    out = list(splines)
+    if count <= 0:
+        return out
+    for g in splines:
+        n = len(g.points)
+        normals = [_normal_at(p, g.kind, sampler, field) for p in g.points]
+        frames = [_frame(_tangent(g.points, i, g.closed), normals[i]) for i in range(n)]
+        for _ in range(count):
+            d = radius * scale * math.sqrt(rng.random())
+            a = rng.uniform(0.0, math.tau)
+            ph = rng.uniform(0.0, math.tau)
+            keep = n if g.closed else max(2, int(round(n * (1.0 - length_var * rng.random()))))
+            pts = []
+            for i in range(keep):
+                ref, bi = frames[i]
+                u = i / max(1, n - 1)
+                w = 1.0 + wobble * math.sin(u * math.tau * 2.0 + ph)
+                if g.kind == guides.KIND_BODY:
+                    o = bi * (d * math.cos(a) * w) + _frame_t(g, i) * (d * math.sin(a) * 0.5)
+                else:
+                    o = (ref * math.cos(a) + bi * math.sin(a)) * d * w
+                pts.append(g.points[i] + o)
+            if g.kind == guides.KIND_BODY:
+                pts = [sampler.nearest(p).loc for p in pts]
+            out.append(GuideSpline(g.kind, pts, list(g.radii[:keep]), g.closed))
     return out
 
 
-def paths_from_guides(splines, sampler, field, P, rng, scale):
-    """Turn guide splines into vine paths (one or more strands per guide + tendrils)."""
-    base_r = P.radius * scale
-    off = P.surface_offset * scale
+def _frame_t(g, i):
+    return _tangent(g.points, i, g.closed)
+
+
+# ----------------------------------------------------------------------
+# Paths
+# ----------------------------------------------------------------------
+def paths_from_batch(batch, sampler, field, rng, scale):
+    A = batch.attrs
+    base_r = A.radius * scale * A.radius_mult
+    off = A.surface_offset * scale
     paths = []
-    for g in splines:
-        gs = g.settings
-        if g.kind == guides.KIND_SKIRT:
-            r_mult = base_r * P.skirt_radius * gs.radius
-        else:
-            r_mult = base_r * gs.radius
-        radii = _tip_taper([max(r, 0.0) * r_mult for r in g.radii], g.closed)
+    for g in batch.splines:
+        radii = _tip_taper([max(r, 0.0) * base_r for r in g.radii], g.closed, A.taper)
         if max(radii, default=0.0) <= 0.0:
             continue
-
-        # Centre line, normals, weights.
         centers, normals, weights, ts = [], [], [], []
         if g.kind == guides.KIND_BODY:
             for p, r in zip(g.points, radii):
                 hit = sampler.nearest(p)
-                if P.snap_on_build:
-                    centers.append(hit.loc + hit.normal * (off + r))
-                else:
-                    centers.append(p.copy())
+                centers.append(hit.loc + hit.normal * (off + r) if A.snap else p.copy())
                 normals.append(hit.normal)
                 weights.append(sampler.weights_at(hit))
                 ts.append(None)
@@ -104,20 +195,36 @@ def paths_from_guides(splines, sampler, field, P, rng, scale):
                     weights.append(sampler.weights_at(hit))
                     ts.append(None)
 
-        strands = gs.strands or P.strands
-        paths += _strands(g, centers, normals, radii, weights, ts, strands, P, scale, rng)
-        if P.tendril_density > 0.0:
-            paths += _tendrils(g, centers, normals, radii, weights, ts, P, scale, rng)
+        if A.noise_amp > 0.0:
+            _apply_noise(centers, normals, g.kind, A, scale)
+
+        new = _strands(g, centers, normals, radii, weights, ts, A, scale, rng)
+        if A.tendril_density > 0.0:
+            new += _tendrils(g, centers, normals, radii, weights, ts, A, scale, rng)
+        for p in new:
+            p.attrs = A
+        paths += new
     return paths
 
 
-def _strands(g, centers, normals, radii, weights, ts, count, P, scale, rng):
+def _apply_noise(centers, normals, kind, A, scale):
+    amp = A.noise_amp * scale
+    freq = A.noise_freq / scale
+    seed = Vector((A.noise_seed * 13.17, A.noise_seed * 7.31, A.noise_seed * 3.77))
+    for i, (c, n) in enumerate(zip(centers, normals)):
+        o = noise.noise_vector(c * freq + seed) * amp
+        if kind == guides.KIND_BODY:
+            o -= n * min(0.0, o.dot(n))  # never push into the skin
+        centers[i] = c + o
+
+
+def _strands(g, centers, normals, radii, weights, ts, A, scale, rng):
     kind = "body" if g.kind == guides.KIND_BODY else "skirt"
-    if count <= 1:
+    count = max(1, A.strands)
+    if count == 1:
         path = VinePath(kind)
         path.points, path.normals, path.radii = centers, normals, radii
         path.weights, path.tparams, path.closed = weights, ts, g.closed
-        path.leaf_scale = g.settings.leaves
         return [path]
 
     out = []
@@ -126,7 +233,7 @@ def _strands(g, centers, normals, radii, weights, ts, count, P, scale, rng):
     for i in range(1, n):
         lens.append(lens[-1] + (centers[i] - centers[i - 1]).length)
     total = lens[-1] or 1.0
-    turns = P.strand_twist * total / scale
+    turns = A.strand_twist * total / scale
     if g.closed:
         turns = round(turns)  # keep the braid continuous on rings
     for k in range(count):
@@ -136,7 +243,7 @@ def _strands(g, centers, normals, radii, weights, ts, count, P, scale, rng):
             t = _tangent(centers, i, g.closed)
             ref, bi = _frame(t, normals[i])
             a = phase + math.tau * turns * lens[i] / total
-            spread = radii[i] * P.strand_spread
+            spread = radii[i] * A.strand_spread
             if kind == "body":
                 # Braid lying on the surface: sideways + slightly up, never into the skin.
                 o = bi * (math.sin(a) * spread) + ref * ((1.0 + math.cos(a)) * 0.5 * spread)
@@ -144,16 +251,16 @@ def _strands(g, centers, normals, radii, weights, ts, count, P, scale, rng):
                 o = (ref * math.cos(a) + bi * math.sin(a)) * spread
             path.points.append(centers[i] + o)
             path.normals.append(normals[i])
-            path.radii.append(radii[i] * P.strand_radius)
+            path.radii.append(radii[i] * A.strand_radius)
         path.weights, path.tparams, path.closed = weights, ts, g.closed
-        path.leaf_scale = g.settings.leaves / count
+        path.leaf_scale = 1.0 / count
         out.append(path)
     return out
 
 
-def _tendrils(g, centers, normals, radii, weights, ts, P, scale, rng):
+def _tendrils(g, centers, normals, radii, weights, ts, A, scale, rng):
     kind = "body" if g.kind == guides.KIND_BODY else "skirt"
-    interval = 1.0 / (P.tendril_density / scale)
+    interval = 1.0 / (A.tendril_density / scale)
     out = []
     acc = 0.0
     next_at = interval * rng.uniform(0.3, 1.2)
@@ -165,7 +272,6 @@ def _tendrils(g, centers, normals, radii, weights, ts, P, scale, rng):
         t = _tangent(centers, i, g.closed)
         ref, bi = _frame(t, normals[i])
         side = 1.0 if rng.random() < 0.5 else -1.0
-        # Grow sideways and away from the body, curling into a spiral.
         out_dir = (bi * side + ref * 0.8 + t * rng.uniform(-0.3, 0.6)).normalized()
         if kind == "body":
             axis = ref.copy()  # curl in the tangent plane, so it never dives into the skin
@@ -174,7 +280,7 @@ def _tendrils(g, centers, normals, radii, weights, ts, P, scale, rng):
             if axis.length_squared < 1e-9:
                 axis = t.copy()
         axis.normalize()
-        length = P.tendril_size * scale * rng.uniform(0.6, 1.4)
+        length = A.tendril_size * scale * rng.uniform(0.6, 1.4)
         coils = rng.uniform(1.5, 3.0)
         m = 28
         path = VinePath(kind)
@@ -187,7 +293,6 @@ def _tendrils(g, centers, normals, radii, weights, ts, P, scale, rng):
             path.points.append(pos.copy())
             path.normals.append(normals[i])
             path.radii.append(r0 * (1.0 - 0.8 * u))
-            # Curvature increases toward the tip -> spiral.
             ang = coils * math.tau / m * (0.3 + 1.7 * u)
             d = Quaternion(axis, ang * side) @ d
             pos = pos + d * seg

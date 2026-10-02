@@ -59,7 +59,6 @@ class VineDressSettings(bpy.types.PropertyGroup):
     taper: FloatProperty(name="先細り", default=0.6, min=0.0, max=1.0, subtype="FACTOR")
     surface_offset: FloatProperty(name="肌からの距離", default=0.002, min=0.0, soft_max=0.05,
                                   unit="LENGTH")
-    ring_res: IntProperty(name="断面分割数", default=6, min=3, max=24)
 
     # --- skirt ---------------------------------------------------------
     use_skirt: BoolProperty(name="スカートを生成", default=True)
@@ -76,69 +75,41 @@ class VineDressSettings(bpy.types.PropertyGroup):
     ruffle_freq: IntProperty(name="フリル数", default=7, min=1, max=64)
     skirt_wave: FloatProperty(name="ゆらぎ", default=0.3, min=0.0, max=3.0)
     skirt_ragged: BoolProperty(name="裾を不揃いに", default=True)
-    skirt_radius: FloatProperty(name="太さ倍率", default=1.2, min=0.1, max=5.0)
     skirt_follow_body: BoolProperty(name="脚を貫通しない", default=True,
                                     description="スカートの半径を体の外形より内側にしない")
     skirt_body_group: StringProperty(
         name="スカート追従グループ",
         description="スカートの外形判定・ウェイト取得に使う頂点グループ（例: 腰と脚）。空なら全身。"
                     "腕や手がスカートに影響する場合に指定")
-    skirt_stiffness: FloatProperty(
-        name="腰への固定度", default=0.85, min=0.0, max=1.0, subtype="FACTOR",
-        description="裾がどれだけ腰の動きに従うか。0=近くの脚に追従, 1=腰に固定")
 
-    # --- leaves --------------------------------------------------------
-    use_leaves: BoolProperty(name="葉を生成", default=True)
-    leaf_density: FloatProperty(name="葉の密度(枚/m)", default=40.0, min=0.0, soft_max=300.0)
-    leaf_size: FloatProperty(name="葉の大きさ", default=0.045, min=0.001, soft_max=0.3, unit="LENGTH")
-    leaf_size_var: FloatProperty(name="大きさのばらつき", default=0.35, min=0.0, max=1.0, subtype="FACTOR")
-    leaf_width: FloatProperty(name="葉の幅", default=0.55, min=0.05, max=2.0)
-    leaf_tilt: FloatProperty(name="葉の起き上がり", default=0.25, min=-1.0, max=2.0)
-    leaf_curl: FloatProperty(name="葉の反り", default=0.2, min=-1.0, max=1.0)
 
-    # --- animation -----------------------------------------------------
-    bind_mode: EnumProperty(
-        name="追従方法",
-        items=[
-            ("ARMATURE", "アーマチュア", "人物のボーンウェイトを転写してArmatureモディファイアで変形（推奨）"),
-            ("SURFACE", "サーフェス変形", "Surface Deformで人物メッシュの表面に貼り付ける（シェイプキー/Alembicにも対応）"),
-            ("NONE", "なし", "親子付けのみ"),
-        ],
-        default="ARMATURE")
-    use_sway: BoolProperty(name="水中のゆらめき", default=True,
-                           description="水面より下のつると葉をノイズでゆらゆら動かす")
-    sway_strength: FloatProperty(name="ゆらめき強さ", default=0.02, min=0.0, soft_max=0.5, unit="LENGTH")
-    sway_scale: FloatProperty(name="ゆらめきの大きさ", default=0.35, min=0.01, soft_max=5.0,
-                              description="ノイズのスケール（大きいほどゆったり大きな波）")
-    sway_speed: FloatProperty(name="ゆらめき速度", default=0.01, min=0.0, soft_max=0.2,
-                              description="1フレームあたりのノイズ移動量")
 
     # --- guides --------------------------------------------------------
     gen_body_guides: BoolProperty(name="上半身ガイド", default=True,
                                   description="体表面を這うガイドカーブを自動生成する")
     gen_skirt_guides: BoolProperty(name="スカートガイド", default=True,
                                    description="水中スカートのガイドカーブを自動生成する")
-    replace_auto_guides: BoolProperty(
-        name="自動ガイドを置き換え", default=True,
-        description="以前に自動生成したガイドを削除してから生成する（手描きのガイドは残る）")
     guide_point_spacing: FloatProperty(
-        name="制御点の間隔", default=0.05, min=0.005, soft_max=0.5, unit="LENGTH",
+        name="制御点の間隔", default=0.03, min=0.005, soft_max=0.5, unit="LENGTH",
         description="自動生成ガイドの制御点の間隔。大きいほど編集しやすい（点が少ない）")
-    snap_on_build: BoolProperty(
-        name="生成時に体へ吸着", default=True,
-        description="「体表面」ガイドからつるを作るとき、曲線を体の表面に吸着させる")
 
-    # --- vines built along guides ---------------------------------------
-    strands: IntProperty(name="1ガイドのつる本数", default=1, min=1, max=12,
-                         description="1本のガイドに沿って絡み合うつるの本数")
-    strand_spread: FloatProperty(name="絡みの幅", default=2.0, min=0.0, soft_max=10.0,
-                                 description="ガイドからの広がり（つるの太さに対する倍率）")
-    strand_twist: FloatProperty(name="絡みの回転数(/m)", default=6.0, min=0.0, soft_max=50.0)
-    strand_radius: FloatProperty(name="絡むつるの太さ比", default=0.7, min=0.05, max=2.0)
-    tendril_density: FloatProperty(name="巻きひげ(本/m)", default=3.0, min=0.0, soft_max=50.0)
-    tendril_size: FloatProperty(name="巻きひげの長さ", default=0.06, min=0.001, soft_max=0.5,
-                                unit="LENGTH")
+    # --- groom ---------------------------------------------------------
+    groom_tree: PointerProperty(name="グルームツリー", type=bpy.types.NodeTree,
+                                poll=lambda self, t: t.bl_idname == "VineGroomTreeType")
+    active_group_index: IntProperty(name="アクティブグループ", default=-1)
 
-    # --- output --------------------------------------------------------
-    replace_existing: BoolProperty(name="既存のつるを置き換え", default=True,
-                                   description="同じ人物に以前生成したつるメッシュを削除してから生成する")
+    brush_radius: IntProperty(name="半径(px)", default=50, min=5, max=500, subtype="PIXEL",
+                              description="ブラシの半径。[ ] キーで変更")
+    brush_strength: FloatProperty(name="強さ", default=0.5, min=0.0, max=1.0, subtype="FACTOR")
+    brush_selected_only: BoolProperty(name="選択のみ", default=False,
+                                      description="選択中のガイドがあれば、それだけに作用する")
+    brush_xray: BoolProperty(name="裏側にも作用", default=False,
+                             description="体の陰に隠れたガイドにも作用する")
+    comb_keep_length: BoolProperty(name="長さを維持", default=True,
+                                   description="コームでガイドの長さを保つ")
+
+    show_overlay: BoolProperty(name="ガイドを表示", default=True)
+    overlay_xray: BoolProperty(name="透過表示", default=False, description="体に隠れたガイドも表示する")
+    overlay_in_pose: BoolProperty(name="ポーズ中も表示", default=False,
+                                  description="ガイドはレストポーズ基準なので、通常はポーズ中は非表示にする")
+    overlay_line_width: FloatProperty(name="線の太さ", default=2.0, min=1.0, max=8.0)

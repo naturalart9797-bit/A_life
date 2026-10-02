@@ -1,4 +1,10 @@
-"""Guide curves: editable curve objects that the vines are built from."""
+"""Guide groups.
+
+Each guide group is a curve object (POLY splines, body-local coordinates,
+parented to the body). The groom tools edit these splines directly in Object
+mode and the viewport overlay draws them, so the curve objects themselves stay
+hidden.
+"""
 
 import math
 
@@ -10,45 +16,59 @@ KIND_BODY = "BODY"
 KIND_SKIRT = "SKIRT"
 AUTO_PROP = "vine_dress_auto"
 
+KIND_ITEMS = [
+    (KIND_BODY, "体表面", "体の表面に吸着するつる（服の部分）", "MOD_SHRINKWRAP", 0),
+    (KIND_SKIRT, "スカート/空間", "体から離れて空間に浮かぶつる（水中スカートの部分）", "MOD_CLOTH", 1),
+]
+
 KIND_COLORS = {
-    KIND_BODY: (0.2, 1.0, 0.3, 1.0),
-    KIND_SKIRT: (0.2, 0.6, 1.0, 1.0),
+    KIND_BODY: (0.25, 1.0, 0.35),
+    KIND_SKIRT: (0.25, 0.65, 1.0),
 }
+
+_PALETTE = [
+    (1.0, 0.55, 0.2), (0.95, 0.3, 0.6), (0.7, 0.45, 1.0), (1.0, 0.9, 0.3),
+    (0.3, 1.0, 0.85), (0.6, 1.0, 0.3), (1.0, 0.4, 0.35), (0.45, 0.8, 1.0),
+]
+
+
+def redraw(_self=None, _ctx=None):
+    wm = bpy.context.window_manager
+    for win in getattr(wm, "windows", []):
+        for area in win.screen.areas:
+            if area.type in {"VIEW_3D", "NODE_EDITOR"}:
+                area.tag_redraw()
+
+
+def _changed(self, _ctx):
+    redraw()
+    from . import groom_tree
+    groom_tree.schedule_for_body(self.body)
 
 
 class GuideSettings(bpy.types.PropertyGroup):
     body: bpy.props.PointerProperty(
         name="人物", type=bpy.types.Object,
-        description="このガイドが属する人物メッシュ")
-    kind: bpy.props.EnumProperty(
-        name="種類",
-        items=[
-            (KIND_BODY, "体表面", "体の表面に吸着するつる（服の部分）"),
-            (KIND_SKIRT, "スカート/空間", "体から離れて空間に浮かぶつる（水中スカートの部分）"),
-        ],
-        default=KIND_BODY,
-        update=lambda self, ctx: _update_color(self.id_data))
-    radius: bpy.props.FloatProperty(name="太さ倍率", default=1.0, min=0.0, soft_max=5.0)
-    leaves: bpy.props.FloatProperty(name="葉の量倍率", default=1.0, min=0.0, soft_max=5.0)
-    strands: bpy.props.IntProperty(name="本数(0=共通)", default=0, min=0, max=12,
-                                   description="1本のガイドに沿わせるつるの本数。0なら共通設定を使う")
-    enabled: bpy.props.BoolProperty(name="使用", default=True)
+        description="このガイドグループが属する人物メッシュ")
+    kind: bpy.props.EnumProperty(name="種類", items=KIND_ITEMS, default=KIND_BODY, update=_changed)
+    color: bpy.props.FloatVectorProperty(name="表示色", subtype="COLOR", size=3, min=0.0, max=1.0,
+                                         default=(0.25, 1.0, 0.35), update=redraw)
+    visible: bpy.props.BoolProperty(name="表示", default=True, update=redraw,
+                                    description="ビューポートにガイドを表示する")
+    locked: bpy.props.BoolProperty(name="ロック", default=False, update=redraw,
+                                   description="ブラシで編集できないようにする")
 
 
-def _update_color(obj):
-    if obj is not None and hasattr(obj, "vine_guide"):
-        obj.color = KIND_COLORS.get(obj.vine_guide.kind, (1, 1, 1, 1))
+def is_guide(obj):
+    return obj is not None and obj.type == "CURVE" and obj.vine_guide.body is not None
 
 
 def is_guide_of(obj, body):
-    return obj.type == "CURVE" and obj.vine_guide.body == body
+    return obj.type == "CURVE" and body is not None and obj.vine_guide.body == body
 
 
-def guide_objects(body, only_enabled=False):
-    out = [o for o in bpy.data.objects if is_guide_of(o, body)]
-    if only_enabled:
-        out = [o for o in out if o.vine_guide.enabled]
-    return out
+def guide_objects(body):
+    return [o for o in bpy.data.objects if is_guide_of(o, body)]
 
 
 def guide_collection(context, body):
@@ -62,15 +82,21 @@ def guide_collection(context, body):
     return coll
 
 
-def new_guide_object(context, body, kind, name, auto=False):
+def new_group(context, body, kind, name, auto=False, color=None):
     cu = bpy.data.curves.new(name, "CURVE")
     cu.dimensions = "3D"
-    cu.resolution_u = 6
     obj = bpy.data.objects.new(name, cu)
-    obj.vine_guide.body = body
-    obj.vine_guide.kind = kind
+    gs = obj.vine_guide
+    gs.body = body
+    gs.kind = kind
+    if color is None:
+        if auto:
+            color = KIND_COLORS[kind]
+        else:
+            color = _PALETTE[len(guide_objects(body)) % len(_PALETTE)]
+    gs.color = color
     if auto:
-        obj[AUTO_PROP] = True
+        obj[AUTO_PROP] = kind
     guide_collection(context, body).objects.link(obj)
     obj.parent = body
     obj.matrix_parent_inverse.identity()
@@ -78,31 +104,42 @@ def new_guide_object(context, body, kind, name, auto=False):
     # matrix_world is only refreshed on depsgraph update; set it now so points
     # written right away land in the right place.
     obj.matrix_world = body.matrix_world.copy()
-    obj.show_in_front = True
-    _update_color(obj)
+    obj.hide_render = True
+    obj.display_type = "WIRE"
+    try:
+        obj.hide_set(True)  # the overlay draws the guides
+    except RuntimeError:
+        pass
     return obj
 
 
-def remove_guides(body, auto_only):
-    for obj in guide_objects(body):
-        if auto_only and not obj.get(AUTO_PROP):
-            continue
-        data = obj.data
-        bpy.data.objects.remove(obj, do_unlink=True)
-        if data.users == 0:
-            bpy.data.curves.remove(data)
+def auto_group(context, body, kind, name):
+    """The auto-generated group of a kind, reused so node links stay valid."""
+    for o in guide_objects(body):
+        if o.get(AUTO_PROP) == kind:
+            o.data.splines.clear()
+            return o
+    return new_group(context, body, kind, name, auto=True)
+
+
+def remove_group(obj):
+    data = obj.data
+    bpy.data.objects.remove(obj, do_unlink=True)
+    if data.users == 0:
+        bpy.data.curves.remove(data)
 
 
 # ----------------------------------------------------------------------
+# Spline IO
+# ----------------------------------------------------------------------
 def write_paths(obj, paths, ctrl_spacing):
-    """Write vine paths (world space) into a curve object as Bezier splines."""
+    """Write vine paths (world space) into a group as POLY splines."""
     inv = obj.matrix_world.inverted()
     for path in paths:
         pts = path.points
         n = len(pts)
         if n < 2:
             continue
-        # Keep roughly one control point per ctrl_spacing of length.
         keep = [0]
         acc = 0.0
         for i in range(1, n):
@@ -120,29 +157,27 @@ def write_paths(obj, paths, ctrl_spacing):
                 keep.append(n - 1)
         if len(keep) < 2:
             continue
+        add_spline(obj, [inv @ pts[k] for k in keep], [path.radii[k] for k in keep],
+                   closed=path.closed, local=True)
 
-        sp = obj.data.splines.new("BEZIER")
-        sp.bezier_points.add(len(keep) - 1)
-        sp.use_cyclic_u = path.closed
-        m = len(keep)
-        local = [inv @ pts[k] for k in keep]
-        for j, k in enumerate(keep):
-            bp = sp.bezier_points[j]
-            if path.closed:
-                prev, nxt = local[j - 1], local[(j + 1) % m]
-            else:
-                prev, nxt = local[max(j - 1, 0)], local[min(j + 1, m - 1)]
-            tan = (nxt - prev) / 6.0
-            bp.co = local[j]
-            bp.handle_left = local[j] - tan
-            bp.handle_right = local[j] + tan
-            bp.handle_left_type = "AUTO"
-            bp.handle_right_type = "AUTO"
-            bp.radius = path.radii[k]
+
+def add_spline(obj, pts, radii, closed=False, local=False, select=False):
+    inv = None if local else obj.matrix_world.inverted()
+    sp = obj.data.splines.new("POLY")
+    sp.points.add(len(pts) - 1)
+    co = []
+    for p in pts:
+        q = p if local else inv @ p
+        co += (q.x, q.y, q.z, 1.0)
+    sp.points.foreach_set("co", co)
+    sp.points.foreach_set("radius", list(radii))
+    sp.points.foreach_set("select", [select] * len(pts))
+    sp.use_cyclic_u = closed
+    return sp
 
 
 def read_splines(obj, resolution=12):
-    """Return [(points_world, radii, closed)] for every spline of a curve object."""
+    """Return [(points_world, radii, closed)] for every spline of a group."""
     mw = obj.matrix_world
     out = []
     for sp in obj.data.splines:
@@ -200,32 +235,3 @@ def resample(pts, rad, step, closed):
         out_p.pop()
         out_r.pop()
     return out_p, out_r
-
-
-def snap_object(obj, sampler, offset=0.0):
-    """Move every control point of a guide onto the body surface (+ a small hover offset)."""
-    mw = obj.matrix_world
-    inv = mw.inverted()
-    moved = 0
-    for sp in obj.data.splines:
-        if sp.type == "BEZIER":
-            for bp in sp.bezier_points:
-                hit = sampler.nearest(mw @ bp.co)
-                if hit is None:
-                    continue
-                new = inv @ (hit.loc + hit.normal * offset)
-                d = new - bp.co
-                bp.co = new
-                bp.handle_left = bp.handle_left + d
-                bp.handle_right = bp.handle_right + d
-                moved += 1
-        else:
-            for p in sp.points:
-                hit = sampler.nearest(mw @ Vector(p.co[:3]))
-                if hit is None:
-                    continue
-                new = inv @ (hit.loc + hit.normal * offset)
-                p.co = (new.x, new.y, new.z, p.co[3])
-                moved += 1
-    obj.data.update_tag()
-    return moved

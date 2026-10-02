@@ -60,18 +60,20 @@ def _frame(t, n):
     return ref, t.cross(ref)
 
 
-def stem_color(rng):
-    h = rng.uniform(0.18, 0.28)
-    s = rng.uniform(0.45, 0.7)
-    v = rng.uniform(0.12, 0.25)
-    return (*colorsys.hsv_to_rgb(h, s, v), 1.0)
+def _vary(rgb, var, rng, sat_var=0.25, val_var=0.45):
+    h, sat, val = colorsys.rgb_to_hsv(*rgb)
+    h = (h + rng.uniform(-0.05, 0.05) * var) % 1.0
+    sat = min(1.0, max(0.0, sat * (1.0 + rng.uniform(-sat_var, sat_var) * var)))
+    val = max(0.0, val * (1.0 + rng.uniform(-val_var, val_var) * var))
+    return (*colorsys.hsv_to_rgb(h, sat, val), 1.0)
 
 
-def leaf_color(rng):
-    h = rng.uniform(0.22, 0.36)
-    s = rng.uniform(0.55, 0.85)
-    v = rng.uniform(0.18, 0.45)
-    return (*colorsys.hsv_to_rgb(h, s, v), 1.0)
+def stem_color(attrs, rng):
+    return _vary(attrs.stem_color, attrs.color_var, rng)
+
+
+def leaf_color(attrs, rng):
+    return _vary(attrs.leaf_color, attrs.color_var, rng, 0.3, 0.6)
 
 
 def add_tube(b, path, res, rng):
@@ -81,7 +83,7 @@ def add_tube(b, path, res, rng):
         return
     closed = path.closed
     tans = _tangents(pts, closed)
-    col = stem_color(rng)
+    col = stem_color(path.attrs, rng)
     rings = []
     vs = []
     acc = 0.0
@@ -130,7 +132,8 @@ def add_tube(b, path, res, rng):
 _LEAF_STATIONS = ((0.0, 0.0), (0.25, 0.42), (0.55, 0.5), (0.82, 0.32), (1.0, 0.0))
 
 
-def add_leaves(b, path, P, rng, scale):
+def add_leaves(b, path, rng, scale):
+    P = path.attrs
     density = P.leaf_density * path.leaf_scale
     if not P.use_leaves or density <= 0.0:
         return
@@ -168,7 +171,7 @@ def _leaf(b, p, t, n, stem_r, side, weights, sway, P, rng, scale):
     width = P.leaf_width
     cup = P.leaf_curl
     base = p + bi * (side * stem_r * 0.8)
-    col = leaf_color(rng)
+    col = leaf_color(P, rng)
 
     def V(x, y, lift):
         co = base + d * (y * length) + across * (x * length) + nl * (lift * length)
