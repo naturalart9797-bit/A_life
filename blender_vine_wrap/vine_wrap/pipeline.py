@@ -10,7 +10,7 @@ from mathutils import Vector
 from . import binding, guides
 from .build import Attrs, paths_from_guide
 from .growth import finalize, grow_vines
-from .meshgen import MeshBuilder, add_leaves, add_tube, assign_vertex_groups, build_mesh
+from .meshgen import MeshBuilder, add_leaves, add_rootlets, add_tube, assign_vertex_groups, build_mesh
 from .sampler import BodySampler
 
 SOURCE_PROP = "vine_wrap_source"
@@ -82,8 +82,16 @@ def build_vines(report, context, target):
         rng = random.Random(P.seed)
         paths = []
         n_splines = 0
+        slots = {}  # style uid -> (stem slot, leaf slot)
+        materials = []
         for obj in objs:
-            A = Attrs.from_guide(guides.style_of(P, obj), obj.vine_guide, P)
+            style = guides.style_of(P, obj)
+            A = Attrs.from_guide(style, obj.vine_guide, P)
+            if style is not None and style.uid not in slots:
+                slots[style.uid] = (len(materials), len(materials) + 1)
+                materials += [binding.stem_material(style), binding.leaf_material(style)]
+            if style is not None:
+                A.mat_stem, A.mat_leaf = slots[style.uid]
             for pts, rad, cyc in guides.evaluated(obj):
                 rp, rr = guides.resample(pts, rad, step, cyc)
                 if len(rp) >= 2:
@@ -91,16 +99,12 @@ def build_vines(report, context, target):
                     paths += paths_from_guide(rp, rr, cyc, A, sampler, rng, scale)
         if not paths:
             return None, "つるを生成できませんでした"
-        for p in paths:
-            p.sway = [0.0] * len(p.points)
-
         b = MeshBuilder()
         for p in paths:
-            add_tube(b, p, P.ring_res, rng)
-        stem_faces = len(b.faces)
+            add_tube(b, p, P.ring_res, rng, scale)
+            add_rootlets(b, p, rng, scale)
         for p in paths:
             add_leaves(b, p, rng, scale)
-        leaves = (len(b.faces) - stem_faces) // 8
 
         name = target.name + "_Vines"
         me = build_mesh(b, name, sampler.to_local)
@@ -109,11 +113,12 @@ def build_vines(report, context, target):
         colls = target.users_collection or (context.scene.collection,)
         colls[0].objects.link(obj)
         binding.attach(obj, target)
-        binding.ensure_materials(obj)
-        assign_vertex_groups(obj, b, bone_names if mode == "ARMATURE" else set(), "")
+        for m in materials:
+            obj.data.materials.append(m)
+        assign_vertex_groups(obj, b, bone_names if mode == "ARMATURE" else set())
         obj.hide_select = True  # clicks go to the guides / target, not the generated mesh
 
-        stats = {"guides": n_splines, "paths": len(paths), "leaves": leaves, "verts": len(b.verts),
+        stats = {"guides": n_splines, "paths": len(paths), "leaves": b.leaf_count, "verts": len(b.verts),
                  "mode": mode}
         if mode == "ARMATURE":
             binding.add_armature(obj, target)

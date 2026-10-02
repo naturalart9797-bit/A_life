@@ -35,9 +35,20 @@ class Attrs:
         self.noise_amp = 0.0
         self.noise_freq = 8.0
         self.noise_seed = 0
-        self.stem_color = (0.12, 0.18, 0.06)
+        self.stem_color = (0.16, 0.11, 0.06)
         self.leaf_color = (0.12, 0.35, 0.08)
         self.color_var = 0.5
+        self.leaf_shape = "OVAL"
+        self.petiole = 0.0
+        self.leaf_tip_scale = 1.0
+        self.leaf_light = 0.0
+        self.leaf_wave = 0.0
+        self.stem_irregular = 0.0
+        self.rootlet_density = 0.0
+        self.rootlet_size = 0.012
+        self.style_uid = 0
+        self.mat_stem = 0
+        self.mat_leaf = 1
 
     def copy(self):
         return copy.copy(self)
@@ -49,10 +60,12 @@ class Attrs:
             for k in ("radius", "taper", "strands", "strand_spread", "strand_twist", "strand_radius",
                       "noise_amp", "noise_freq", "tendril_density", "tendril_size", "use_leaves",
                       "leaf_density", "leaf_size", "leaf_size_var", "leaf_width", "leaf_tilt", "leaf_curl",
-                      "color_var"):
+                      "color_var", "leaf_shape", "petiole", "leaf_tip_scale", "leaf_light", "leaf_wave",
+                      "stem_irregular", "rootlet_density", "rootlet_size"):
                 setattr(a, k, getattr(style, k))
             a.stem_color = tuple(style.stem_color)
             a.leaf_color = tuple(style.leaf_color)
+            a.style_uid = style.uid
         a.radius_mult = gs.radius
         a.leaf_density *= gs.leaves
         a.snap = gs.snap

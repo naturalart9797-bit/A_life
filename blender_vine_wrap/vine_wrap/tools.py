@@ -138,7 +138,7 @@ def snap_point(sampler, p, hover):
 # Curve tool (click to place points, like Maya's CV curve tool)
 # ======================================================================
 HELP = ("クリック: 点を追加　Enter/Space/右クリック/ダブルクリック: 確定　"
-        "Backspace: 1つ戻す　Esc: 取り消し　中ボタン/ホイール: 視点操作")
+        "Backspace: 1つ戻す　Esc: 取り消し　Alt+ドラッグ・中ボタン・ホイール: 視点操作")
 
 _NAV_EVENTS = {"MIDDLEMOUSE", "WHEELUPMOUSE", "WHEELDOWNMOUSE", "WHEELINMOUSE", "WHEELOUTMOUSE",
                "TRACKPADPAN", "TRACKPADZOOM", "MOUSEROTATE", "MOUSESMARTZOOM"}
@@ -156,6 +156,8 @@ class VINEWRAP_OT_place_curve(bpy.types.Operator):
         return context.area is not None and context.area.type == "VIEW_3D"
 
     def invoke(self, context, event):
+        if event.alt or event.oskey:
+            return {"PASS_THROUGH"}  # view navigation
         target, sampler = _prepare(context, self)
         if target is None:
             return {"CANCELLED"}
@@ -224,6 +226,10 @@ class VINEWRAP_OT_place_curve(bpy.types.Operator):
         return 0 <= event.mouse_region_x < r.width and 0 <= event.mouse_region_y < r.height
 
     def modal(self, context, event):
+        # Alt (or OS-key) + mouse is view navigation (Industry Compatible keymap,
+        # "Emulate 3 Button Mouse"): always let Blender handle it.
+        if event.alt or event.oskey:
+            return {"PASS_THROUGH"}
         if (event.type in _NAV_EVENTS or event.type.startswith("NDOF")
                 or (event.type.startswith("NUMPAD_") and event.type != "NUMPAD_ENTER")):
             return {"PASS_THROUGH"}
@@ -233,7 +239,7 @@ class VINEWRAP_OT_place_curve(bpy.types.Operator):
         if event.type in {"MOUSEMOVE", "INBETWEEN_MOUSEMOVE"}:
             overlay.place["cursor"] = self._locate(m)[0]
             context.area.tag_redraw()
-            return {"RUNNING_MODAL"}
+            return {"PASS_THROUGH"}
         if event.type == "LEFTMOUSE":
             if event.value == "DOUBLE_CLICK":
                 return self._finish(context)
@@ -301,7 +307,7 @@ class VINEWRAP_OT_edit_points(bpy.types.Operator):
     bl_idname = "vine_wrap.edit_points"
     bl_label = "ガイドの点を編集"
     bl_description = ("ドラッグ: 点を移動 / 線をドラッグ: 点を追加して移動 / Ctrl: 端に点を追加 / "
-                      "Alt: 点を削除 / Shift+ドラッグ: 太さ / 別のガイドをクリック: 選択")
+                      "X・Delete: 点を削除 / Shift+ドラッグ: 太さ / 別のガイドをクリック: 選択")
     bl_options = {"REGISTER", "UNDO", "BLOCKING"}
 
     @classmethod
@@ -309,6 +315,8 @@ class VINEWRAP_OT_edit_points(bpy.types.Operator):
         return context.area is not None and context.area.type == "VIEW_3D"
 
     def invoke(self, context, event):
+        if event.alt or event.oskey:
+            return {"PASS_THROUGH"}  # view navigation
         target, sampler = _prepare(context, self)
         if target is None:
             return {"CANCELLED"}
@@ -324,11 +332,6 @@ class VINEWRAP_OT_edit_points(bpy.types.Operator):
             return {"PASS_THROUGH"}
 
         hitp = find_point(self.view, cands, m)
-        if event.alt:
-            if hitp is None:
-                return {"CANCELLED"}
-            self._delete_point(context, hitp)
-            return {"FINISHED"}
 
         if hitp is None and event.ctrl:
             obj = context.active_object if guides.is_guide_of(context.active_object, target) else None
@@ -561,8 +564,10 @@ TOOLS = [
           ()),
     _tool("vine_wrap.tool_edit", "ポイント編集", "ops.curve.pen",
           "点をドラッグで移動 / 線をドラッグで点を追加 / Ctrl+クリック: 端に点を追加\n"
-          "Alt+クリック または X: 点を削除 / Shift+ドラッグ: 太さ / 他のガイドをクリック: 選択",
-          (("vine_wrap.edit_points", {"type": "LEFTMOUSE", "value": "PRESS", "any": True}, None),
+          "X または Delete: カーソル下の点を削除 / Shift+ドラッグ: 太さ / 他のガイドをクリック: 選択\nAlt+ドラッグは視点操作のまま",
+          (("vine_wrap.edit_points", {"type": "LEFTMOUSE", "value": "PRESS"}, None),
+           ("vine_wrap.edit_points", {"type": "LEFTMOUSE", "value": "PRESS", "ctrl": True}, None),
+           ("vine_wrap.edit_points", {"type": "LEFTMOUSE", "value": "PRESS", "shift": True}, None),
            ("vine_wrap.delete_hovered_point", {"type": "X", "value": "PRESS"}, None),
            ("vine_wrap.delete_hovered_point", {"type": "DEL", "value": "PRESS"}, None),
            _HOVER),

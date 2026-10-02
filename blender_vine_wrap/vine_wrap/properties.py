@@ -49,12 +49,40 @@ class VineStyle(bpy.types.PropertyGroup):
                                  update=_changed)
     leaf_width: FloatProperty(name="葉の幅", default=0.55, min=0.05, max=2.0, update=_changed)
     leaf_tilt: FloatProperty(name="葉の起き上がり", default=0.25, min=-1.0, max=2.0, update=_changed)
-    leaf_curl: FloatProperty(name="葉の反り", default=0.2, min=-1.0, max=1.0, update=_changed)
+    leaf_curl: FloatProperty(name="葉の反り", default=0.35, min=-1.0, max=1.0, update=_changed)
 
-    stem_color: FloatVectorProperty(name="茎の色", subtype="COLOR", size=3, min=0.0, max=1.0,
-                                    default=(0.12, 0.18, 0.06), update=_changed)
+    leaf_shape: EnumProperty(
+        name="葉の形", default="IVY", update=_changed,
+        items=[("IVY", "ツタ", "切れ込みのあるツタの葉"), ("HEART", "ハート", "ポトスのようなハート形"),
+               ("OVAL", "楕円", "丸みのある楕円の葉"), ("LANCE", "細長い", "細長い披針形の葉")])
+    petiole: FloatProperty(name="葉柄の長さ", default=0.5, min=0.0, max=2.0, update=_changed,
+                           description="葉と茎をつなぐ柄の長さ（葉の大きさに対する比）")
+    leaf_tip_scale: FloatProperty(name="先端の葉の大きさ", default=0.35, min=0.05, max=2.0, update=_changed,
+                                  description="つるの先端付近の葉の大きさ（根元の葉に対する比）。若い葉ほど小さい")
+    leaf_light: FloatProperty(name="光への向き", default=0.4, min=0.0, max=1.0, subtype="FACTOR",
+                              update=_changed, description="葉の面を上（光の方向）へ向ける度合い")
+    leaf_wave: FloatProperty(name="葉のうねり", default=0.4, min=0.0, max=2.0, update=_changed)
+    stem_irregular: FloatProperty(name="太さのムラ", default=0.2, min=0.0, max=1.0, update=_changed)
+    rootlet_density: FloatProperty(name="気根(か所/m)", default=6.0, min=0.0, soft_max=60.0, update=_changed,
+                                   description="表面に吸着したつるの裏側から出る細い根（ツタの付着根）")
+    rootlet_size: FloatProperty(name="気根の長さ", default=0.012, min=0.001, soft_max=0.1, unit="LENGTH",
+                                update=_changed)
+
+    stem_young_color: FloatVectorProperty(name="若い茎の色", subtype="COLOR", size=3, min=0.0, max=1.0,
+                                          default=(0.09, 0.14, 0.035), update=_changed)
+    leaf_image: PointerProperty(name="葉のテクスチャ", type=bpy.types.Image, update=_changed,
+                                description="葉の画像（アルファ付きPNG推奨）。指定すると写真の葉を使う（UVは葉1枚ごとに0〜1）")
+    leaf_translucency: FloatProperty(name="透け感", default=0.25, min=0.0, max=1.0, subtype="FACTOR",
+                                     update=_changed, description="光が葉を透ける度合い")
+    leaf_roughness: FloatProperty(name="葉のツヤ(粗さ)", default=0.35, min=0.0, max=1.0, subtype="FACTOR",
+                                  update=_changed)
+    vein_strength: FloatProperty(name="葉脈", default=0.5, min=0.0, max=1.0, subtype="FACTOR", update=_changed)
+    bark_bump: FloatProperty(name="樹皮の凹凸", default=0.4, min=0.0, max=1.0, subtype="FACTOR", update=_changed)
+
+    stem_color: FloatVectorProperty(name="古い茎の色", subtype="COLOR", size=3, min=0.0, max=1.0,
+                                    default=(0.09, 0.06, 0.035), update=_changed)
     leaf_color: FloatVectorProperty(name="葉の色", subtype="COLOR", size=3, min=0.0, max=1.0,
-                                    default=(0.12, 0.35, 0.08), update=_changed)
+                                    default=(0.045, 0.13, 0.025), update=_changed)
     color_var: FloatProperty(name="色のばらつき", default=0.5, min=0.0, max=2.0, update=_changed)
 
 
@@ -102,7 +130,7 @@ class VineWrapSettings(bpy.types.PropertyGroup):
             ("NONE", "なし", "親子付けのみ"),
         ],
         default="ARMATURE", update=_changed)
-    ring_res: IntProperty(name="断面分割数", default=6, min=3, max=24, update=_changed)
+    ring_res: IntProperty(name="断面分割数", default=8, min=3, max=24, update=_changed)
     step_length: FloatProperty(name="セグメント長", default=0.01, min=0.001, soft_max=0.05, unit="LENGTH",
                                update=_changed)
     surface_offset: FloatProperty(name="表面からの距離", default=0.002, min=0.0, soft_max=0.05, unit="LENGTH",

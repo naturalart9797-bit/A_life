@@ -116,12 +116,12 @@ class VINEWRAP_PT_tools(_Base, bpy.types.Panel):
             box.label(text="Enter・Space・右クリック・ダブルクリック: 確定")
             box.label(text="Backspace: 1つ戻す / Esc: 取り消し")
             box.label(text="選択中ガイドの端から打つ: 延長")
-            box.label(text="打っている途中も中ボタンで視点操作できます")
+            box.label(text="途中でも Alt+ドラッグ / 中ボタンで視点操作")
         elif active == "vine_wrap.tool_edit":
             box.label(text="点をドラッグ: 移動")
             box.label(text="線をドラッグ: 点を追加して移動")
             box.label(text="Ctrl+クリック: 端に点を追加")
-            box.label(text="Alt+クリック / X: 点を削除")
+            box.label(text="X / Delete: カーソル下の点を削除")
             box.label(text="Shift+上下ドラッグ: 太さ")
             box.label(text="他のガイドをクリック: 選択 / 何もない所: 解除")
             box.prop(P, "soft_range")
@@ -219,9 +219,10 @@ class VINEWRAP_PT_style_stem(_Base, bpy.types.Panel):
 
     def draw(self, context):
         st = guides.active_style(context.scene.vine_wrap)
-        _cols(self.layout, st, ("radius", "taper"),
+        _cols(self.layout, st, ("radius", "taper", "stem_irregular"),
               ("strands", "strand_spread", "strand_twist", "strand_radius"),
-              ("noise_amp", "noise_freq"), ("tendril_density", "tendril_size"))
+              ("noise_amp", "noise_freq"), ("tendril_density", "tendril_size"),
+              ("rootlet_density", "rootlet_size"))
 
 
 class VINEWRAP_PT_style_leaves(_Base, bpy.types.Panel):
@@ -239,12 +240,17 @@ class VINEWRAP_PT_style_leaves(_Base, bpy.types.Panel):
         st = guides.active_style(context.scene.vine_wrap)
         col = self.layout.column(align=True)
         col.active = st.use_leaves
-        for name in ("leaf_density", "leaf_size", "leaf_size_var", "leaf_width", "leaf_tilt", "leaf_curl"):
+        col.prop(st, "leaf_shape")
+        for name in ("leaf_density", "leaf_size", "leaf_size_var", "leaf_tip_scale", "leaf_width", "petiole"):
+            col.prop(st, name)
+        col = self.layout.column(align=True)
+        col.active = st.use_leaves
+        for name in ("leaf_tilt", "leaf_light", "leaf_curl", "leaf_wave"):
             col.prop(st, name)
 
 
 class VINEWRAP_PT_style_color(_Base, bpy.types.Panel):
-    bl_label = "色"
+    bl_label = "色・質感"
     bl_parent_id = "VINEWRAP_PT_styles"
     bl_options = {"DEFAULT_CLOSED"}
 
@@ -254,7 +260,12 @@ class VINEWRAP_PT_style_color(_Base, bpy.types.Panel):
 
     def draw(self, context):
         st = guides.active_style(context.scene.vine_wrap)
-        _cols(self.layout, st, ("stem_color", "leaf_color", "color_var"), ("color",))
+        layout = self.layout
+        _cols(layout, st, ("stem_young_color", "stem_color", "bark_bump"),
+              ("leaf_color", "color_var", "vein_strength", "leaf_translucency", "leaf_roughness"))
+        layout.label(text="葉のテクスチャ（任意・アルファ付きPNG）:")
+        layout.template_ID(st, "leaf_image", open="image.open")
+        layout.prop(st, "color", text="ガイドの表示色")
 
 
 class VINEWRAP_PT_generate(_Base, bpy.types.Panel):
