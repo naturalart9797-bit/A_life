@@ -1,13 +1,11 @@
-"""Object-mode tools: draw guides, edit guide points, paint the generation density."""
+"""Object-mode tools: place guide curves point by point, and edit their points."""
 
 import math
 
 import bpy
-from bpy.props import BoolProperty, IntProperty
 from bpy_extras import view3d_utils
 from mathutils import Vector
 from mathutils.geometry import interpolate_bezier
-from mathutils.kdtree import KDTree
 
 from . import binding, guides, overlay, pipeline
 from .sampler import BodySampler
@@ -137,13 +135,21 @@ def snap_point(sampler, p, hover):
 
 
 # ======================================================================
-# Draw
+# Curve tool (click to place points, like Maya's CV curve tool)
 # ======================================================================
-class VINEWRAP_OT_draw_guide(bpy.types.Operator):
-    bl_idname = "vine_wrap.draw_guide"
-    bl_label = "ガイドを描く"
-    bl_description = "ドラッグして新しいガイドカーブを描く（Shift: 選択中のガイドを延長）"
-    bl_options = {"REGISTER", "UNDO", "BLOCKING"}
+HELP = ("クリック: 点を追加　Enter/Space/右クリック/ダブルクリック: 確定　"
+        "Backspace: 1つ戻す　Esc: 取り消し　中ボタン/ホイール: 視点操作")
+
+_NAV_EVENTS = {"MIDDLEMOUSE", "WHEELUPMOUSE", "WHEELDOWNMOUSE", "WHEELINMOUSE", "WHEELOUTMOUSE",
+               "TRACKPADPAN", "TRACKPADZOOM", "MOUSEROTATE", "MOUSESMARTZOOM"}
+
+
+class VINEWRAP_OT_place_curve(bpy.types.Operator):
+    bl_idname = "vine_wrap.place_curve"
+    bl_label = "カーブを作成"
+    bl_description = ("クリックで点を打ってガイドカーブを作る。対象の上をクリックすると表面に吸着、"
+                      "外をクリックすると空間に置く。選択中のガイドの端から始めると延長")
+    bl_options = {"REGISTER", "UNDO"}
 
     @classmethod
     def poll(cls, context):
@@ -158,82 +164,130 @@ class VINEWRAP_OT_draw_guide(bpy.types.Operator):
         self.scale = pipeline.target_scale(target, P)
         self.hover = P.guide_hover * self.scale
         self.view = View(context)
-        m = Vector((event.mouse_region_x, event.mouse_region_y))
+        self.region = context.region
+        self.points, self.on_surface = [], []
         self.extend = None
-        if event.shift:
-            act = context.active_object
-            if guides.is_guide_of(act, target):
-                self.extend = act
-        o, v = self.view.ray(m)
-        hit = sampler.ray_cast(o, v)
-        if hit is not None:
-            self.snap = True
-            first = hit.loc + hit.normal * self.hover
-        else:
-            self.snap = False
-            first = self.view.on_plane(m, context.scene.cursor.location)
-        if self.extend is not None:
-            self.snap = self.extend.vine_guide.snap
-        self.anchor = first.copy()
-        self.points = [first]
-        self.last = m
-        pipeline.hold(True)
-        overlay.stroke["active"] = True
-        overlay.stroke["points"] = self.points
+        m = Vector((event.mouse_region_x, event.mouse_region_y))
+
+        # Starting on an end point of the selected guide continues that guide.
+        act = context.active_object
+        if guides.is_guide_of(act, target) and act.select_get() and act.data.splines:
+            cps = guides.control_points(act)[0][0]
+            for end, p in (("END", cps[-1]), ("START", cps[0])):
+                co = self.view.proj(p)
+                if co is not None and (co - m).length <= PICK_PX:
+                    self.extend = (act, end)
+                    self.base = cps if end == "END" else list(reversed(cps))
+                    break
+        if self.extend is None:
+            self._add(m)
+        overlay.place.update(active=True, points=self._preview_base(), cursor=None)
+        self._status(context)
         context.window_manager.modal_handler_add(self)
         return {"RUNNING_MODAL"}
 
+    # ------------------------------------------------------------------
+    def _locate(self, m):
+        o, v = self.view.ray(m)
+        hit = self.sampler.ray_cast(o, v)
+        if hit is not None:
+            return hit.loc + hit.normal * self.hover, True
+        if self.points:
+            ref = self.points[-1]
+        elif self.extend is not None:
+            ref = self.base[-1]
+        else:
+            ref = bpy.context.scene.cursor.location
+        return self.view.on_plane(m, ref), False
+
+    def _add(self, m):
+        p, surf = self._locate(m)
+        if self.points and (p - self.points[-1]).length < 1e-6:
+            return
+        self.points.append(p)
+        self.on_surface.append(surf)
+
+    def _preview_base(self):
+        return (self.base if self.extend else []) + self.points
+
+    def _status(self, context):
+        n = len(self.points)
+        text = "%s　［%d点%s］" % (HELP, n, "・延長中" if self.extend else "")
+        context.area.header_text_set(text)
+        try:
+            context.workspace.status_text_set(text)
+        except Exception:  # noqa: BLE001
+            pass
+
+    def _inside(self, event):
+        r = self.region
+        return 0 <= event.mouse_region_x < r.width and 0 <= event.mouse_region_y < r.height
+
     def modal(self, context, event):
+        if (event.type in _NAV_EVENTS or event.type.startswith("NDOF")
+                or (event.type.startswith("NUMPAD_") and event.type != "NUMPAD_ENTER")):
+            return {"PASS_THROUGH"}
+        if not self._inside(event) and event.type not in {"RET", "NUMPAD_ENTER", "ESC", "BACK_SPACE", "SPACE"}:
+            return {"PASS_THROUGH"}
+        m = Vector((event.mouse_region_x, event.mouse_region_y))
         if event.type in {"MOUSEMOVE", "INBETWEEN_MOUSEMOVE"}:
-            m = Vector((event.mouse_region_x, event.mouse_region_y))
-            if (m - self.last).length < 5.0:
-                return {"RUNNING_MODAL"}
-            p = None
-            if self.snap:
-                o, v = self.view.ray(m)
-                hit = self.sampler.ray_cast(o, v)
-                if hit is not None:
-                    p = hit.loc + hit.normal * self.hover
-            else:
-                p = self.view.on_plane(m, self.anchor)
-            if p is not None:
-                self.points.append(p)
-                self.last = m
+            overlay.place["cursor"] = self._locate(m)[0]
+            context.area.tag_redraw()
+            return {"RUNNING_MODAL"}
+        if event.type == "LEFTMOUSE":
+            if event.value == "DOUBLE_CLICK":
+                return self._finish(context)
+            if event.value == "PRESS":
+                self._add(m)
+                overlay.place["points"] = self._preview_base()
+                self._status(context)
                 context.area.tag_redraw()
             return {"RUNNING_MODAL"}
-        if event.type == "LEFTMOUSE" and event.value == "RELEASE":
+        if event.value != "PRESS":
+            return {"RUNNING_MODAL"} if event.type in {"RIGHTMOUSE", "RET", "NUMPAD_ENTER", "SPACE",
+                                                        "BACK_SPACE", "ESC"} else {"PASS_THROUGH"}
+        if event.type in {"RET", "NUMPAD_ENTER", "SPACE", "RIGHTMOUSE"}:
             return self._finish(context)
-        if event.type in {"RIGHTMOUSE", "ESC"}:
+        if event.type == "BACK_SPACE":
+            if self.points:
+                self.points.pop()
+                self.on_surface.pop()
+            overlay.place["points"] = self._preview_base()
+            self._status(context)
+            context.area.tag_redraw()
+            return {"RUNNING_MODAL"}
+        if event.type == "ESC":
             self._end(context)
             return {"CANCELLED"}
-        return {"RUNNING_MODAL"}
+        return {"PASS_THROUGH"}
 
     def _end(self, context):
-        overlay.stroke["active"] = False
-        pipeline.hold(False)
+        overlay.place.update(active=False, points=[], cursor=None)
+        context.area.header_text_set(None)
+        try:
+            context.workspace.status_text_set(None)
+        except Exception:  # noqa: BLE001
+            pass
         context.area.tag_redraw()
 
     def _finish(self, context):
         self._end(context)
-        if len(self.points) < 2:
-            return {"CANCELLED"}
-        spacing = self.P.point_spacing * self.scale
-        pts, rad = guides.resample(self.points, [1.0] * len(self.points), spacing)
-        if len(pts) < 2:
-            return {"CANCELLED"}
-        if self.snap:
-            pts = [snap_point(self.sampler, p, self.hover) for p in pts]
         if self.extend is not None:
-            obj = self.extend
-            cps, crs, _c = guides.control_points(obj)[0]
-            # Attach the stroke to the nearer end of the guide.
-            if (pts[0] - cps[-1]).length <= (pts[0] - cps[0]).length:
-                new_p, new_r = cps + pts[1:], crs + [crs[-1]] * (len(pts) - 1)
-            else:
-                new_p, new_r = list(reversed(pts[1:])) + cps, [crs[0]] * (len(pts) - 1) + crs
-            guides.set_spline(obj, 0, new_p, new_r)
+            obj, end = self.extend
+            if not self.points:
+                return {"CANCELLED"}
+            rad = guides.control_points(obj)[0][1]
+            pts = self.base + self.points
+            rads = (rad if end == "END" else list(reversed(rad))) + [rad[-1] if end == "END" else rad[0]] * len(self.points)
+            if end == "START":
+                pts, rads = list(reversed(pts)), list(reversed(rads))
+            guides.set_spline(obj, 0, pts, rads)
         else:
-            obj = guides.new_guide(context, self.target, pts, rad, snap=self.snap,
+            if len(self.points) < 2:
+                self.report({"INFO"}, "点が2つ以上必要です")
+                return {"CANCELLED"}
+            snap = all(self.on_surface)
+            obj = guides.new_guide(context, self.target, self.points, [1.0] * len(self.points), snap=snap,
                                    name=guides.unique_name("Vine"))
         make_active(context, obj)
         pipeline.schedule(self.target)
@@ -460,119 +514,6 @@ class VINEWRAP_OT_delete_hovered_point(bpy.types.Operator):
 
 
 # ======================================================================
-# Density paint
-# ======================================================================
-class VINEWRAP_OT_paint(bpy.types.Operator):
-    bl_idname = "vine_wrap.paint"
-    bl_label = "密度をペイント"
-    bl_description = "つるを生やしたい場所を塗る（Ctrl: 消す / Shift: ぼかす）"
-    bl_options = {"REGISTER", "UNDO", "BLOCKING"}
-
-    @classmethod
-    def poll(cls, context):
-        return context.area is not None and context.area.type == "VIEW_3D"
-
-    def invoke(self, context, event):
-        target, sampler = _prepare(context, self)
-        if target is None:
-            return {"CANCELLED"}
-        P = context.scene.vine_wrap
-        self.P, self.target, self.sampler = P, target, sampler
-        self.view = View(context)
-        vg = target.vertex_groups.get(P.paint_group)
-        if vg is None:
-            vg = target.vertex_groups.new(name=P.paint_group or "VineDensity")
-            P.paint_group = vg.name
-        self.vg = vg
-        n = len(target.data.vertices)
-        if n != len(sampler.co):
-            self.report({"ERROR"}, "頂点数が変わるモディファイアがあるためペイントできません")
-            return {"CANCELLED"}
-        w = [0.0] * n
-        gi = vg.index
-        for v in target.data.vertices:
-            for g in v.groups:
-                if g.group == gi:
-                    w[v.index] = g.weight
-                    break
-        self.w = w
-        kd = KDTree(n)
-        for i, c in enumerate(sampler.co):
-            kd.insert(c, i)
-        kd.balance()
-        self.kd = kd
-        self.mode = "ERASE" if event.ctrl else ("SMOOTH" if event.shift else "ADD")
-        self.last = None
-        overlay.brush.update(active=True, x=event.mouse_region_x, y=event.mouse_region_y, r=P.brush_radius,
-                             mode=self.mode)
-        self._dab(Vector((event.mouse_region_x, event.mouse_region_y)))
-        context.window_manager.modal_handler_add(self)
-        return {"RUNNING_MODAL"}
-
-    def _dab(self, m):
-        if self.last is not None and (m - self.last).length < self.P.brush_radius * 0.2:
-            return
-        self.last = m
-        o, v = self.view.ray(m)
-        hit = self.sampler.ray_cast(o, v)
-        if hit is None:
-            return
-        edge = self.view.on_plane(m + Vector((self.P.brush_radius, 0.0)), hit.loc)
-        R = (edge - hit.loc).length
-        if R <= 0.0:
-            return
-        found = self.kd.find_range(hit.loc, R)
-        vn = self.sampler.vnormals
-        st = self.P.brush_strength
-        changed = {}
-        if self.mode == "SMOOTH" and found:
-            avg = sum(self.w[i] for _c, i, _d in found) / len(found)
-        for _co, i, d in found:
-            if vn[i].dot(v) > 0.3:  # facing away from the view: back side
-                continue
-            x = d / R
-            f = (1.0 - x * x) ** 2 * st
-            old = self.w[i]
-            if self.mode == "ERASE":
-                new = max(0.0, old - f)
-            elif self.mode == "SMOOTH":
-                new = old + (avg - old) * min(1.0, f * 2.0)
-            else:
-                new = min(1.0, old + f)
-            if abs(new - old) > 1e-4:
-                self.w[i] = new
-                changed[i] = new
-        if not changed:
-            return
-        by_w = {}
-        zero = []
-        for i, wv in changed.items():
-            if wv <= 1e-4:
-                zero.append(i)
-            else:
-                by_w.setdefault(round(wv, 3), []).append(i)
-        for wv, idx in by_w.items():
-            self.vg.add(idx, wv, "REPLACE")
-        if zero:
-            self.vg.remove(zero)
-        overlay.paint_changed()
-
-    def modal(self, context, event):
-        if event.type in {"MOUSEMOVE", "INBETWEEN_MOUSEMOVE"}:
-            m = Vector((event.mouse_region_x, event.mouse_region_y))
-            overlay.brush.update(x=m.x, y=m.y)
-            self._dab(m)
-            context.area.tag_redraw()
-            return {"RUNNING_MODAL"}
-        if event.type == "LEFTMOUSE" and event.value == "RELEASE":
-            overlay.brush["active"] = False
-            self.target.data.update()
-            context.area.tag_redraw()
-            return {"FINISHED"}
-        return {"RUNNING_MODAL"}
-
-
-# ======================================================================
 # Small helpers bound to tool keymaps
 # ======================================================================
 class VINEWRAP_OT_hover(bpy.types.Operator):
@@ -581,28 +522,10 @@ class VINEWRAP_OT_hover(bpy.types.Operator):
     bl_options = {"INTERNAL"}
 
     def invoke(self, context, event):
-        overlay.brush.update(hover=True, x=event.mouse_region_x, y=event.mouse_region_y,
-                             r=context.scene.vine_wrap.brush_radius)
         overlay.hover.update(x=event.mouse_region_x, y=event.mouse_region_y)
         if context.area:
             context.area.tag_redraw()
         return {"PASS_THROUGH"}
-
-
-class VINEWRAP_OT_brush_radius(bpy.types.Operator):
-    bl_idname = "vine_wrap.brush_radius"
-    bl_label = "ブラシ半径"
-    bl_options = {"INTERNAL"}
-
-    delta: IntProperty(default=10)
-
-    def execute(self, context):
-        P = context.scene.vine_wrap
-        P.brush_radius = max(5, min(500, P.brush_radius + self.delta))
-        overlay.brush["r"] = P.brush_radius
-        if context.area:
-            context.area.tag_redraw()
-        return {"FINISHED"}
 
 
 # ======================================================================
@@ -630,11 +553,12 @@ def _tool(idname, label, icon, desc, keymap, props):
 
 
 TOOLS = [
-    _tool("vine_wrap.tool_draw", "ガイド描画", "ops.curve.draw",
-          "ドラッグでガイドカーブを描く。対象の上から描くと表面に吸着、外から描くと空間に描く\n"
-          "Shift+ドラッグ: 選択中のガイドを延長",
-          (("vine_wrap.draw_guide", {"type": "LEFTMOUSE", "value": "PRESS", "any": True}, None), _HOVER),
-          ("point_spacing",)),
+    _tool("vine_wrap.tool_curve", "カーブ作成", "ops.curve.draw",
+          "クリックで点を打ってガイドカーブを作る（Mayaのカーブツールのように）\n"
+          "対象の上: 表面に吸着 / 外: 空間に置く / 選択中ガイドの端から: 延長\n"
+          "Enter・Space・右クリック・ダブルクリック: 確定 / Backspace: 1つ戻す / Esc: 取り消し",
+          (("vine_wrap.place_curve", {"type": "LEFTMOUSE", "value": "PRESS"}, None), _HOVER),
+          ()),
     _tool("vine_wrap.tool_edit", "ポイント編集", "ops.curve.pen",
           "点をドラッグで移動 / 線をドラッグで点を追加 / Ctrl+クリック: 端に点を追加\n"
           "Alt+クリック または X: 点を削除 / Shift+ドラッグ: 太さ / 他のガイドをクリック: 選択",
@@ -643,15 +567,6 @@ TOOLS = [
            ("vine_wrap.delete_hovered_point", {"type": "DEL", "value": "PRESS"}, None),
            _HOVER),
           ("soft_range",)),
-    _tool("vine_wrap.tool_paint", "密度ペイント", "brush.paint_weight.draw",
-          "つるを自動生成したい場所を塗る（Ctrl: 消す / Shift: ぼかす / [ ]: 半径）",
-          (("vine_wrap.paint", {"type": "LEFTMOUSE", "value": "PRESS", "any": True}, None),
-           ("vine_wrap.brush_radius", {"type": "LEFT_BRACKET", "value": "PRESS", "repeat": True},
-            {"properties": [("delta", -10)]}),
-           ("vine_wrap.brush_radius", {"type": "RIGHT_BRACKET", "value": "PRESS", "repeat": True},
-            {"properties": [("delta", 10)]}),
-           _HOVER),
-          ("brush_radius", "brush_strength")),
 ]
 
 
@@ -675,10 +590,8 @@ def unregister_tools():
 
 
 classes = (
-    VINEWRAP_OT_draw_guide,
+    VINEWRAP_OT_place_curve,
     VINEWRAP_OT_edit_points,
     VINEWRAP_OT_delete_hovered_point,
-    VINEWRAP_OT_paint,
     VINEWRAP_OT_hover,
-    VINEWRAP_OT_brush_radius,
 )

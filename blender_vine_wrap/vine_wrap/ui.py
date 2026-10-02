@@ -110,11 +110,13 @@ class VINEWRAP_PT_tools(_Base, bpy.types.Panel):
             "builtin.select_box"
 
         box = layout.box()
-        if active == "vine_wrap.tool_draw":
-            box.label(text="ドラッグ: 新しいガイドを描く")
-            box.label(text="対象の上から: 表面に吸着 / 外から: 空間に描く")
-            box.label(text="Shift+ドラッグ: 選択中のガイドを延長")
-            box.prop(P, "point_spacing")
+        if active == "vine_wrap.tool_curve":
+            box.label(text="クリック: 点を追加")
+            box.label(text="対象の上: 表面に吸着 / 外: 空間に置く")
+            box.label(text="Enter・Space・右クリック・ダブルクリック: 確定")
+            box.label(text="Backspace: 1つ戻す / Esc: 取り消し")
+            box.label(text="選択中ガイドの端から打つ: 延長")
+            box.label(text="打っている途中も中ボタンで視点操作できます")
         elif active == "vine_wrap.tool_edit":
             box.label(text="点をドラッグ: 移動")
             box.label(text="線をドラッグ: 点を追加して移動")
@@ -123,16 +125,9 @@ class VINEWRAP_PT_tools(_Base, bpy.types.Panel):
             box.label(text="Shift+上下ドラッグ: 太さ")
             box.label(text="他のガイドをクリック: 選択 / 何もない所: 解除")
             box.prop(P, "soft_range")
-        elif active == "vine_wrap.tool_paint":
-            box.label(text="ドラッグ: 生やしたい所を塗る")
-            box.label(text="Ctrl: 消す / Shift: ぼかす / [ ]: 半径")
-            box.prop(P, "brush_radius")
-            box.prop(P, "brush_strength")
         else:
             box.label(text="上のボタンでツールを選択", icon="INFO")
-        row = layout.row(align=True)
-        row.prop(P, "show_points", toggle=True)
-        row.prop(P, "show_paint_always", toggle=True)
+        layout.prop(P, "show_points")
 
 
 class VINEWRAP_PT_guides(_Base, bpy.types.Panel):
@@ -263,7 +258,8 @@ class VINEWRAP_PT_style_color(_Base, bpy.types.Panel):
 
 
 class VINEWRAP_PT_generate(_Base, bpy.types.Panel):
-    bl_label = "ペイントから自動生成"
+    bl_label = "自動生成"
+    bl_options = {"DEFAULT_CLOSED"}
 
     @classmethod
     def poll(cls, context):
@@ -272,15 +268,7 @@ class VINEWRAP_PT_generate(_Base, bpy.types.Panel):
     def draw(self, context):
         P = context.scene.vine_wrap
         layout = self.layout
-        target = P.target
-        row = layout.row(align=True)
-        row.prop_search(P, "paint_group", target, "vertex_groups", text="ペイント")
-        row = layout.row(align=True)
-        op = row.operator("wm.tool_set_by_id", text="ペイントする", icon="BRUSH_DATA")
-        op.name = "vine_wrap.tool_paint"
-        row.operator("vine_wrap.clear_paint", text="全体", icon="SELECT_SET").fill = True
-        row.operator("vine_wrap.clear_paint", text="消去", icon="X").fill = False
-
+        layout.prop_search(P, "gen_group", P.target, "vertex_groups")
         _cols(layout, P, ("gen_density", "gen_max", "gen_threshold"),
               ("gen_length", "gen_length_var", "gen_spacing"),
               ("gen_axis", "gen_wrap", "gen_climb", "gen_spiral_bias"))

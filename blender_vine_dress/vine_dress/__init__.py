@@ -1,7 +1,7 @@
 bl_info = {
     "name": "Vine Dress (つる植物ドレス)",
     "author": "A_life",
-    "version": (2, 0, 0),
+    "version": (2, 0, 1),
     "blender": (3, 6, 0),
     "location": "3Dビューポート > サイドバー(N) > Vine Dress / ノードエディタ > Vine Groom",
     "description": "人物にガイドカーブをグルーミングし、ノードグラフでつる植物の服と水中スカートを生成する",

@@ -1,4 +1,4 @@
-"""Building the vine mesh from guides, auto generation from paint, and auto update."""
+"""Building the vine mesh from guides, auto generation, and auto update."""
 
 import random
 import time
@@ -130,7 +130,7 @@ def format_stats(stats, seconds):
 
 
 # ======================================================================
-# Auto generation from paint
+# Auto generation
 # ======================================================================
 def generate(report, context, target):
     P = context.scene.vine_wrap
@@ -139,12 +139,10 @@ def generate(report, context, target):
         for o in guides.guide_objects(target):
             if o.vine_guide.auto:
                 remove_guide(o)
-    has_paint = P.paint_group in target.vertex_groups
-    if not has_paint:
-        report({"WARNING"}, "ペイント（頂点グループ「%s」）が無いので全体に生成します" % P.paint_group)
+    has_group = bool(P.gen_group) and P.gen_group in target.vertex_groups
 
     with binding.rest_pose(context, target, P.rest_pose):
-        sampler = BodySampler(context, target, P.paint_group if has_paint else "")
+        sampler = BodySampler(context, target, P.gen_group if has_group else "")
         scale = target_scale(target, P)
         rng = random.Random(P.seed)
         avoid = []

@@ -99,8 +99,8 @@ class VINEWRAP_OT_toggle_rest(bpy.types.Operator):
 # ======================================================================
 class VINEWRAP_OT_generate(bpy.types.Operator):
     bl_idname = "vine_wrap.generate"
-    bl_label = "ペイント範囲に生成"
-    bl_description = "塗った範囲に、密度に応じてガイドカーブを自動生成する（生成後は自由に編集できる）"
+    bl_label = "ガイドを自動生成"
+    bl_description = "対象（または範囲の頂点グループ）に、密度に応じてガイドカーブを自動生成する。生成後は自由に編集できる"
     bl_options = {"REGISTER", "UNDO"}
 
     def execute(self, context):
@@ -116,7 +116,7 @@ class VINEWRAP_OT_generate(bpy.types.Operator):
             self.report({"ERROR"}, "自動生成に失敗しました: %s" % exc)
             return {"CANCELLED"}
         if n == 0:
-            self.report({"WARNING"}, "ガイドが生成されませんでした（ペイント・密度・しきい値を確認）")
+            self.report({"WARNING"}, "ガイドが生成されませんでした（範囲・密度・しきい値を確認）")
         else:
             self.report({"INFO"}, "ガイド %d 本を生成しました (%.1f秒)" % (n, time.time() - t0))
         pipeline.schedule(target)
@@ -136,29 +136,6 @@ class VINEWRAP_OT_clear_auto(bpy.types.Operator):
             if o.vine_guide.auto:
                 pipeline.remove_guide(o)
         pipeline.schedule(target)
-        return {"FINISHED"}
-
-
-class VINEWRAP_OT_clear_paint(bpy.types.Operator):
-    bl_idname = "vine_wrap.clear_paint"
-    bl_label = "ペイントを消去"
-    bl_options = {"REGISTER", "UNDO"}
-
-    fill: BoolProperty(name="全体を塗る", default=False, options={"SKIP_SAVE"})
-
-    def execute(self, context):
-        target = _target(self, context)
-        if target is None:
-            return {"CANCELLED"}
-        P = context.scene.vine_wrap
-        vg = target.vertex_groups.get(P.paint_group) or target.vertex_groups.new(name=P.paint_group)
-        idx = list(range(len(target.data.vertices)))
-        if self.fill:
-            vg.add(idx, 1.0, "REPLACE")
-        else:
-            vg.remove(idx)
-        from . import overlay
-        overlay.paint_changed()
         return {"FINISHED"}
 
 
@@ -435,7 +412,6 @@ classes = (
     VINEWRAP_OT_toggle_rest,
     VINEWRAP_OT_generate,
     VINEWRAP_OT_clear_auto,
-    VINEWRAP_OT_clear_paint,
     VINEWRAP_OT_guide_select,
     VINEWRAP_OT_guide_delete,
     VINEWRAP_OT_guide_duplicate,

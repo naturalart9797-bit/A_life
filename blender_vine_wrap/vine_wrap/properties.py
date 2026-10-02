@@ -118,24 +118,18 @@ class VineWrapSettings(bpy.types.PropertyGroup):
 
     # --- tools --------------------------------------------------------
     point_spacing: FloatProperty(name="点の間隔", default=0.03, min=0.002, soft_max=0.3, unit="LENGTH",
-                                 description="描いたガイドの制御点の間隔")
+                                 description="「点を均等」で打ち直すときの制御点の間隔")
     soft_range: IntProperty(name="なめらか移動(点数)", default=2, min=0, max=30,
                             description="点を動かしたとき、前後の何点まで一緒に動かすか")
     guide_hover: FloatProperty(name="ガイドの浮き", default=0.008, min=0.0, soft_max=0.05, unit="LENGTH",
                                description="吸着ガイドを表面からどれだけ浮かせて表示するか")
     show_points: BoolProperty(name="制御点を表示", default=True)
-    brush_radius: IntProperty(name="半径(px)", default=60, min=5, max=500, subtype="PIXEL")
-    brush_strength: FloatProperty(name="強さ", default=0.5, min=0.0, max=1.0, subtype="FACTOR")
-    show_paint: BoolProperty(name="ペイントを表示", default=True,
-                             description="密度ペイントツールの使用中に、塗った範囲を表示する")
-    show_paint_always: BoolProperty(name="常にペイントを表示", default=False,
-                                    description="ツールに関係なく、塗った範囲を常に表示する")
 
-    # --- auto generation from paint -----------------------------------
-    paint_group: StringProperty(name="ペイント", default="VineDensity",
-                                description="生成範囲・密度を表す頂点グループ（ペイントツールで描く）")
+    # --- auto generation ---------------------------------------------
+    gen_group: StringProperty(name="範囲", default="",
+                              description="生成範囲を限定する頂点グループ（任意。ウェイトが密度になる）。空なら対象全体")
     gen_density: FloatProperty(name="密度(本/㎡)", default=60.0, min=0.0, soft_max=1000.0,
-                               description="ウェイト1の面積1㎡あたりに生えるつるの本数")
+                               description="面積1㎡あたりに生えるつるの本数")
     gen_max: IntProperty(name="最大本数", default=200, min=1, max=5000)
     gen_length: FloatProperty(name="長さ", default=0.5, min=0.01, soft_max=5.0, unit="LENGTH")
     gen_length_var: FloatProperty(name="長さのばらつき", default=0.5, min=0.0, max=1.0, subtype="FACTOR")

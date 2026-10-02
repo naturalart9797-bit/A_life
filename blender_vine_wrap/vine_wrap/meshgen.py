@@ -219,7 +219,10 @@ def build_mesh(b, name, to_local):
     flat = [c for uvs in b.face_uvs for uv in uvs for c in uv]
     uv_layer.data.foreach_set("uv", flat)
     me.polygons.foreach_set("material_index", b.face_mat)
-    me.polygons.foreach_set("use_smooth", [True] * len(b.faces))
+    try:
+        me.polygons.foreach_set("use_smooth", [True] * len(b.faces))
+    except (AttributeError, TypeError, RuntimeError):
+        me.shade_smooth()  # newer Blender versions
 
     attr = me.color_attributes.new(name="vine_color", type="FLOAT_COLOR", domain="POINT")
     attr.data.foreach_set("color", [c for col in b.vcolor for c in col])

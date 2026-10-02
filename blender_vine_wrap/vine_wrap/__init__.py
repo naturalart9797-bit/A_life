@@ -1,10 +1,10 @@
 bl_info = {
     "name": "Vine Wrap (つる植物を絡ませる)",
     "author": "A_life",
-    "version": (1, 0, 0),
+    "version": (1, 1, 0),
     "blender": (3, 6, 0),
     "location": "3Dビューポート > サイドバー(N) > Vine Wrap / ツールバー",
-    "description": "ガイドカーブを描く・編集する・ペイントから自動生成して、オブジェクトにつる植物を絡ませる",
+    "description": "クリックでガイドカーブを作る・編集する・自動生成して、オブジェクトにつる植物を絡ませる",
     "category": "Add Mesh",
 }
 

@@ -109,8 +109,13 @@ def _material(name, color, roughness, sss=0.0):
     if mat is not None:
         return mat
     mat = bpy.data.materials.new(name)
-    mat.use_nodes = True
+    try:
+        mat.use_nodes = True  # deprecated/no-op in Blender 5
+    except (AttributeError, TypeError):
+        pass
     nt = mat.node_tree
+    if nt is None:
+        return mat
     bsdf = next((n for n in nt.nodes if n.type == "BSDF_PRINCIPLED"), None)
     if bsdf is None:
         return mat

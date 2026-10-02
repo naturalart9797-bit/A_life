@@ -1,6 +1,4 @@
-"""Viewport overlay: guide control points, paint weights, brush circle, stroke preview."""
-
-import math
+"""Viewport overlay: guide control points and the curve being placed."""
 
 import bpy
 import gpu
@@ -9,17 +7,11 @@ from mathutils import Vector
 
 from . import guides
 
-brush = {"active": False, "hover": False, "x": 0, "y": 0, "r": 60, "mode": "ADD"}
 hover = {"x": -1000, "y": -1000}
-stroke = {"active": False, "points": []}
+place = {"active": False, "points": [], "cursor": None}
 edit_state = {"active": False, "obj": "", "si": 0, "pi": 0}
 
-_paint_cache = {"key": None, "batch": None, "version": 0}
 _handles = []
-
-
-def paint_changed():
-    _paint_cache["version"] += 1
 
 
 def _shader(name):
@@ -42,55 +34,10 @@ def _posed(target):
 
 
 # ----------------------------------------------------------------------
-def _draw_paint(context, P, target):
-    vg = target.vertex_groups.get(P.paint_group)
-    if vg is None:
-        return
-    me = target.data
-    key = (target.name, vg.name, len(me.vertices), _paint_cache["version"], target.matrix_world.copy().freeze())
-    if _paint_cache["key"] != key:
-        gi = vg.index
-        w = [0.0] * len(me.vertices)
-        for v in me.vertices:
-            for g in v.groups:
-                if g.group == gi:
-                    w[v.index] = g.weight
-                    break
-        mw = target.matrix_world
-        nm = mw.to_3x3().inverted().transposed()
-        off = max(target.dimensions) * 0.002
-        co = [mw @ v.co + (nm @ v.normal).normalized() * off for v in me.vertices]
-        if len(me.loop_triangles) == 0:
-            me.calc_loop_triangles()
-        pos, col = [], []
-        for t in me.loop_triangles:
-            a, b, c = t.vertices
-            if w[a] <= 0.0 and w[b] <= 0.0 and w[c] <= 0.0:
-                continue
-            for i in (a, b, c):
-                pos.append(co[i])
-                x = w[i]
-                col.append((0.15 + 0.85 * x, 0.9, 0.25 * (1.0 - x), 0.15 + 0.45 * x))
-        shader = _shader("SMOOTH_COLOR")
-        _paint_cache["batch"] = (shader, batch_for_shader(shader, "TRIS", {"pos": pos, "color": col})) if pos else None
-        _paint_cache["key"] = key
-    if _paint_cache["batch"] is None:
-        return
-    shader, batch = _paint_cache["batch"]
-    gpu.state.blend_set("ALPHA")
-    gpu.state.depth_test_set("LESS_EQUAL")
-    gpu.state.depth_mask_set(False)
-    shader.bind()
-    batch.draw(shader)
-    gpu.state.depth_mask_set(True)
-    gpu.state.depth_test_set("NONE")
-    gpu.state.blend_set("NONE")
-
-
 def _draw_points(context, P, target, tool):
     sel = [o for o in guides.guide_objects(target)
            if o.name in context.view_layer.objects and o.visible_get() and o.select_get()]
-    editing = tool == "vine_wrap.tool_edit"
+    editing = tool in {"vine_wrap.tool_edit", "vine_wrap.tool_curve"}
     if not sel and not editing:
         return
     objs = sel
@@ -136,6 +83,61 @@ def _draw_points(context, P, target, tool):
     gpu.state.blend_set("NONE")
 
 
+def _catmull_rom(pts, seg=10):
+    n = len(pts)
+    if n < 3:
+        return list(pts)
+    out = []
+    for i in range(n - 1):
+        p0 = pts[max(i - 1, 0)]
+        p1, p2 = pts[i], pts[i + 1]
+        p3 = pts[min(i + 2, n - 1)]
+        for k in range(seg):
+            t = k / seg
+            t2, t3 = t * t, t * t * t
+            out.append(0.5 * ((2.0 * p1) + (-p0 + p2) * t + (2.0 * p0 - 5.0 * p1 + 4.0 * p2 - p3) * t2
+                              + (-p0 + 3.0 * p1 - 3.0 * p2 + p3) * t3))
+    out.append(pts[-1])
+    return out
+
+
+def _draw_place(context):
+    pts = list(place["points"])
+    cur = place["cursor"]
+    shader = _shader("POLYLINE_UNIFORM_COLOR")
+    gpu.state.blend_set("ALPHA")
+    gpu.state.depth_test_set("NONE")
+    vp = (context.region.width, context.region.height)
+    if len(pts) >= 2:
+        batch = batch_for_shader(shader, "LINE_STRIP", {"pos": _catmull_rom(pts)})
+        shader.bind()
+        shader.uniform_float("viewportSize", vp)
+        shader.uniform_float("lineWidth", 3.0)
+        shader.uniform_float("color", (1.0, 0.85, 0.2, 1.0))
+        batch.draw(shader)
+    if pts and cur is not None:
+        tail = _catmull_rom(pts[-2:] + [cur]) if len(pts) >= 2 else [pts[-1], cur]
+        if len(pts) >= 2:
+            tail = tail[len(tail) // 2:]
+        batch = batch_for_shader(shader, "LINE_STRIP", {"pos": tail})
+        shader.bind()
+        shader.uniform_float("viewportSize", vp)
+        shader.uniform_float("lineWidth", 2.0)
+        shader.uniform_float("color", (1.0, 0.85, 0.2, 0.5))
+        batch.draw(shader)
+    ushader = _shader("UNIFORM_COLOR")
+    for coords, size, color in ((pts[1:], 8.0, (1.0, 1.0, 1.0, 1.0)), (pts[:1], 10.0, (0.3, 1.0, 0.4, 1.0)),
+                                ([cur] if cur is not None else [], 7.0, (1.0, 0.85, 0.2, 0.8))):
+        if coords:
+            gpu.state.point_size_set(size)
+            b = batch_for_shader(ushader, "POINTS", {"pos": coords})
+            ushader.bind()
+            ushader.uniform_float("color", color)
+            b.draw(ushader)
+    gpu.state.point_size_set(1.0)
+    gpu.state.blend_set("NONE")
+
+
 def _draw_view():
     context = bpy.context
     P = getattr(context.scene, "vine_wrap", None)
@@ -143,41 +145,10 @@ def _draw_view():
         return
     target = P.target
     tool = _active_tool(context)
-    if (P.show_paint and tool == "vine_wrap.tool_paint") or P.show_paint_always:
-        _draw_paint(context, P, target)
     if P.show_points and not _posed(target):
         _draw_points(context, P, target, tool)
-    if stroke["active"] and len(stroke["points"]) >= 2:
-        shader = _shader("POLYLINE_UNIFORM_COLOR")
-        batch = batch_for_shader(shader, "LINE_STRIP", {"pos": stroke["points"]})
-        gpu.state.blend_set("ALPHA")
-        shader.bind()
-        shader.uniform_float("viewportSize", (context.region.width, context.region.height))
-        shader.uniform_float("lineWidth", 3.0)
-        shader.uniform_float("color", (1.0, 0.85, 0.2, 1.0))
-        batch.draw(shader)
-        gpu.state.blend_set("NONE")
-
-
-_MODE_COLORS = {"ADD": (0.4, 1.0, 0.4), "ERASE": (1.0, 0.35, 0.35), "SMOOTH": (0.5, 0.8, 1.0)}
-
-
-def _draw_pixel():
-    context = bpy.context
-    st = brush
-    if not (st["active"] or (st["hover"] and _active_tool(context) == "vine_wrap.tool_paint")):
-        return
-    r = st["r"]
-    cx, cy = st["x"], st["y"]
-    pts = [(cx + math.cos(a) * r, cy + math.sin(a) * r) for a in (math.tau * i / 48 for i in range(48))]
-    c = _MODE_COLORS.get(st["mode"], (1, 1, 1)) if st["active"] else (1.0, 1.0, 1.0)
-    shader = _shader("UNIFORM_COLOR")
-    batch = batch_for_shader(shader, "LINE_LOOP", {"pos": pts})
-    gpu.state.blend_set("ALPHA")
-    shader.bind()
-    shader.uniform_float("color", (c[0], c[1], c[2], 0.9 if st["active"] else 0.6))
-    batch.draw(shader)
-    gpu.state.blend_set("NONE")
+    if place["active"]:
+        _draw_place(context)
 
 
 def register():
@@ -185,7 +156,6 @@ def register():
         return
     sv = bpy.types.SpaceView3D
     _handles.append(sv.draw_handler_add(_draw_view, (), "WINDOW", "POST_VIEW"))
-    _handles.append(sv.draw_handler_add(_draw_pixel, (), "WINDOW", "POST_PIXEL"))
 
 
 def unregister():

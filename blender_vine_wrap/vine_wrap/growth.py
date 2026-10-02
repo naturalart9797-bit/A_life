@@ -1,4 +1,4 @@
-"""Auto generation: vines that crawl over a surface inside a painted density region."""
+"""Auto generation: vines that crawl over a surface (optionally inside a weighted region)."""
 
 import math
 
@@ -66,7 +66,7 @@ class _Grower:
 
 
 def weighted_area(sampler, weight_fn, rng, samples=3000):
-    """Monte-Carlo estimate of the painted area (area x weight)."""
+    """Monte-Carlo estimate of the usable area (area x weight)."""
     acc = 0.0
     for _ in range(samples):
         acc += weight_fn(sampler.sample(rng))
@@ -77,7 +77,7 @@ def grow_vines(sampler, G, rng, scale, weight_fn, up, avoid_points=()):
     """Grow vines over the surface.
 
     G          : settings (density, length, spacing, wrap ...)
-    weight_fn  : hit -> 0..1 paint weight (where vines may grow, and how many seed)
+    weight_fn  : hit -> 0..1 region weight (where vines may grow, and how many seed)
     up         : world-space axis vines wrap around / climb along
     avoid_points: existing guide points the new vines keep away from
     """
@@ -99,7 +99,7 @@ def grow_vines(sampler, G, rng, scale, weight_fn, up, avoid_points=()):
     if n_seeds == 0:
         return []
 
-    # Seeds: rejection sampling by paint weight, kept apart from each other.
+    # Seeds: rejection sampling by region weight, kept apart from each other.
     seeds = []
     tries = 0
     min_d = spacing * 2.5

@@ -244,8 +244,11 @@ def editable_groups(body):
 
 
 def active_group(context, create=True):
+    from . import pipeline
     P = context.scene.vine_dress
-    body = P.body
+    body = pipeline.get_body(context)
+    if body is not None and P.body is None:
+        P.body = body
     objs = bpy.data.objects
     if 0 <= P.active_group_index < len(objs):
         obj = objs[P.active_group_index]
@@ -471,6 +474,9 @@ class VINEDRESS_OT_groom_draw(bpy.types.Operator):
         if body is None:
             return {"CANCELLED"}
         group = active_group(context)
+        if group is None:
+            self.report({"ERROR"}, "人物メッシュを指定してください")
+            return {"CANCELLED"}
         if group.vine_guide.locked:
             self.report({"WARNING"}, "アクティブグループはロックされています")
             return {"CANCELLED"}
