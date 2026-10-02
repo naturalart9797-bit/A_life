@@ -94,6 +94,7 @@ const CATEGORIES=[
     items:[
       {file:'particle_life.html', name:'パーティクルライフ', en:'Particle Life', desc:'種ごとの引力・斥力マトリクスからコロニーが創発。', tags:['粒子','創発'], vis:'plife'},
       {file:'creature_ecosystem.html', name:'生物の生態系', en:'Creature Ecosystem', desc:'捕食者と被食者。体節と脚を持つ生物が狩り・逃走する。', tags:['捕食','エージェント'], vis:'creature'},
+      {file:'murmuration3d.html', name:'3D群舞（ボイド）', en:'Murmuration 3D', desc:'ムクドリの群舞。分離・整列・結合と捕食者からの逃走で群れがうねる。', tags:['ボイド','3D','Three.js'], vis:'murmur'},
       {file:'slime_mold.html', name:'粘菌ネットワーク', en:'Slime Mold', desc:'変形菌(Physarum)が餌を結ぶ最適ネットワークを形成。', tags:['粘菌','ネットワーク'], vis:'slime'},
     ]
   },
@@ -214,6 +215,15 @@ function drawPreview(p){
     if(!p.state){p.state=[];for(let i=0;i<40;i++)p.state.push({x:Math.random()*w,y:Math.random()*h,a:Math.random()*6.28,c:i%3});}
     const cols=[[224,82,82],[95,217,154],[124,138,255]];
     for(const s of p.state){s.a+=(Math.random()-0.5)*0.4;s.x+=Math.cos(s.a)*0.8;s.y+=Math.sin(s.a)*0.8;if(s.x<0)s.x+=w;if(s.x>w)s.x-=w;if(s.y<0)s.y+=h;if(s.y>h)s.y-=h;const cc=cols[s.c];ctx.fillStyle=`rgb(${cc[0]},${cc[1]},${cc[2]})`;ctx.beginPath();ctx.arc(s.x,s.y,2,0,6.28);ctx.fill();}
+  } else if(vis==='murmur'){
+    // swirling flock drifting along a lissajous path
+    if(!p.state){p.state=[];for(let i=0;i<90;i++)p.state.push({o:Math.random()*6.28,r:Math.random(),z:Math.random()});}
+    const fx=w/2+Math.sin(t*0.7)*w*0.25, fy=h/2+Math.sin(t*1.1)*h*0.2;
+    for(const s of p.state){
+      const a=s.o+t*(1.2+s.z*0.6), rr=6+s.r*26;
+      const x=fx+Math.cos(a)*rr, y=fy+Math.sin(a*1.3)*rr*0.45;
+      ctx.fillStyle=`rgba(${cr},${cg},${cb},${0.5+s.z*0.5})`;ctx.fillRect(x,y,1.8,1.8);
+    }
   } else if(vis==='slime'||vis==='slimeimg'||vis==='smorph'){
     if(!p.state){p.state=[];for(let i=0;i<50;i++)p.state.push({x:w/2,y:h/2,a:Math.random()*6.28});}
     ctx.fillStyle=`rgba(${cr},${cg},${cb},0.5)`;

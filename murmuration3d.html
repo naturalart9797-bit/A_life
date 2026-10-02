@@ -1,0 +1,743 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Murmuration 3D</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+JP:wght@300;400;500&display=swap');
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --bg: #07080d;
+    --surface: #0d0f16;
+    --border: #1d2030;
+    --accent: #e0a050;
+    --accent2: #a8743a;
+    --text: #d8dcec;
+    --text2: #7a8098;
+    --text3: #3a3f52;
+    --font-mono: 'IBM Plex Mono', monospace;
+    --font-ui: 'IBM Plex Sans JP', sans-serif;
+  }
+  body { background: var(--bg); color: var(--text); font-family: var(--font-ui); height: 100vh; display: flex; flex-direction: column; overflow: hidden; user-select: none; }
+
+  header { display: flex; align-items: center; gap: 16px; padding: 10px 20px; border-bottom: 1px solid var(--border); background: var(--surface); flex-shrink: 0; z-index: 10; }
+  .back { font-family: var(--font-mono); font-size: 11px; color: var(--text3); text-decoration: none; }
+  .back:hover { color: var(--accent); }
+  .logo { font-family: var(--font-mono); font-size: 13px; font-weight: 500; color: var(--accent); letter-spacing: 0.08em; text-transform: uppercase; }
+  .logo span { color: var(--text3); }
+  .badge { font-family: var(--font-mono); font-size: 9px; padding: 2px 6px; border: 1px solid var(--accent2); color: var(--accent); border-radius: 2px; letter-spacing: 0.1em; }
+  .stats { margin-left: auto; display: flex; gap: 24px; }
+  .stat { display: flex; flex-direction: column; align-items: flex-end; }
+  .stat-label { font-family: var(--font-mono); font-size: 9px; color: var(--text3); letter-spacing: 0.1em; text-transform: uppercase; }
+  .stat-val { font-family: var(--font-mono); font-size: 16px; font-weight: 500; color: var(--text); line-height: 1.2; }
+
+  .main { display: flex; flex: 1; overflow: hidden; }
+
+  .sidebar { width: 230px; flex-shrink: 0; background: var(--surface); border-right: 1px solid var(--border); display: flex; flex-direction: column; overflow-y: auto; z-index: 5; }
+  .sidebar::-webkit-scrollbar { width: 4px; }
+  .sidebar::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+  .section { padding: 14px 16px; border-bottom: 1px solid var(--border); }
+  .section-title { font-family: var(--font-mono); font-size: 9px; color: var(--text3); letter-spacing: 0.12em; text-transform: uppercase; margin-bottom: 12px; }
+
+  button { font-family: var(--font-mono); font-size: 11px; font-weight: 500; background: transparent; border: 1px solid var(--border); color: var(--text2); padding: 6px 12px; border-radius: 3px; cursor: pointer; letter-spacing: 0.05em; transition: all 0.15s; white-space: nowrap; }
+  button:hover { border-color: var(--accent2); color: var(--accent); background: rgba(224,160,80,0.06); }
+  button.active { border-color: var(--accent); color: var(--accent); background: rgba(224,160,80,0.12); }
+  .play-btn { width: 100%; padding: 8px; font-size: 12px; border-color: var(--accent2); color: var(--accent); letter-spacing: 0.1em; }
+  .row { display: flex; gap: 6px; margin-top: 6px; }
+  .row button { flex: 1; }
+
+  .slider-row { margin-bottom: 10px; }
+  .slider-header { display: flex; justify-content: space-between; margin-bottom: 5px; }
+  .slider-name { font-family: var(--font-mono); font-size: 10px; color: var(--text2); }
+  .slider-val { font-family: var(--font-mono); font-size: 10px; color: var(--accent); }
+  input[type=range] { -webkit-appearance: none; appearance: none; width: 100%; height: 2px; background: var(--border); border-radius: 1px; outline: none; }
+  input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 12px; height: 12px; background: var(--accent); border-radius: 50%; cursor: pointer; }
+  input[type=range]::-moz-range-thumb { width: 12px; height: 12px; background: var(--accent); border: none; border-radius: 50%; cursor: pointer; }
+
+  .preset-list { display: flex; flex-direction: column; gap: 3px; }
+  .preset-btn { text-align: left; padding: 6px 10px; font-size: 11px; width: 100%; }
+  .preset-btn small { color: var(--text3); margin-left: 6px; }
+
+  .check { display: flex; align-items: center; gap: 8px; font-family: var(--font-mono); font-size: 10px; color: var(--text2); margin-bottom: 8px; cursor: pointer; }
+  .check input { accent-color: var(--accent); }
+
+  .note { font-family: var(--font-mono); font-size: 10px; color: var(--text3); line-height: 1.9; }
+
+  .canvas-wrap { flex: 1; position: relative; overflow: hidden; background: var(--bg); touch-action: none; }
+  #c { display: block; width: 100%; height: 100%; cursor: crosshair; }
+  .hint { position: absolute; bottom: 14px; left: 50%; transform: translateX(-50%); font-family: var(--font-mono); font-size: 10px; color: var(--text3); letter-spacing: 0.08em; pointer-events: none; white-space: nowrap; }
+  .loading { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-family: var(--font-mono); font-size: 12px; color: var(--text3); letter-spacing: 0.1em; }
+
+  @media (max-width: 700px) {
+    header { padding: 8px 12px; gap: 10px; }
+    .stats { gap: 12px; }
+    .stat-val { font-size: 13px; }
+    .badge { display: none; }
+    .main { flex-direction: column-reverse; }
+    .sidebar { width: 100%; height: 38vh; border-right: none; border-top: 1px solid var(--border); }
+    .hint { display: none; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <a class="back" href="index.html">←</a>
+  <div class="logo">Murmur<span>//</span>ation</div>
+  <div class="badge">3D BOIDS</div>
+  <div class="stats">
+    <div class="stat"><span class="stat-label">個体数</span><span class="stat-val" id="stCount">0</span></div>
+    <div class="stat"><span class="stat-label">秩序度</span><span class="stat-val" id="stOrder">—</span></div>
+    <div class="stat"><span class="stat-label">FPS</span><span class="stat-val" id="stFps">—</span></div>
+  </div>
+</header>
+
+<div class="main">
+  <div class="sidebar">
+
+    <div class="section">
+      <button class="play-btn" id="btnPlay">❚❚ 一時停止</button>
+      <div class="row">
+        <button id="btnScare">驚かす</button>
+        <button id="btnReset">リセット</button>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-title">群れのルール</div>
+      <div id="sliders"></div>
+    </div>
+
+    <div class="section">
+      <div class="section-title">捕食者</div>
+      <div id="sliders2"></div>
+    </div>
+
+    <div class="section">
+      <div class="section-title">プリセット</div>
+      <div class="preset-list" id="presets"></div>
+    </div>
+
+    <div class="section">
+      <div class="section-title">表示</div>
+      <label class="check"><input type="checkbox" id="chkRotate" checked>カメラ自動回転</label>
+      <label class="check"><input type="checkbox" id="chkFollow">群れを追跡</label>
+      <label class="check"><input type="checkbox" id="chkBounds">境界球を表示</label>
+    </div>
+
+    <div class="section note">
+      ドラッグ: 回転<br>
+      スクロール / ピンチ: ズーム<br>
+      クリック: その地点で驚かす<br>
+      Space: 一時停止<br><br>
+      秩序度 = 全個体の向きの揃い具合<br>(0: ばらばら 〜 1: 完全に整列)
+    </div>
+
+  </div>
+
+  <div class="canvas-wrap" id="wrap">
+    <div class="loading" id="loading">LOADING...</div>
+    <canvas id="c"></canvas>
+    <div class="hint">分離・整列・結合の3つの局所ルールだけで、群れ全体のうねりが創発します</div>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+// ─────────────────────────────────────────────
+//  PARAMETERS
+// ─────────────────────────────────────────────
+const MAX_BOIDS = 6000;
+const MAX_PRED = 6;
+const BOUND = 42;          // soft boundary radius
+
+const P = {
+  count: 2000,
+  separation: 1.6,
+  alignment: 1.1,
+  cohesion: 0.9,
+  radius: 4.5,
+  maxSpeed: 0.75,
+  predators: 1,
+  fear: 1.0,
+  predSpeed: 1.15,
+};
+
+const SLIDERS = [
+  { key:'count',      name:'個体数',     min:100, max:MAX_BOIDS, step:100, fmt:v=>v, target:'sliders' },
+  { key:'separation', name:'分離',       min:0,   max:4,   step:0.05, fmt:v=>v.toFixed(2), target:'sliders' },
+  { key:'alignment',  name:'整列',       min:0,   max:3,   step:0.05, fmt:v=>v.toFixed(2), target:'sliders' },
+  { key:'cohesion',   name:'結合',       min:0,   max:3,   step:0.05, fmt:v=>v.toFixed(2), target:'sliders' },
+  { key:'radius',     name:'視野半径',   min:1.5, max:9,   step:0.1,  fmt:v=>v.toFixed(1), target:'sliders' },
+  { key:'maxSpeed',   name:'最大速度',   min:0.2, max:1.6, step:0.05, fmt:v=>v.toFixed(2), target:'sliders' },
+  { key:'predators',  name:'捕食者の数', min:0,   max:MAX_PRED, step:1, fmt:v=>v, target:'sliders2' },
+  { key:'fear',       name:'恐怖の強さ', min:0,   max:3,   step:0.05, fmt:v=>v.toFixed(2), target:'sliders2' },
+  { key:'predSpeed',  name:'捕食者の速さ(倍)', min:0.6, max:2, step:0.05, fmt:v=>v.toFixed(2), target:'sliders2' },
+];
+
+const PRESETS = [
+  { name:'ムクドリの群舞', en:'starling', v:{ separation:1.6, alignment:1.1, cohesion:0.9, radius:4.5, maxSpeed:0.75, predators:1, fear:1.0 } },
+  { name:'イワシの群れ',   en:'sardine',  v:{ separation:2.2, alignment:1.8, cohesion:1.6, radius:3.2, maxSpeed:0.6,  predators:2, fear:1.8 } },
+  { name:'ユスリカの蚊柱', en:'midge',    v:{ separation:0.8, alignment:0.1, cohesion:2.2, radius:6.0, maxSpeed:0.9,  predators:0, fear:1.0 } },
+  { name:'渦巻くトルネード', en:'torus',  v:{ separation:1.2, alignment:2.6, cohesion:2.4, radius:7.0, maxSpeed:0.85, predators:0, fear:1.0 } },
+  { name:'散り散り',       en:'chaos',    v:{ separation:3.5, alignment:0.0, cohesion:0.1, radius:2.5, maxSpeed:1.0,  predators:3, fear:2.5 } },
+];
+
+// ─────────────────────────────────────────────
+//  STATE
+// ─────────────────────────────────────────────
+const pos  = new Float32Array(MAX_BOIDS * 3);
+const vel  = new Float32Array(MAX_BOIDS * 3);
+const nvel = new Float32Array(MAX_BOIDS * 3);
+const panic = new Float32Array(MAX_BOIDS);   // 0..1, decays; tints color
+
+const ppos = new Float32Array(MAX_PRED * 3);
+const pvel = new Float32Array(MAX_PRED * 3);
+
+function rand(a, b) { return a + Math.random() * (b - a); }
+
+function spawnBoid(i) {
+  // inside a flattened ellipsoid near the center
+  const r = Math.cbrt(Math.random()) * 18;
+  const th = Math.random() * Math.PI * 2, ph = Math.acos(rand(-1, 1));
+  pos[i*3]   = r * Math.sin(ph) * Math.cos(th);
+  pos[i*3+1] = r * Math.cos(ph) * 0.5;
+  pos[i*3+2] = r * Math.sin(ph) * Math.sin(th);
+  const a = rand(0, Math.PI * 2);
+  vel[i*3]   = Math.cos(a) * 0.5;
+  vel[i*3+1] = rand(-0.1, 0.1);
+  vel[i*3+2] = Math.sin(a) * 0.5;
+  panic[i] = 0;
+}
+
+function spawnPredator(k) {
+  const a = rand(0, Math.PI * 2);
+  ppos[k*3]   = Math.cos(a) * BOUND;
+  ppos[k*3+1] = rand(-10, 10);
+  ppos[k*3+2] = Math.sin(a) * BOUND;
+  pvel[k*3] = pvel[k*3+1] = pvel[k*3+2] = 0;
+}
+
+function resetAll() {
+  for (let i = 0; i < MAX_BOIDS; i++) spawnBoid(i);
+  for (let k = 0; k < MAX_PRED; k++) spawnPredator(k);
+}
+
+// ─────────────────────────────────────────────
+//  SPATIAL GRID (counting sort into uniform cells)
+// ─────────────────────────────────────────────
+const GRID_EXTENT = BOUND * 1.6;   // boids rarely go beyond this; clamp otherwise
+let cellSize, gdim, cellStart, cellCount;
+const cellOf = new Int32Array(MAX_BOIDS);
+const sorted = new Int32Array(MAX_BOIDS);
+
+function setupGrid() {
+  cellSize = P.radius;
+  gdim = Math.ceil(GRID_EXTENT * 2 / cellSize) + 1;
+  const n = gdim * gdim * gdim;
+  cellStart = new Int32Array(n + 1);
+  cellCount = new Int32Array(n);
+}
+
+function cellCoord(v) {
+  let c = Math.floor((v + GRID_EXTENT) / cellSize);
+  return c < 0 ? 0 : (c >= gdim ? gdim - 1 : c);
+}
+
+function buildGrid(n) {
+  if (cellSize !== P.radius) setupGrid();
+  cellCount.fill(0);
+  for (let i = 0; i < n; i++) {
+    const c = (cellCoord(pos[i*3]) * gdim + cellCoord(pos[i*3+1])) * gdim + cellCoord(pos[i*3+2]);
+    cellOf[i] = c;
+    cellCount[c]++;
+  }
+  let acc = 0;
+  for (let c = 0; c < cellCount.length; c++) { cellStart[c] = acc; acc += cellCount[c]; }
+  cellStart[cellCount.length] = acc;
+  cellCount.fill(0);
+  for (let i = 0; i < n; i++) {
+    const c = cellOf[i];
+    sorted[cellStart[c] + cellCount[c]++] = i;
+  }
+}
+
+// ─────────────────────────────────────────────
+//  SIMULATION
+// ─────────────────────────────────────────────
+const MAX_NEIGHBORS = 40;   // real starlings track ~7; a cap keeps dense knots cheap
+let polarization = 0;
+
+function stepBoids(dt) {
+  const n = P.count;
+  buildGrid(n);
+
+  const R = P.radius, R2 = R * R;
+  const sepR2 = (R * 0.45) ** 2;
+  const maxS = P.maxSpeed, minS = maxS * 0.45;
+  const maxF = 0.03 * maxS / 0.75;
+  const fearR = 16, fearR2 = fearR * fearR;
+  const nPred = P.predators;
+
+  let sumX = 0, sumY = 0, sumZ = 0;
+
+  for (let i = 0; i < n; i++) {
+    const ix = i*3;
+    const px = pos[ix], py = pos[ix+1], pz = pos[ix+2];
+    const vx = vel[ix], vy = vel[ix+1], vz = vel[ix+2];
+
+    let sx = 0, sy = 0, sz = 0;     // separation
+    let ax = 0, ay = 0, az = 0;     // alignment
+    let cx = 0, cy = 0, cz = 0;     // cohesion
+    let cnt = 0;
+
+    const gx = cellCoord(px), gy = cellCoord(py), gz = cellCoord(pz);
+    search:
+    for (let dx = -1; dx <= 1; dx++) {
+      const xx = gx + dx; if (xx < 0 || xx >= gdim) continue;
+      for (let dy = -1; dy <= 1; dy++) {
+        const yy = gy + dy; if (yy < 0 || yy >= gdim) continue;
+        for (let dz = -1; dz <= 1; dz++) {
+          const zz = gz + dz; if (zz < 0 || zz >= gdim) continue;
+          const c = (xx * gdim + yy) * gdim + zz;
+          for (let s = cellStart[c], e = cellStart[c+1]; s < e; s++) {
+            const j = sorted[s];
+            if (j === i) continue;
+            const jx = j*3;
+            const ox = px - pos[jx], oy = py - pos[jx+1], oz = pz - pos[jx+2];
+            const d2 = ox*ox + oy*oy + oz*oz;
+            if (d2 > R2) continue;
+            if (d2 < sepR2 && d2 > 1e-6) { sx += ox / d2; sy += oy / d2; sz += oz / d2; }
+            ax += vel[jx]; ay += vel[jx+1]; az += vel[jx+2];
+            cx += pos[jx]; cy += pos[jx+1]; cz += pos[jx+2];
+            if (++cnt >= MAX_NEIGHBORS) break search;
+          }
+        }
+      }
+    }
+
+    let fx = 0, fy = 0, fz = 0;
+    if (cnt > 0) {
+      const inv = 1 / cnt;
+      fx += (ax * inv - vx) * 0.05 * P.alignment;
+      fy += (ay * inv - vy) * 0.05 * P.alignment;
+      fz += (az * inv - vz) * 0.05 * P.alignment;
+      fx += (cx * inv - px) * 0.0035 * P.cohesion;
+      fy += (cy * inv - py) * 0.0035 * P.cohesion;
+      fz += (cz * inv - pz) * 0.0035 * P.cohesion;
+    }
+    fx += sx * 0.05 * P.separation;
+    fy += sy * 0.05 * P.separation;
+    fz += sz * 0.05 * P.separation;
+
+    // soft spherical boundary (flattened vertically, like a sky dome)
+    const by = py * 1.6;
+    const dist = Math.sqrt(px*px + by*by + pz*pz);
+    if (dist > BOUND) {
+      const k = (dist - BOUND) * 0.0012 / dist;
+      fx -= px * k; fy -= by * k * 1.6; fz -= pz * k;
+    }
+
+    // flee predators
+    let fearSum = 0;
+    for (let k = 0; k < nPred; k++) {
+      const kx = k*3;
+      const ox = px - ppos[kx], oy = py - ppos[kx+1], oz = pz - ppos[kx+2];
+      const d2 = ox*ox + oy*oy + oz*oz;
+      if (d2 < fearR2) {
+        const d = Math.sqrt(d2) + 1e-4;
+        const w = (1 - d / fearR) * 0.09 * P.fear;
+        fx += ox / d * w; fy += oy / d * w; fz += oz / d * w;
+        fearSum += 1 - d / fearR;
+      }
+    }
+
+    // panic: excited boids move faster and spread the excitement
+    if (fearSum > 0) panic[i] = Math.min(1, panic[i] + fearSum * 0.15 * P.fear);
+
+    // steering limit (panicked boids may turn harder)
+    const lim = maxF * (1 + panic[i] * 2);
+    const fl = Math.sqrt(fx*fx + fy*fy + fz*fz);
+    if (fl > lim) { const s = lim / fl; fx *= s; fy *= s; fz *= s; }
+
+    let nx = vx + fx * dt, ny = vy + fy * dt, nz = vz + fz * dt;
+    ny *= 0.995;   // birds prefer level flight
+    const sp = Math.sqrt(nx*nx + ny*ny + nz*nz) + 1e-6;
+    const top = maxS * (1 + panic[i] * 0.6);
+    const ts = sp > top ? top : (sp < minS ? minS : sp);
+    nx *= ts / sp; ny *= ts / sp; nz *= ts / sp;
+    nvel[ix] = nx; nvel[ix+1] = ny; nvel[ix+2] = nz;
+
+    sumX += nx / ts; sumY += ny / ts; sumZ += nz / ts;
+  }
+
+  for (let i = 0; i < n; i++) {
+    const ix = i*3;
+    vel[ix] = nvel[ix]; vel[ix+1] = nvel[ix+1]; vel[ix+2] = nvel[ix+2];
+    pos[ix] += vel[ix] * dt; pos[ix+1] += vel[ix+1] * dt; pos[ix+2] += vel[ix+2] * dt;
+    panic[i] *= Math.pow(0.97, dt);
+  }
+
+  polarization = n ? Math.sqrt(sumX*sumX + sumY*sumY + sumZ*sumZ) / n : 0;
+}
+
+function stepPredators(dt) {
+  const n = P.count;
+  const speed = P.maxSpeed * P.predSpeed;
+  for (let k = 0; k < P.predators; k++) {
+    const kx = k*3;
+    const px = ppos[kx], py = ppos[kx+1], pz = ppos[kx+2];
+    // hunt the nearest boid out of a random sample (cheap and slightly erratic)
+    let best = -1, bd = Infinity;
+    for (let s = 0; s < 64; s++) {
+      const j = (Math.random() * n) | 0, jx = j*3;
+      const dx = pos[jx] - px, dy = pos[jx+1] - py, dz = pos[jx+2] - pz;
+      const d2 = dx*dx + dy*dy + dz*dz;
+      if (d2 < bd) { bd = d2; best = j; }
+    }
+    let tx = 0, ty = 0, tz = 0;
+    if (best >= 0) {
+      const jx = best*3;
+      tx = pos[jx] - px; ty = pos[jx+1] - py; tz = pos[jx+2] - pz;
+    }
+    // keep predators apart from each other
+    for (let m = 0; m < P.predators; m++) {
+      if (m === k) continue;
+      const ox = px - ppos[m*3], oy = py - ppos[m*3+1], oz = pz - ppos[m*3+2];
+      const d2 = ox*ox + oy*oy + oz*oz;
+      if (d2 < 100) { tx += ox * 2; ty += oy * 2; tz += oz * 2; }
+    }
+    const tl = Math.sqrt(tx*tx + ty*ty + tz*tz) + 1e-6;
+    const turn = 0.025 * dt;
+    let vx = pvel[kx] + tx / tl * speed * turn * 2;
+    let vy = pvel[kx+1] + ty / tl * speed * turn * 2;
+    let vz = pvel[kx+2] + tz / tl * speed * turn * 2;
+    const vl = Math.sqrt(vx*vx + vy*vy + vz*vz) + 1e-6;
+    if (vl > speed) { vx *= speed / vl; vy *= speed / vl; vz *= speed / vl; }
+    pvel[kx] = vx; pvel[kx+1] = vy; pvel[kx+2] = vz;
+    ppos[kx] += vx * dt; ppos[kx+1] += vy * dt; ppos[kx+2] += vz * dt;
+  }
+}
+
+function scareAt(x, y, z, radius = 18) {
+  const r2 = radius * radius;
+  for (let i = 0; i < P.count; i++) {
+    const ix = i*3;
+    const ox = pos[ix] - x, oy = pos[ix+1] - y, oz = pos[ix+2] - z;
+    const d2 = ox*ox + oy*oy + oz*oz;
+    if (d2 < r2) {
+      const d = Math.sqrt(d2) + 1e-3;
+      const w = (1 - d / radius) * P.maxSpeed * 1.5;
+      vel[ix] += ox / d * w; vel[ix+1] += oy / d * w; vel[ix+2] += oz / d * w;
+      panic[i] = 1;
+    }
+  }
+  spawnRipple(x, y, z, radius);
+}
+
+// ─────────────────────────────────────────────
+//  THREE.JS SCENE
+// ─────────────────────────────────────────────
+const canvas = document.getElementById('c');
+const wrap = document.getElementById('wrap');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+
+const scene = new THREE.Scene();
+const BG = new THREE.Color(0x07080d);
+scene.background = BG;
+scene.fog = new THREE.Fog(BG, 70, 190);
+
+const camera = new THREE.PerspectiveCamera(55, 1, 0.1, 500);
+
+scene.add(new THREE.HemisphereLight(0xb8c4ff, 0x1a1208, 0.9));
+const sun = new THREE.DirectionalLight(0xffd8a0, 0.9);
+sun.position.set(40, 60, 20);
+scene.add(sun);
+
+// boids: one instanced cone each, tip pointing along +Z
+const boidGeo = new THREE.ConeGeometry(0.22, 1.0, 5);
+boidGeo.rotateX(Math.PI / 2);
+const boidMat = new THREE.MeshLambertMaterial({ color: 0xffffff });
+const boids = new THREE.InstancedMesh(boidGeo, boidMat, MAX_BOIDS);
+boids.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+boids.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(MAX_BOIDS * 3), 3);
+boids.instanceColor.setUsage(THREE.DynamicDrawUsage);
+boids.frustumCulled = false;
+scene.add(boids);
+
+const predGeo = new THREE.ConeGeometry(0.7, 2.8, 6);
+predGeo.rotateX(Math.PI / 2);
+const predMat = new THREE.MeshLambertMaterial({ color: 0xff4a3a, emissive: 0x551008 });
+const preds = new THREE.InstancedMesh(predGeo, predMat, MAX_PRED);
+preds.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+preds.frustumCulled = false;
+scene.add(preds);
+
+// faint dust for depth cues
+{
+  const N = 1500, g = new THREE.BufferGeometry(), a = new Float32Array(N * 3);
+  for (let i = 0; i < N; i++) {
+    const r = rand(60, 160), th = rand(0, Math.PI * 2), ph = Math.acos(rand(-1, 1));
+    a[i*3] = r * Math.sin(ph) * Math.cos(th); a[i*3+1] = r * Math.cos(ph); a[i*3+2] = r * Math.sin(ph) * Math.sin(th);
+  }
+  g.setAttribute('position', new THREE.BufferAttribute(a, 3));
+  scene.add(new THREE.Points(g, new THREE.PointsMaterial({ color: 0x3a3f52, size: 0.3, sizeAttenuation: true })));
+}
+
+const boundMesh = new THREE.Mesh(
+  new THREE.SphereGeometry(BOUND, 32, 16),
+  new THREE.MeshBasicMaterial({ color: 0x262a38, wireframe: true, transparent: true, opacity: 0.25 })
+);
+boundMesh.scale.y = 1 / 1.6;
+boundMesh.visible = false;
+scene.add(boundMesh);
+
+// click ripples
+const ripples = [];
+const rippleGeo = new THREE.SphereGeometry(1, 24, 12);
+function spawnRipple(x, y, z, radius) {
+  const m = new THREE.Mesh(rippleGeo, new THREE.MeshBasicMaterial({ color: 0xe0a050, wireframe: true, transparent: true, opacity: 0.5 }));
+  m.position.set(x, y, z);
+  m.userData = { t: 0, radius };
+  scene.add(m);
+  ripples.push(m);
+}
+function updateRipples(dt) {
+  for (let i = ripples.length - 1; i >= 0; i--) {
+    const m = ripples[i];
+    m.userData.t += dt / 40;
+    const t = m.userData.t;
+    m.scale.setScalar(1 + t * m.userData.radius);
+    m.material.opacity = 0.5 * (1 - t);
+    if (t >= 1) { scene.remove(m); m.material.dispose(); ripples.splice(i, 1); }
+  }
+}
+
+// color ramp by speed: deep indigo → pale sky; panic shifts toward amber
+const cSlow = new THREE.Color(0x3b4a9a), cFast = new THREE.Color(0xcfe2ff), cPanic = new THREE.Color(0xffa040);
+const tmpC = new THREE.Color();
+const mat4 = new THREE.Matrix4(), quat = new THREE.Quaternion(), vPos = new THREE.Vector3(), vDir = new THREE.Vector3(), vScale = new THREE.Vector3(1, 1, 1);
+const FORWARD = new THREE.Vector3(0, 0, 1);
+
+function syncMeshes() {
+  const n = P.count;
+  const colors = boids.instanceColor.array;
+  const maxS = P.maxSpeed, minS = maxS * 0.45;
+  for (let i = 0; i < n; i++) {
+    const ix = i*3;
+    vPos.set(pos[ix], pos[ix+1], pos[ix+2]);
+    vDir.set(vel[ix], vel[ix+1], vel[ix+2]);
+    const sp = vDir.length();
+    vDir.multiplyScalar(1 / (sp + 1e-6));
+    quat.setFromUnitVectors(FORWARD, vDir);
+    mat4.compose(vPos, quat, vScale);
+    boids.setMatrixAt(i, mat4);
+
+    const t = Math.min(1, Math.max(0, (sp - minS) / (maxS - minS + 1e-6)));
+    tmpC.copy(cSlow).lerp(cFast, t).lerp(cPanic, panic[i] * 0.85);
+    colors[ix] = tmpC.r; colors[ix+1] = tmpC.g; colors[ix+2] = tmpC.b;
+  }
+  boids.count = n;
+  boids.instanceMatrix.needsUpdate = true;
+  boids.instanceColor.needsUpdate = true;
+
+  for (let k = 0; k < P.predators; k++) {
+    const kx = k*3;
+    vPos.set(ppos[kx], ppos[kx+1], ppos[kx+2]);
+    vDir.set(pvel[kx], pvel[kx+1], pvel[kx+2]);
+    if (vDir.lengthSq() < 1e-8) vDir.set(0, 0, 1);
+    vDir.normalize();
+    quat.setFromUnitVectors(FORWARD, vDir);
+    mat4.compose(vPos, quat, vScale);
+    preds.setMatrixAt(k, mat4);
+  }
+  preds.count = P.predators;
+  preds.instanceMatrix.needsUpdate = true;
+}
+
+// ─────────────────────────────────────────────
+//  CAMERA (custom orbit)
+// ─────────────────────────────────────────────
+const cam = { theta: 0.6, phi: 1.25, dist: 110, target: new THREE.Vector3() };
+const opts = { autoRotate: true, follow: false };
+
+function updateCamera() {
+  const { theta, phi, dist, target } = cam;
+  camera.position.set(
+    target.x + dist * Math.sin(phi) * Math.sin(theta),
+    target.y + dist * Math.cos(phi),
+    target.z + dist * Math.sin(phi) * Math.cos(theta)
+  );
+  camera.lookAt(target);
+}
+
+const pointers = new Map();
+let dragMoved = 0, pinchDist = 0;
+
+canvas.addEventListener('pointerdown', e => {
+  canvas.setPointerCapture(e.pointerId);
+  pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  dragMoved = 0;
+  if (pointers.size === 2) {
+    const [a, b] = [...pointers.values()];
+    pinchDist = Math.hypot(a.x - b.x, a.y - b.y);
+  }
+});
+canvas.addEventListener('pointermove', e => {
+  const p = pointers.get(e.pointerId);
+  if (!p) return;
+  const dx = e.clientX - p.x, dy = e.clientY - p.y;
+  p.x = e.clientX; p.y = e.clientY;
+  if (pointers.size === 1) {
+    dragMoved += Math.abs(dx) + Math.abs(dy);
+    cam.theta -= dx * 0.006;
+    cam.phi = Math.min(Math.PI - 0.05, Math.max(0.05, cam.phi - dy * 0.006));
+  } else if (pointers.size === 2) {
+    dragMoved += 10;
+    const [a, b] = [...pointers.values()];
+    const d = Math.hypot(a.x - b.x, a.y - b.y);
+    if (pinchDist > 0) cam.dist = Math.min(260, Math.max(15, cam.dist * pinchDist / d));
+    pinchDist = d;
+  }
+});
+function endPointer(e) {
+  if (pointers.has(e.pointerId) && pointers.size === 1 && dragMoved < 6) clickScare(e);
+  pointers.delete(e.pointerId);
+  pinchDist = 0;
+}
+canvas.addEventListener('pointerup', endPointer);
+canvas.addEventListener('pointercancel', e => { pointers.delete(e.pointerId); pinchDist = 0; });
+canvas.addEventListener('wheel', e => {
+  e.preventDefault();
+  cam.dist = Math.min(260, Math.max(15, cam.dist * Math.exp(e.deltaY * 0.001)));
+}, { passive: false });
+
+// click → scare at the point on the camera ray closest to the flock's center
+const raycaster = new THREE.Raycaster(), ndc = new THREE.Vector2(), centroid = new THREE.Vector3();
+function computeCentroid() {
+  let x = 0, y = 0, z = 0;
+  const n = P.count;
+  for (let i = 0; i < n; i++) { x += pos[i*3]; y += pos[i*3+1]; z += pos[i*3+2]; }
+  return centroid.set(x / n, y / n, z / n);
+}
+function clickScare(e) {
+  const r = canvas.getBoundingClientRect();
+  ndc.set((e.clientX - r.left) / r.width * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
+  raycaster.setFromCamera(ndc, camera);
+  const p = new THREE.Vector3();
+  raycaster.ray.closestPointToPoint(computeCentroid(), p);
+  scareAt(p.x, p.y, p.z);
+}
+
+// ─────────────────────────────────────────────
+//  UI
+// ─────────────────────────────────────────────
+const sliderEls = {};
+SLIDERS.forEach(s => {
+  const row = document.createElement('div');
+  row.className = 'slider-row';
+  row.innerHTML = `<div class="slider-header"><span class="slider-name">${s.name}</span><span class="slider-val"></span></div>
+    <input type="range" min="${s.min}" max="${s.max}" step="${s.step}">`;
+  const input = row.querySelector('input'), out = row.querySelector('.slider-val');
+  input.value = P[s.key];
+  out.textContent = s.fmt(P[s.key]);
+  input.addEventListener('input', () => {
+    P[s.key] = +input.value;
+    out.textContent = s.fmt(P[s.key]);
+    if (s.key === 'predators') for (let k = 0; k < MAX_PRED; k++) if (k >= P.predators) spawnPredator(k);
+  });
+  sliderEls[s.key] = { input, out, s };
+  document.getElementById(s.target).appendChild(row);
+});
+
+function setParam(key, v) {
+  P[key] = v;
+  const el = sliderEls[key];
+  if (el) { el.input.value = v; el.out.textContent = el.s.fmt(v); }
+}
+
+const presetWrap = document.getElementById('presets');
+PRESETS.forEach((pr, idx) => {
+  const b = document.createElement('button');
+  b.className = 'preset-btn' + (idx === 0 ? ' active' : '');
+  b.innerHTML = `${pr.name}<small>${pr.en}</small>`;
+  b.addEventListener('click', () => {
+    Object.entries(pr.v).forEach(([k, v]) => setParam(k, v));
+    presetWrap.querySelectorAll('button').forEach(x => x.classList.toggle('active', x === b));
+  });
+  presetWrap.appendChild(b);
+});
+
+let running = true;
+const btnPlay = document.getElementById('btnPlay');
+function togglePlay() {
+  running = !running;
+  btnPlay.textContent = running ? '❚❚ 一時停止' : '▶ 再開';
+}
+btnPlay.addEventListener('click', togglePlay);
+document.getElementById('btnReset').addEventListener('click', resetAll);
+document.getElementById('btnScare').addEventListener('click', () => {
+  const c = computeCentroid();
+  scareAt(c.x, c.y, c.z, 22);
+});
+document.getElementById('chkRotate').addEventListener('change', e => opts.autoRotate = e.target.checked);
+document.getElementById('chkFollow').addEventListener('change', e => opts.follow = e.target.checked);
+document.getElementById('chkBounds').addEventListener('change', e => boundMesh.visible = e.target.checked);
+window.addEventListener('keydown', e => {
+  if (e.code === 'Space' && e.target === document.body) { e.preventDefault(); togglePlay(); }
+});
+
+function resize() {
+  const w = wrap.clientWidth, h = wrap.clientHeight;
+  renderer.setSize(w, h, false);
+  camera.aspect = w / h;
+  camera.updateProjectionMatrix();
+}
+window.addEventListener('resize', resize);
+
+// ─────────────────────────────────────────────
+//  LOOP
+// ─────────────────────────────────────────────
+const stCount = document.getElementById('stCount'), stOrder = document.getElementById('stOrder'), stFps = document.getElementById('stFps');
+let last = performance.now(), fpsAcc = 0, fpsFrames = 0, uiTimer = 0;
+
+function frame(now) {
+  requestAnimationFrame(frame);
+  const ms = Math.min(50, now - last);
+  last = now;
+  const dt = ms / 16.667;   // 1.0 at 60fps
+
+  if (running) {
+    stepBoids(dt);
+    if (P.predators > 0) stepPredators(dt);
+  }
+  updateRipples(dt);
+
+  if (opts.autoRotate) cam.theta += 0.0015 * dt;
+  if (opts.follow) cam.target.lerp(computeCentroid(), 0.04 * dt);
+  else cam.target.lerp(vPos.set(0, 0, 0), 0.04 * dt);
+  updateCamera();
+
+  syncMeshes();
+  renderer.render(scene, camera);
+
+  fpsAcc += ms; fpsFrames++; uiTimer += ms;
+  if (uiTimer > 400) {
+    stCount.textContent = P.count;
+    stOrder.textContent = polarization.toFixed(2);
+    stFps.textContent = Math.round(1000 * fpsFrames / fpsAcc);
+    fpsAcc = 0; fpsFrames = 0; uiTimer = 0;
+  }
+}
+
+setupGrid();
+resetAll();
+resize();
+document.getElementById('loading').remove();
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
