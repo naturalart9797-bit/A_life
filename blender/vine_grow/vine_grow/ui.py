@@ -106,9 +106,10 @@ class VINEGROW_PT_network(_Base, bpy.types.Panel):
         layout = self.layout
         if P.mode == "DENSITY":
             _cols(layout, P, ("tangle_density", "concentration", "containment"),
-                  ("tangle_length", "curl", "curl_length", "fine_branch", "fuse"),
-                  ("spread", "cling", "clearance"),
-                  ("tendril_chance", "fine_step", "max_nodes", "seed"))
+                  ("tangle_length", "curl", "curl_length"),
+                  ("internode", "fine_branch", "tendril_chance"),
+                  ("spread", "cling", "fine_aerial", "aerial_lift", "clearance"),
+                  ("fine_step", "max_nodes", "seed"))
         elif P.mode == "ROUTE":
             col = layout.column(align=True)
             for name in ("strand_count", "twist", "wrap_threshold", "strand_sync"):

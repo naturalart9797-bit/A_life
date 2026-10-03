@@ -111,12 +111,11 @@ def generate(report, context, target):
 
         push = colonize.Pusher(sampler, P.clearance * scale)
         tree = colonize.Tree()
-        joins = []
         if P.mode == "DENSITY":
             field = tangle.Field(sampler, opts, P, scale, rng)
             if not field.ok():
                 return None, "範囲が小さすぎるか、起点の近くに面がありません。範囲を広げてください"
-            radii, joins = tangle.grow(tree, sampler, field, P, scale, push, rng)
+            radii = tangle.grow(tree, sampler, field, P, scale, push, rng)
             if len(tree.pos) < 2:
                 return None, "つるが伸びませんでした（密度・長さを確認）"
         elif P.mode == "ROUTE":
@@ -171,7 +170,6 @@ def generate(report, context, target):
             return w
 
         b = MeshBuilder()
-        join_set = set(joins)
         ch = tree.children()
         for seq in colonize.chains(tree):
             pts = [tree.pos[i].copy() for i in seq]
@@ -187,7 +185,11 @@ def generate(report, context, target):
             thick = [min(1.0, r / rmax) for r in rs]
             ws = [node_weights(i) for i in seq]
             rings = tube(b, pts, normals, rs, ws, dists, thick, P.ring_res)
-            if rings and not ch[seq[-1]] and seq[-1] not in join_set:
+            if rings and tree.parent[seq[0]] < 0 and P.mode != "RADIAL":  # open base of a vine
+                t = pts[1] - pts[0]
+                t = t.normalized() if t.length_squared > 1e-16 else normals[0]
+                cap(b, pts[0], normals[0], -t, rs[0], rings[0], ws[0], dists[0], thick[0], flip=True)
+            if rings and not ch[seq[-1]]:
                 t = pts[-1] - pts[-2]
                 t = t.normalized() if t.length_squared > 1e-16 else normals[-1]
                 cap(b, pts[-1], normals[-1], t, rs[-1], rings[-1], ws[-1], dists[-1], thick[-1])
@@ -195,9 +197,6 @@ def generate(report, context, target):
             if len(kids) >= 2 or (tree.parent[i] < 0 and P.mode == "RADIAL"):
                 blob(b, tree.pos[i], radii[i] * (1.3 if tree.parent[i] < 0 else 1.05), node_weights(i),
                      min(1.0, plen[i] / maxlen), min(1.0, radii[i] / rmax), seg=6, rings=4)
-        for i in joins:  # fused vines: a small knot where they meet
-            blob(b, tree.pos[i], radii[i] * 1.6, node_weights(i), min(1.0, plen[i] / maxlen),
-                 min(1.0, radii[i] / rmax), seg=6, rings=4)
 
         name = target.name + "_Vines"
         me = build_mesh(b, name, sampler.to_local)

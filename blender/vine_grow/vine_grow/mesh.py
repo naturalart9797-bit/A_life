@@ -1,4 +1,4 @@
-"""Vine branches -> tube mesh with per-vertex attributes.
+"""Vine stems -> tube mesh with per-vertex attributes.
 
 vine_dist  : 0 at an origin -> 1 at the edge of its range (drives the growth animation)
 vine_thick : 0 for the thinnest capillaries -> 1 for the thickest veins
@@ -53,12 +53,15 @@ def tube(b, pts, normals, radii, weights, dists, thicks, res):
     return rings
 
 
-def cap(b, center, normal, tangent, radius, ring, weight, dist, thick):
-    """Rounded end for free branch tips."""
+def cap(b, center, normal, tangent, radius, ring, weight, dist, thick, flip=False):
+    """Rounded end for free branch tips (flip=True for the start of a tube)."""
     tip = b.vert(center + tangent * radius, weight, dist, thick)
     res = len(ring)
     for j in range(res):
-        b.faces.append((ring[j], ring[(j + 1) % res], tip))
+        if flip:
+            b.faces.append((ring[(j + 1) % res], ring[j], tip))
+        else:
+            b.faces.append((ring[j], ring[(j + 1) % res], tip))
 
 
 def blob(b, center, radius, weight, dist, thick, seg=8, rings=5):

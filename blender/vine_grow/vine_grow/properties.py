@@ -56,11 +56,11 @@ class VineGrowSettings(bpy.types.PropertyGroup):
     shoot_length: FloatProperty(name="脇芽の長さ", default=0.05, min=0.0, soft_max=0.5, unit="LENGTH")
 
     # --- density mode ----------------------------------------------------
-    tangle_density: FloatProperty(name="密度(本/100cm²)", default=50.0, min=0.1, soft_max=400.0,
+    tangle_density: FloatProperty(name="密度(本/100cm²)", default=5.0, min=0.1, soft_max=200.0,
                                   description="起点の中心付近で、100cm²あたりに生えるつるの本数")
     concentration: FloatProperty(name="中心への集まり", default=0.35, min=0.0, max=1.0, subtype="FACTOR",
                                  description="0: 範囲内に均一 / 1: 起点の中心に強く集まる")
-    tangle_length: FloatProperty(name="つるの長さ", default=0.1, min=0.005, soft_max=0.5, unit="LENGTH",
+    tangle_length: FloatProperty(name="つるの長さ", default=0.3, min=0.005, soft_max=0.5, unit="LENGTH",
                                  description="1本のつるの平均の長さ")
     curl: FloatProperty(name="うねり", default=0.8, min=0.0, max=4.0,
                         description="つるが曲がりくねる強さ。大きいとループや渦を描いて絡まる")
@@ -68,10 +68,12 @@ class VineGrowSettings(bpy.types.PropertyGroup):
                                description="曲がりくねりの1つの弧の大きさ。小さいほど細かくうねる")
     containment: FloatProperty(name="範囲に留まる強さ", default=1.0, min=0.0, max=3.0,
                                description="範囲の外へ向かうつるを、密な方へ曲げて戻す強さ")
-    fuse: FloatProperty(name="つながり", default=0.4, min=0.0, max=1.0, subtype="FACTOR",
-                        description="つるが他のつるとつながる割合（出会ったとき・先端）。大きいほど先端の少ない網目（粘菌風）になる")
-    fine_branch: FloatProperty(name="枝分かれ", default=0.5, min=0.0, max=5.0,
-                               description="1本のつるが途中で枝分かれする回数の目安")
+    fine_branch: FloatProperty(name="枝分かれ", default=0.25, min=0.0, max=1.0, subtype="FACTOR",
+                               description="節ごとに脇枝が出る確率")
+    internode: FloatProperty(name="節の間隔", default=0.025, min=0.003, soft_max=0.2, unit="LENGTH",
+                             description="茎の節（少しふくらむ所。脇枝・巻きひげが出る）の間隔")
+    fine_aerial: FloatProperty(name="空中へ伸びる先端", default=0.2, min=0.0, max=1.0, subtype="FACTOR",
+                               description="つるの先端のうち、体を離れて空中へ伸びるものの割合")
     fine_step: FloatProperty(name="細かさ（ステップ）", default=0.0025, min=0.0003, soft_max=0.02, unit="LENGTH",
                              description="つるの節の間隔。小さいほど細かく曲がる（重くなる）")
     fine_r_min: FloatProperty(name="最小の太さ", default=0.0004, min=0.00002, soft_max=0.005, unit="LENGTH")
@@ -81,7 +83,7 @@ class VineGrowSettings(bpy.types.PropertyGroup):
     attractor_spacing: FloatProperty(
         name="密度（間隔）", default=0.02, min=0.003, soft_max=0.2, unit="LENGTH",
         description="つるが向かう目標点の間隔。小さいほど密に茂る（重くなる）")
-    spread: FloatProperty(name="空間への広がり", default=0.02, min=0.0, soft_max=0.5, unit="LENGTH",
+    spread: FloatProperty(name="空間への広がり", default=0.035, min=0.0, soft_max=0.5, unit="LENGTH",
                           description="体の表面からどれだけ離れた空間までつるが広がるか")
     cling: FloatProperty(name="密着度", default=0.5, min=0.0, max=1.0, subtype="FACTOR",
                          description="0: 空間に均一に広がる / 1: ほとんど体に沿う")
