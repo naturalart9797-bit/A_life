@@ -20,6 +20,11 @@ def _growth_changed(self, context):
                 o.update_tag()
 
 
+def _reach_changed(self, context):
+    from . import pipeline
+    pipeline.sync_display(self)
+
+
 class SlimeNetSettings(bpy.types.PropertyGroup):
     target: PointerProperty(name="対象", type=bpy.types.Object, poll=_is_target,
                             description="ネットワークを広げるメッシュオブジェクト")
@@ -59,6 +64,8 @@ class SlimeNetSettings(bpy.types.PropertyGroup):
 
     growth: FloatProperty(name="成長", default=1.0, min=0.0, max=1.0, subtype="FACTOR", update=_growth_changed,
                           description="0: 起点だけ → 1: 範囲いっぱい。キーフレームを打つなら生成物の「成長」モディファイアに")
+    last_message: bpy.props.StringProperty(default="")
+    last_ok: BoolProperty(default=True)
     bind_mode: EnumProperty(
         name="追従方法",
         items=[("ARMATURE", "アーマチュア", "対象のボーンウェイトを転写してArmatureモディファイアで変形"),
@@ -68,3 +75,6 @@ class SlimeNetSettings(bpy.types.PropertyGroup):
 
 
 classes = (SlimeNetSettings,)
+
+REACH = FloatProperty(name="範囲", default=0.0, min=0.0, soft_max=5.0, unit="LENGTH", update=_reach_changed,
+                      description="起点から表面に沿って広がる距離（ワールド単位）")

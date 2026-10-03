@@ -38,7 +38,17 @@ def origin_objects(target):
 
 
 def origin_reach(o):
+    """Reach in world units (independent of the target's object scale)."""
+    r = getattr(o, "slime_reach", 0.0)
+    if r > 0.0:
+        return r
     return o.empty_display_size * max(o.matrix_world.to_scale())
+
+
+def sync_display(o):
+    """Draw the origin's sphere at its world-space reach, whatever the parent scale."""
+    sc = max(o.matrix_world.to_scale()) or 1.0
+    o.empty_display_size = max(o.slime_reach / sc, 1e-6)
 
 
 def network_objects(target):
@@ -66,6 +76,9 @@ def add_origin(context, target, location, reach):
     o.location = target.matrix_world.inverted() @ location
     o.show_in_front = True
     o.hide_render = True
+    # matrix_world is refreshed lazily; compute it now so the sphere size is right.
+    o.matrix_world = target.matrix_world @ o.matrix_basis
+    o.slime_reach = reach
     return o
 
 
@@ -95,7 +108,8 @@ def generate(report, context, target):
             return None, "起点の近くに対象の面がありません"
         nodes = network.scatter_nodes(sampler, [p for p, _ in opts], max(r for _, r in opts), spacing, rng)
         if len(nodes) < 8:
-            return None, "範囲が小さすぎます（範囲を広げるか、点の間隔を小さく）"
+            return None, ("範囲が小さすぎます（範囲 %.3g / 網の細かさ %.3g）。範囲を広げるか、網の細かさを小さく"
+                          % (max(r for _, r in opts), spacing))
         edges = network.connect(sampler, nodes, spacing)
 
         # Geodesic range per origin; node.dist = normalised distance (0 origin .. 1 edge of range).
@@ -317,16 +331,16 @@ def material(target, P):
 
 
 def run(context, target, report):
+    P = context.scene.slime_net
     if context.mode != "OBJECT":
         bpy.ops.object.mode_set(mode="OBJECT")
     try:
         obj, info = generate(report, context, target)
     except Exception as exc:  # noqa: BLE001
         traceback.print_exc()
-        report({"ERROR"}, "生成に失敗しました: %s" % exc)
+        P.last_message, P.last_ok = "生成に失敗しました: %s" % exc, False
+        report({"ERROR"}, P.last_message)
         return None
-    if obj is None:
-        report({"WARNING"}, info)
-        return None
-    report({"INFO"}, info)
+    P.last_message, P.last_ok = info, obj is not None
+    report({"INFO"} if obj is not None else {"WARNING"}, info)
     return obj

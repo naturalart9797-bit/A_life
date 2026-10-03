@@ -1,7 +1,7 @@
 bl_info = {
     "name": "Slime Net (粘菌ネットワーク)",
     "author": "A_life",
-    "version": (1, 0, 0),
+    "version": (1, 0, 1),
     "blender": (3, 6, 0),
     "location": "3Dビューポート > サイドバー(N) > Slime Net",
     "description": "オブジェクトの一点から、表面に沿って粘菌のようなネットワークを広げる。アニメーションに追従",
@@ -24,9 +24,11 @@ def register():
     for cls in _classes:
         bpy.utils.register_class(cls)
     bpy.types.Scene.slime_net = bpy.props.PointerProperty(type=properties.SlimeNetSettings)
+    bpy.types.Object.slime_reach = properties.REACH
 
 
 def unregister():
+    del bpy.types.Object.slime_reach
     del bpy.types.Scene.slime_net
     for cls in reversed(_classes):
         bpy.utils.unregister_class(cls)

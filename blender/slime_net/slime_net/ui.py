@@ -9,6 +9,10 @@ class _Base:
     bl_category = "Slime Net"
 
 
+def _wrap(text, n):
+    return [text[i:i + n] for i in range(0, len(text), n)] or [""]
+
+
 def _cols(layout, data, *groups):
     for names in groups:
         col = layout.column(align=True)
@@ -31,6 +35,11 @@ class SLIMENET_PT_main(_Base, bpy.types.Panel):
         row = layout.row()
         row.scale_y = 1.5
         row.operator("slime_net.generate", icon="PLAY")
+        if P.last_message:
+            box = layout.box()
+            box.alert = not P.last_ok
+            for line in _wrap(P.last_message, 22):
+                box.label(text=line, icon="NONE")
         row = layout.row(align=True)
         row.operator("slime_net.toggle_rest", icon="ARMATURE_DATA")
         row.operator("slime_net.clear", text="", icon="TRASH")
@@ -65,7 +74,10 @@ class SLIMENET_PT_origins(_Base, bpy.types.Panel):
             row = layout.row(align=True)
             sel = o.name in context.view_layer.objects and o.select_get()
             row.operator("slime_net.origin_select", text=o.name, depress=sel).name = o.name
-            row.prop(o, "empty_display_size", text="範囲")
+            if o.slime_reach > 0.0:
+                row.prop(o, "slime_reach", text="範囲")
+            else:
+                row.prop(o, "empty_display_size", text="範囲")
             row.operator("slime_net.origin_remove", text="", icon="X").name = o.name
         layout.label(text="範囲 = 球の大きさ（表面に沿った距離で広がる）", icon="INFO")
 
