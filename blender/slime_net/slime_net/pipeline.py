@@ -58,7 +58,11 @@ def network_objects(target):
 def remove_network(target):
     for obj in network_objects(target):
         data = obj.data
+        groups = [m.node_group for m in obj.modifiers if m.type == "NODES" and m.node_group]
         bpy.data.objects.remove(obj, do_unlink=True)
+        for g in groups:
+            if g.users == 0:
+                bpy.data.node_groups.remove(g)
         if isinstance(data, bpy.types.Mesh) and data.users == 0:
             bpy.data.meshes.remove(data)
 
@@ -190,7 +194,11 @@ def generate(report, context, target):
         colls = target.users_collection or (context.scene.collection,)
         colls[0].objects.link(obj)
         binding.attach(obj, target)
-        obj.data.materials.append(material(target, P))
+        try:
+            obj.data.materials.append(material(target, P))
+        except Exception as exc:  # noqa: BLE001
+            traceback.print_exc()
+            report({"WARNING"}, "マテリアルの設定に失敗しました: %s" % exc)
         assign_vertex_groups(obj, b, bone_names if mode == "ARMATURE" else set())
         obj.hide_select = True
         if mode == "ARMATURE":
@@ -198,7 +206,11 @@ def generate(report, context, target):
         elif mode == "SURFACE":
             context.view_layer.update()
             binding.add_surface_deform(context, obj, target)
-        add_growth(obj, P.growth)
+        try:
+            add_growth(obj, P.growth)
+        except Exception as exc:  # noqa: BLE001 - the network itself is fine
+            traceback.print_exc()
+            report({"WARNING"}, "成長アニメーションの設定に失敗しました: %s" % exc)
     stats = "粘菌ネットワーク: 点 %d / 管 %d 本 / 頂点 %d (%.1f秒)" % (
         len(nodes), len(branches), len(b.verts), time.time() - t0)
     return obj, stats
@@ -228,26 +240,27 @@ def _pick_foods(nodes, sources, P, rng, spacing):
 
 
 # ----------------------------------------------------------------------
-# Growth animation (Geometry Nodes: delete where slime_dist > growth)
+# Growth animation (Geometry Nodes: delete where slime_dist > growth).
+# The growth value lives in a Value node of a per-network node group, so it
+# does not rely on modifier input ID properties (changed in Blender 5).
 # ----------------------------------------------------------------------
-def _growth_group():
-    ng = bpy.data.node_groups.get(GROWTH_GROUP)
-    if ng is not None:
-        return ng
-    ng = bpy.data.node_groups.new(GROWTH_GROUP, "GeometryNodeTree")
+GROWTH_NODE = "growth"
+
+
+def _new_growth_group(name, value):
+    ng = bpy.data.node_groups.new(name, "GeometryNodeTree")
     if hasattr(ng, "interface"):
         ng.interface.new_socket("Geometry", in_out="INPUT", socket_type="NodeSocketGeometry")
-        s = ng.interface.new_socket("成長", in_out="INPUT", socket_type="NodeSocketFloat")
-        s.min_value, s.max_value, s.default_value = 0.0, 1.0, 1.0
         ng.interface.new_socket("Geometry", in_out="OUTPUT", socket_type="NodeSocketGeometry")
     else:  # Blender < 4.0
         ng.inputs.new("NodeSocketGeometry", "Geometry")
-        s = ng.inputs.new("NodeSocketFloat", "成長")
-        s.min_value, s.max_value, s.default_value = 0.0, 1.0, 1.0
         ng.outputs.new("NodeSocketGeometry", "Geometry")
     nodes, links = ng.nodes, ng.links
     gi = nodes.new("NodeGroupInput")
     go = nodes.new("NodeGroupOutput")
+    val = nodes.new("ShaderNodeValue")
+    val.name = val.label = GROWTH_NODE
+    val.outputs[0].default_value = value
     attr = nodes.new("GeometryNodeInputNamedAttribute")
     attr.data_type = "FLOAT"
     attr.inputs["Name"].default_value = "slime_dist"
@@ -257,7 +270,7 @@ def _growth_group():
     delete = nodes.new("GeometryNodeDeleteGeometry")
     delete.domain = "POINT"
     links.new(attr.outputs["Attribute"], cmp.inputs[0])
-    links.new(gi.outputs[1], cmp.inputs[1])
+    links.new(val.outputs[0], cmp.inputs[1])
     links.new(gi.outputs[0], delete.inputs["Geometry"])
     links.new(cmp.outputs["Result"], delete.inputs["Selection"])
     links.new(delete.outputs[0], go.inputs[0])
@@ -266,10 +279,7 @@ def _growth_group():
 
 def add_growth(obj, value):
     mod = obj.modifiers.new("成長", "NODES")
-    mod.node_group = _growth_group()
-    key = growth_key(mod)
-    if key:
-        mod[key] = value
+    mod.node_group = _new_growth_group("%s_%s" % (GROWTH_GROUP, obj.name), value)
     return mod
 
 
@@ -278,17 +288,9 @@ def growth_mod(obj):
                  and m.node_group.name.startswith(GROWTH_GROUP)), None)
 
 
-def growth_key(mod):
-    ng = mod.node_group
-    if hasattr(ng, "interface"):
-        for item in ng.interface.items_tree:
-            if getattr(item, "in_out", "") == "INPUT" and getattr(item, "socket_type", "") == "NodeSocketFloat":
-                return item.identifier
-    else:
-        for s in ng.inputs:
-            if s.type == "VALUE":
-                return s.identifier
-    return None
+def growth_node(obj):
+    mod = growth_mod(obj)
+    return mod.node_group.nodes.get(GROWTH_NODE) if mod else None
 
 
 # ----------------------------------------------------------------------

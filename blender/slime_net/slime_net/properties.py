@@ -12,12 +12,9 @@ def _growth_changed(self, context):
     if t is None:
         return
     for o in pipeline.network_objects(t):
-        mod = pipeline.growth_mod(o)
-        if mod is not None:
-            key = pipeline.growth_key(mod)
-            if key:
-                mod[key] = self.growth
-                o.update_tag()
+        node = pipeline.growth_node(o)
+        if node is not None:
+            node.outputs[0].default_value = self.growth
 
 
 def _reach_changed(self, context):

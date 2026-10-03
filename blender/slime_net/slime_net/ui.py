@@ -46,10 +46,9 @@ class SLIMENET_PT_main(_Base, bpy.types.Panel):
         nets = pipeline.network_objects(P.target)
         if nets:
             layout.prop(P, "growth", slider=True)
-            mod = pipeline.growth_mod(nets[0])
-            key = pipeline.growth_key(mod) if mod else None
-            if key:
-                layout.prop(mod, '["%s"]' % key, text="成長（キーフレーム用）")
+            node = pipeline.growth_node(nets[0])
+            if node is not None:
+                layout.prop(node.outputs[0], "default_value", text="成長（キーフレーム用）", slider=True)
 
 
 class SLIMENET_PT_origins(_Base, bpy.types.Panel):

@@ -1,7 +1,7 @@
 bl_info = {
     "name": "Slime Net (粘菌ネットワーク)",
     "author": "A_life",
-    "version": (1, 0, 1),
+    "version": (1, 0, 2),
     "blender": (3, 6, 0),
     "location": "3Dビューポート > サイドバー(N) > Slime Net",
     "description": "オブジェクトの一点から、表面に沿って粘菌のようなネットワークを広げる。アニメーションに追従",
