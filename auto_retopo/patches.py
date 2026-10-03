@@ -42,6 +42,12 @@ class Layout:
         self.curves = {}
         self.patches = []
         self.npatches = []
+        self.tpatches = []       # (a, b, c, d): one row doubling a-b to d-c
+        self.tpatch_tags = []
+        self.tag = None          # tag recorded with every patch added
+        self.patch_tags = []
+        self.npatch_tags = []
+        self.face_tags = []      # filled by build(): tag of every output face
 
     def point(self, name, uv):
         self.points[name] = np.asarray(uv, dtype=float)
@@ -52,6 +58,26 @@ class Layout:
 
     def patch(self, a, b, c, d):
         self.patches.append((a, b, c, d))
+        self.patch_tags.append(self.tag)
+
+    def tpatch(self, a, b, c, d):
+        """A one-row transition patch: the outer side d-c gets about twice
+        the segments of the inner side a-b (1-to-3 quad splits spread
+        along it; the end cells stay 1-to-1). Sides b-c / a-d are one edge."""
+        self.tpatches.append((a, b, c, d))
+        self.tpatch_tags.append(self.tag)
+
+    @staticmethod
+    def t_steps(n):
+        """Outer segments per inner segment of a transition patch: 1-to-3
+        splits on every other cell, never at the ends and never next to each
+        other (that would make 6-edge poles)."""
+        steps = [1] * n
+        for i in range(1, n - 1, 2):
+            steps[i] = 3
+        if n == 2:
+            steps[0] = 3
+        return steps
 
     def npatch(self, *corners):
         """An odd-sided patch (3 or 5 sides) filled with one quad per corner
@@ -60,6 +86,7 @@ class Layout:
         if len(corners) % 2 == 0:
             raise ValueError("npatch needs an odd number of corners")
         self.npatches.append(tuple(corners))
+        self.npatch_tags.append(self.tag)
 
     # ------------------------------------------------------------------
 
@@ -95,6 +122,10 @@ class Layout:
             n = len(cs)
             for i in range(1, n):
                 union(key(cs[0], cs[1]), key(cs[i], cs[(i + 1) % n]))
+        for a, b, c, d in self.tpatches:
+            union(key(b, c), key(d, a))
+            find(key(a, b))
+            find(key(d, c))
         groups = {}
         for k in list(parent):
             groups.setdefault(find(k), []).append(k)
@@ -117,6 +148,33 @@ class Layout:
             n = n or default
             for e in g:
                 seg[e] = n
+
+        # Transition patches: the outer side count follows from the inner one.
+        group_of = {}
+        for gi, g in enumerate(groups):
+            for e in g:
+                group_of[e] = gi
+        explicit = set()
+        for gi, g in enumerate(groups):
+            if any(k in counts or (k[1], k[0]) in counts for k in g):
+                explicit.add(gi)
+        changed = True
+        while changed:
+            changed = False
+            for a, b, c, d in self.tpatches:
+                n = seg[key(a, b)]
+                m = sum(self.t_steps(n))
+                go = group_of[key(d, c)]
+                if seg[key(d, c)] != m:
+                    if go in explicit:
+                        raise ValueError(f"transition patch {(a, b, c, d)} needs {m} outer segments")
+                    for e in groups[go]:
+                        seg[e] = m
+                    explicit.add(go)
+                    changed = True
+                if seg[key(b, c)] != 1:
+                    for e in groups[group_of[key(b, c)]]:
+                        seg[e] = 1
 
         verts = []
         index = {}
@@ -142,6 +200,7 @@ class Layout:
             return vid(k, self._curve(a, b)(i / n))
 
         faces = []
+        self.face_tags = []
         for pi, (a, b, c, d) in enumerate(self.patches):
             n = seg[key(a, b)]
             m = seg[key(b, c)]
@@ -169,13 +228,49 @@ class Layout:
                         grid[i][j] = vid(("F", pi, i, j), uv)
             # Orient the whole patch counter-clockwise in the layout plane
             # (decided from its corners, so folded interior cells cannot flip).
-            corners = [pa, pb, pc, pd]
-            area = sum(corners[k][0] * corners[(k + 1) % 4][1]
-                       - corners[(k + 1) % 4][0] * corners[k][1] for k in range(4))
+            # (decided from the sampled boundary curves: corners alone are
+            # not enough for strongly curved strips).
+            ring = ([c0(x) for x in np.linspace(0, 1, 9)[:-1]]
+                    + [d1(x) for x in np.linspace(0, 1, 9)[:-1]]
+                    + [c1(x) for x in np.linspace(1, 0, 9)[:-1]]
+                    + [d0(x) for x in np.linspace(1, 0, 9)[:-1]])
+            area = sum(ring[k][0] * ring[(k + 1) % len(ring)][1]
+                       - ring[(k + 1) % len(ring)][0] * ring[k][1] for k in range(len(ring)))
             for i in range(n):
                 for j in range(m):
                     f = (grid[i][j], grid[i + 1][j], grid[i + 1][j + 1], grid[i][j + 1])
                     faces.append(f if area > 0 else tuple(reversed(f)))
+                    self.face_tags.append(self.patch_tags[pi])
+
+        for pi, (a, b, c, d) in enumerate(self.tpatches):
+            n = seg[key(a, b)]
+            steps = self.t_steps(n)
+            m = sum(steps)
+            inner = [edge_vid(a, b, i, n) for i in range(n + 1)]
+            outer = [edge_vid(d, c, i, m) for i in range(m + 1)]
+            ring = ([self._curve(a, b)(x) for x in np.linspace(0, 1, 9)[:-1]]
+                    + [self._curve(b, c)(x) for x in np.linspace(0, 1, 3)[:-1]]
+                    + [self._curve(d, c)(x) for x in np.linspace(1, 0, 9)[:-1]]
+                    + [self._curve(a, d)(x) for x in np.linspace(1, 0, 3)[:-1]])
+            area = sum(ring[q][0] * ring[(q + 1) % len(ring)][1]
+                       - ring[(q + 1) % len(ring)][0] * ring[q][1] for q in range(len(ring)))
+            P = lambda v: verts[v]
+            pos = 0
+            for i in range(n):
+                i0, i1 = inner[i], inner[i + 1]
+                if steps[i] == 1:
+                    f = (i0, i1, outer[pos + 1], outer[pos])
+                    quads = [f]
+                else:
+                    o = outer[pos:pos + 4]
+                    x = vid(("TX", pi, i), 0.5 * P(o[1]) + 0.5 * (P(i0) + (P(i1) - P(i0)) / 3))
+                    y = vid(("TY", pi, i), 0.5 * P(o[2]) + 0.5 * (P(i0) + (P(i1) - P(i0)) * 2 / 3))
+                    quads = [(i0, x, o[1], o[0]), (x, y, o[2], o[1]),
+                             (y, i1, o[3], o[2]), (i0, i1, y, x)]
+                for f in quads:
+                    faces.append(f if area > 0 else tuple(reversed(f)))
+                    self.face_tags.append(self.tpatch_tags[pi])
+                pos += steps[i]
 
         for pi, cs in enumerate(self.npatches):
             n = len(cs)
@@ -227,5 +322,6 @@ class Layout:
                     for b in range(k):
                         f = (g[a][b], g[a + 1][b], g[a + 1][b + 1], g[a][b + 1])
                         faces.append(f if area > 0 else tuple(reversed(f)))
+                        self.face_tags.append(self.npatch_tags[pi])
 
         return np.array(verts), faces, point_ids

@@ -121,7 +121,7 @@ def vertex_normals(V, faces):
     return N / np.maximum(np.linalg.norm(N, axis=1), 1e-12)[:, None]
 
 
-def make_snapper(nearest, ray=None):
+def make_snapper(nearest, ray=None, normal=None, inside=None):
     """Snap function ``snap(V, faces, maxd)``: each vertex goes to the closest
     surface hit along its +/- normal (keeps neighbouring vertices in order on
     curved areas), falling back to the closest surface point."""
@@ -142,11 +142,38 @@ def make_snapper(nearest, ray=None):
             np.add.at(acc, F[:, k], el[:, k])
             np.add.at(cnt, F[:, k], 1)
         local = acc / np.maximum(cnt, 1)
+        if inside is not None:
+            (a0, a1), zone = inside
+            ab = a1 - a0
+            # Unclamped at the neck end: rays at the neck bottom stay level
+            # instead of slanting down onto the shoulders.
+            tt = np.clip(((V - a0) @ ab) / max(ab @ ab, 1e-12), 0.0, 2.0)
+            axis_pts = a0 + tt[:, None] * ab
+        else:
+            zone = None
         for i in range(len(V)):
+            if zone is not None and zone[i]:
+                # Cast from the head / neck axis outwards: the first skin hit
+                # is the scalp or the neck on the vertex's own side, never an
+                # ear sticking out of it, even if the vertex sank inside.
+                c = axis_pts[i]
+                d = V[i] - c
+                dist = float(np.linalg.norm(d))
+                if dist > 1e-9:
+                    hit = ray(c, d / dist, dist * 2.5)
+                    if hit is not None:
+                        out[i] = hit
+                        continue
             best = None
             lim = min(maxd, local[i] * 3.0)
             for sgn in (1.0, -1.0):
                 hit = ray(V[i], N[i] * sgn, lim)
+                if hit is not None and normal is not None:
+                    # Skip surfaces facing the other way (the back of an ear,
+                    # the inside of a nostril seen from outside...).
+                    hn = normal(hit)
+                    if hn is not None and float(np.dot(hn, N[i])) < 0.0:
+                        hit = None
                 if hit is not None:
                     d = np.linalg.norm(hit - V[i])
                     if best is None or d < best[0]:
@@ -158,7 +185,7 @@ def make_snapper(nearest, ray=None):
 
 
 def conform(V, faces, pins, nearest, iters=40, lam=0.5, mirror=None, plane=None, ray=None,
-            rest_shape=None):
+            rest_shape=None, normal=None, inside=None):
     """Make the warped template ``V`` lie on the surface while keeping its
     shape: alternate a Laplacian step that preserves the warped template's
     own Laplacian (so the designed spacing/edge flow survives) with snapping
@@ -171,7 +198,7 @@ def conform(V, faces, pins, nearest, iters=40, lam=0.5, mirror=None, plane=None,
     rest = adj.average(R0) - R0
     pin_idx, pin_co = pins
     size = float(np.linalg.norm(V.max(0) - V.min(0)))
-    snap = make_snapper(nearest, ray)
+    snap = make_snapper(nearest, ray, normal, inside)
     for it in range(iters):
         V = V + lam * ((adj.average(V) - V) - rest)
         V = snap(V, faces, size * 0.15)
@@ -184,7 +211,7 @@ def conform(V, faces, pins, nearest, iters=40, lam=0.5, mirror=None, plane=None,
 
 
 def fit_template(T0, faces, lm_index, lm_target, nearest, iters=40,
-                 mirror=None, plane=None, ray=None):
+                 mirror=None, plane=None, ray=None, normal=None, inside=None):
     """Full pipeline for a template with vertex positions ``T0``."""
     T0 = np.asarray(T0, float)
     src = T0[lm_index]
@@ -195,7 +222,8 @@ def fit_template(T0, faces, lm_index, lm_target, nearest, iters=40,
     if flipped:
         faces = [tuple(reversed(f)) for f in faces]
     V = conform(V, faces, (np.asarray(lm_index), np.asarray(lm_target, float)), nearest,
-                iters=iters, mirror=mirror, plane=plane, ray=ray)
+                iters=iters, mirror=mirror, plane=plane, ray=ray, normal=normal,
+                inside=inside)
     return V, faces
 
 
@@ -271,4 +299,27 @@ def relax_on_surface(V, faces, nearest_one, iters, lam=0.4):
             p = nearest_one(target[i])
             if np.linalg.norm(p - target[i]) < local[i] * 0.6:
                 V[i] = p
+    return V
+
+
+def smooth_border(V, faces, mask, nearest_one, iters=15, lam=0.5):
+    """Smooth an open border (e.g. the bottom of the neck) along itself:
+    each flagged border vertex moves towards the average of its two border
+    neighbours and is put back on the surface."""
+    count = {}
+    for f in faces:
+        for k in range(len(f)):
+            e = (min(f[k], f[(k + 1) % len(f)]), max(f[k], f[(k + 1) % len(f)]))
+            count[e] = count.get(e, 0) + 1
+    nb = {}
+    for (a, b), c in count.items():
+        if c == 1 and mask[a] and mask[b]:
+            nb.setdefault(a, []).append(b)
+            nb.setdefault(b, []).append(a)
+    ids = [v for v, n in nb.items() if len(n) == 2]
+    V = V.copy()
+    for _ in range(iters):
+        new = {v: V[v] + lam * ((V[nb[v][0]] + V[nb[v][1]]) * 0.5 - V[v]) for v in ids}
+        for v, p in new.items():
+            V[v] = nearest_one(p)
     return V

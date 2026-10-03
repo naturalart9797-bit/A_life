@@ -25,6 +25,13 @@ class AutoRetopoSettings(bpy.types.PropertyGroup):
                ('HAND', "Hand", "Hand: finger tubes with joint loops, palm, thumb")),
         default='FACE',
     )
+    coverage: EnumProperty(
+        name="Coverage",
+        items=(('FACE', "Face Mask", "Only the face (forehead to under the chin)"),
+               ('HEAD', "Whole Head", "The whole head and neck: face loops continue round the "
+                                      "skull, ear sockets, neck down to the neck guides")),
+        default='HEAD',
+    )
     symmetric: BoolProperty(
         name="Symmetric",
         description="Face: click only one side of the paired guides; the other side is "
@@ -34,7 +41,7 @@ class AutoRetopoSettings(bpy.types.PropertyGroup):
     )
     face_density: IntProperty(
         name="Density", default=2, min=1, max=3,
-        description="1: ~720 verts, 2: ~1800 verts, 3: ~3400 verts",
+        description="Face mask 1/2/3: ~780 / 2000 / 3900 verts, whole head ~1300 / 3300 / 6200",
     )
     iterations: IntProperty(
         name="Fit Iterations", default=80, min=5, max=300,
@@ -74,6 +81,7 @@ class VIEW3D_PT_auto_retopo(bpy.types.Panel):
         ob = context.active_object
         layout.row().prop(s, "kind", expand=True)
         if s.kind == 'FACE':
+            layout.row().prop(s, "coverage", expand=True)
             col = layout.column(align=True)
             col.prop(s, "symmetric")
             col.prop(s, "face_density")
@@ -87,7 +95,7 @@ class VIEW3D_PT_auto_retopo(bpy.types.Panel):
         if ob is None or ob.type != 'MESH':
             layout.label(text="Select the scan / sculpt mesh", icon='INFO')
             return
-        defs = G.definitions(s.kind, s.symmetric)
+        defs = G.definitions(s.kind, s.symmetric, s.coverage == 'HEAD')
         g = G.load(ob, s.kind)
         done = sum(d[0] in g for d in defs)
         box = layout.box()

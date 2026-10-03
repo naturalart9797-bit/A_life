@@ -9,11 +9,12 @@ from . import hand_builder
 PROP = "auto_retopo_guides"
 
 
-def definitions(kind, symmetric=True):
+def definitions(kind, symmetric=True, head=False):
     """[(id, Japanese label, English label)] in click order."""
     if kind == 'FACE':
+        lms = face_template.landmarks(head)
         out = []
-        for lid, _p, paired, ja, en in face_template.LANDMARKS:
+        for lid, _p, paired, ja, en in lms:
             if paired:
                 if symmetric:
                     out.append((lid, ja + "（片側）", en + " (one side)"))
@@ -22,7 +23,7 @@ def definitions(kind, symmetric=True):
             else:
                 out.append((lid, ja, en))
         if not symmetric:
-            for lid, _p, paired, ja, en in face_template.LANDMARKS:
+            for lid, _p, paired, ja, en in lms:
                 if paired:
                     out.append((lid + "_m", ja + "（左）", en + " (left)"))
         return out

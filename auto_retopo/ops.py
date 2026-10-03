@@ -77,7 +77,7 @@ def _settings(context):
 
 def _defs(context):
     s = _settings(context)
-    return G.definitions(s.kind, s.symmetric)
+    return G.definitions(s.kind, s.symmetric, s.coverage == 'HEAD')
 
 
 # ---------------------------------------------------------------------------
@@ -139,13 +139,13 @@ _HAND_SKETCH = {   # back of a right hand, wrist at the bottom (x right, y up)
 _diagram_cache = {}
 
 
-def _diagram(kind, symmetric):
+def _diagram(kind, symmetric, head=False):
     """(segments [(p, q)], {guide id: point}) in a unit box."""
-    key = (kind, symmetric)
+    key = (kind, symmetric, head)
     if key in _diagram_cache:
         return _diagram_cache[key]
     if kind == 'FACE':
-        T = face_template.FaceTemplate(1)
+        T = face_template.FaceTemplate(1, head)
         uv = T.uv
         edges = set()
         for f in T.faces:
@@ -174,13 +174,13 @@ def _diagram(kind, symmetric):
     return out
 
 
-def draw_diagram(context, kind, symmetric, current, placed):
+def draw_diagram(context, kind, symmetric, current, placed, head=False):
     """Small map in the lower-right corner: the template (face) or a hand
     sketch, with the guide to click next in red and placed guides in green."""
     region = context.region
     ui = context.preferences.system.ui_scale
     size = 230 * ui
-    segs, pts, extent = _diagram(kind, symmetric)
+    segs, pts, extent = _diagram(kind, symmetric, head)
     w, h = size * extent[0], size * extent[1]
     x0 = region.width - w - 30 * ui
     y0 = 40 * ui
@@ -478,7 +478,9 @@ class OBJECT_OT_auto_retopo_guides(bpy.types.Operator):
                       "Backspace: 1つ戻す   Enter: 確定   Esc: 取消", 12, (1, 1, 1, 0.95)))
         _text_block(context, 24, 60, lines)
         cur = self.defs[self.current][0] if self.current < n else None
-        draw_diagram(context, self.kind, _settings(context).symmetric, cur, set(self.guides))
+        st = _settings(context)
+        draw_diagram(context, self.kind, st.symmetric, cur, set(self.guides),
+                     st.coverage == 'HEAD')
 
 
 def _text_block(context, x, y, lines):
@@ -523,7 +525,8 @@ class OBJECT_OT_auto_retopo_generate(bpy.types.Operator):
             if s.kind == 'FACE':
                 V, F = face_template.build_face(pts, surf.nearest_many, density=s.face_density,
                                                 symmetric=s.symmetric, iters=s.iterations,
-                                                samples=surf.co, ray=surf.ray)
+                                                samples=surf.co, ray=surf.ray,
+                                                head=s.coverage == 'HEAD', normal=surf.normal)
                 F = fit.orient_faces(V, F, surf.normal)
             else:
                 V, F = hand_builder.build_hand(pts, surf, segments=int(s.hand_segments),
@@ -534,7 +537,8 @@ class OBJECT_OT_auto_retopo_generate(bpy.types.Operator):
             self.report({'ERROR'}, f"生成に失敗しました: {ex}")
             return {'CANCELLED'}
 
-        name = f"{obj.name}_retopo_{'face' if s.kind == 'FACE' else 'hand'}"
+        part = 'hand' if s.kind == 'HAND' else ('head' if s.coverage == 'HEAD' else 'face')
+        name = f"{obj.name}_retopo_{part}"
         me = bpy.data.meshes.new(name)
         me.from_pydata([tuple(p) for p in V], [], [list(f) for f in F])
         me.validate()
