@@ -21,6 +21,9 @@ from .patches import Layout, bezier, ellipse_arc
 EYE_C = (0.38, 0.22)
 EYE_IN = (0.12, 0.05)    # eye opening radii
 EYE_OUT = (0.22, 0.17)   # outer edge of the eye loops
+NOSTRIL_C = (0.12, -0.09)
+NOSTRIL_IN = (0.045, 0.03)   # nostril opening radii
+NOSTRIL_OUT = (0.075, 0.055)  # loop around the nostril (alar rim)
 MOUTH_C = (0.0, -0.45)
 MOUTH_IN = (0.20, 0.035)
 MOUTH_OUT = (0.32, 0.19)
@@ -75,7 +78,21 @@ def _layout():
     L.patch("F", "N1", "ET", "OT")     # forehead
     L.patch("OT", "ET", "ER", "OR")    # brow / temple
     L.patch("N1", "N2", "EL", "ET")    # nose bridge
-    L.patch("N2", "MT", "Q", "EL")     # nose side
+    # Nose side with a nostril: the quad N2-MT-Q-EL becomes two rings around
+    # the nostril opening (nostril rim + alar loops), keeping its outer sides.
+    corner = {"N2": 3 * H / 2, "MT": 5 * H / 2, "Q": 7 * H / 2, "EL": H / 2}
+    for pre, (rx, ry) in (("h", NOSTRIL_IN), ("r", NOSTRIL_OUT)):
+        for c, ang in corner.items():
+            L.point(pre + c, (NOSTRIL_C[0] + rx * math.cos(ang), NOSTRIL_C[1] + ry * math.sin(ang)))
+        order = ["EL", "N2", "MT", "Q"]
+        for k in range(4):
+            a, b = order[k], order[(k + 1) % 4]
+            a0 = corner[a]
+            a1 = corner[b] if corner[b] > a0 else corner[b] + 4 * H
+            L.curve(pre + a, pre + b, ellipse_arc(NOSTRIL_C, rx, ry, a0, a1))
+    for a, b in (("N2", "MT"), ("MT", "Q"), ("Q", "EL"), ("EL", "N2")):
+        L.patch(a, b, "r" + b, "r" + a)            # alar loops
+        L.patch("r" + a, "r" + b, "h" + b, "h" + a)  # nostril rim
     L.patch("EL", "Q", "K", "EB")      # under the eye (inner)
     L.patch("EB", "K", "OR", "ER")     # cheek bone
     L.patch("MT", "MR", "K", "Q")      # nasolabial
@@ -90,6 +107,8 @@ def counts(density=1):
     return {
         ("eR", "ER"): 2 * d,      # loops around the eye
         ("mT", "MT"): 2 * d,      # loops around the mouth
+        ("N2", "rN2"): 2 * d,     # alar loops around the nostril
+        ("rN2", "hN2"): d,        # nostril rim loops
         ("ER", "ET"): 3 * d,      # eye quarter (outer-top)
         ("ET", "EL"): 3 * d,      # eye quarter (inner-top) / nose bridge
         ("EL", "EB"): 3 * d,      # eye quarter (inner-bottom) / upper lip
@@ -125,35 +144,66 @@ LANDMARKS = [
     ("eye_top", "eT", True, "上まぶたの中央", "Upper eyelid centre"),
     ("eye_bottom", "eB", True, "下まぶたの中央", "Lower eyelid centre"),
     ("mouth_corner", "mR", True, "口角", "Mouth corner"),
+    ("ala", "Q", True, "小鼻のわき（小鼻の付け根の外側）", "Side of the nose wing"),
+    ("nostril", (NOSTRIL_C[0] + NOSTRIL_IN[0], NOSTRIL_C[1]), True,
+     "鼻の穴の外側の端", "Outer edge of the nostril"),
     ("temple", "OR", True, "こめかみ（目の高さのマスク端）", "Temple, mask edge at eye level"),
     ("jaw", "OJ", True, "エラ（口の高さのマスク端）", "Jaw angle, mask edge at mouth level"),
     ("top_side", "OT", True, "おでこの上の端（マスク上端の角）", "Top corner of mask"),
 ]
 
 
+def _corner_quality(uv, f):
+    """Smallest normalised corner cross product of a quad (< 0: folded)."""
+    q = 1.0
+    for k in range(4):
+        a, b, c = uv[f[k - 1]], uv[f[k]], uv[f[(k + 1) % 4]]
+        e0, e1 = b - a, c - b
+        den = np.linalg.norm(e0) * np.linalg.norm(e1)
+        if den < 1e-12:
+            return -1.0
+        q = min(q, (e0[0] * e1[1] - e0[1] * e1[0]) / den)
+    return q
+
+
 def _relax2d(uv, faces, fixed, iters=30, lam=0.5):
-    """Smooth interior vertices of the half layout (boundary, centre line and
-    layout corners stay) so Coons-filled patches become even and convex."""
+    """Smart Laplacian smoothing of the half layout: each vertex moves to
+    the average of its neighbours only if that does not make the worst
+    corner of its faces worse, so folds get untangled and none are created.
+    The layout boundary (outline, centre line, openings) stays put."""
     n = len(uv)
     nbrs = [set() for _ in range(n)]
+    vfaces = [[] for _ in range(n)]
     edge_count = {}
-    for f in faces:
+    for fi, f in enumerate(faces):
         for k in range(4):
             a, b = f[k], f[(k + 1) % 4]
             nbrs[a].add(b)
             nbrs[b].add(a)
+            vfaces[a].append(fi)
             key = (min(a, b), max(a, b))
             edge_count[key] = edge_count.get(key, 0) + 1
     boundary = {v for e, c in edge_count.items() if c == 1 for v in e}
     movable = [i for i in range(n) if i not in fixed and i not in boundary]
     uv = uv.copy()
+    nb = [list(s) for s in nbrs]
     for _ in range(iters):
-        new = uv.copy()
         for i in movable:
-            avg = uv[list(nbrs[i])].mean(axis=0)
-            new[i] = uv[i] + lam * (avg - uv[i])
-        uv = new
+            old = uv[i].copy()
+            before = min(_corner_quality(uv, faces[fi]) for fi in vfaces[i])
+            uv[i] = old + lam * (uv[nb[i]].mean(axis=0) - old)
+            after = min(_corner_quality(uv, faces[fi]) for fi in vfaces[i])
+            if after < min(before, 0.05):
+                uv[i] = old
     return uv
+
+
+def _vertex_of(p, uv, pts):
+    """Template vertex of a landmark: a layout point name or the vertex
+    nearest to a (u, v) position."""
+    if isinstance(p, str):
+        return pts[p]
+    return int(np.argmin(np.linalg.norm(uv - np.asarray(p), axis=1)))
 
 
 class FaceTemplate:
@@ -161,7 +211,10 @@ class FaceTemplate:
 
     def __init__(self, density=1):
         uv, faces, pts = _layout().build(counts(density))
-        uv = _relax2d(uv, faces, fixed={pts[p] for _l, p, *_r in LANDMARKS},
+        lm_vid = {lid: _vertex_of(p, uv, pts) for lid, p, *_r in LANDMARKS}
+        # Only the layout boundary (outline, centre line, eye / mouth /
+        # nostril openings) stays put; every inner vertex evens out.
+        uv = _relax2d(uv, faces, fixed=set(),
                       iters=8 * max(1, int(density)))
         n = len(uv)
         center = np.abs(uv[:, 0]) < 1e-9
@@ -183,7 +236,7 @@ class FaceTemplate:
         # Landmark vertex indices: right side (u > 0) and mirrored side.
         self.landmarks = []
         for lid, p, paired, ja, en in LANDMARKS:
-            i = pts[p]
+            i = lm_vid[lid]
             self.landmarks.append((lid, i, ja, en, False))
             if paired:
                 self.landmarks.append((lid + "_m", int(mirror[i]), ja, en, True))

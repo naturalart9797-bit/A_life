@@ -40,6 +40,20 @@ class AutoRetopoSettings(bpy.types.PropertyGroup):
         name="Fit Iterations", default=40, min=5, max=200,
         description="Snap / relax iterations when fitting the face template",
     )
+    hand_segments: EnumProperty(
+        name="Finger Edges",
+        items=(('12', "12", "12 edges around each finger (detailed)"),
+               ('8', "8", "8 edges around each finger (light)")),
+        default='12',
+    )
+    knuckle_loops: BoolProperty(
+        name="Knuckle Loops", default=True,
+        description="Oval loops on the back of every joint (extra edges for bending)",
+    )
+    forearm_loops: IntProperty(
+        name="Forearm Loops", default=3, min=0, max=12,
+        description="Loops continued past the wrist (only where the scan has a forearm)",
+    )
     show_guides: BoolProperty(name="Show Guides", default=True)
 
 
@@ -59,6 +73,11 @@ class VIEW3D_PT_auto_retopo(bpy.types.Panel):
             col.prop(s, "symmetric")
             col.prop(s, "face_density")
             col.prop(s, "iterations")
+        else:
+            col = layout.column(align=True)
+            col.row().prop(s, "hand_segments", expand=True)
+            col.prop(s, "knuckle_loops")
+            col.prop(s, "forearm_loops")
         if ob is None or ob.type != 'MESH':
             layout.label(text="Select the scan / sculpt mesh", icon='INFO')
             return
@@ -69,7 +88,10 @@ class VIEW3D_PT_auto_retopo(bpy.types.Panel):
         box.label(text=f"{ob.name}: guides {done}/{len(defs)}",
                   icon='CHECKMARK' if done == len(defs) else 'DOT')
         col = box.column(align=True)
-        col.operator("object.auto_retopo_guides", icon='EMPTY_SINGLE_ARROW')
+        if ops._GuideTool.running:
+            col.label(text="Placing guides… (Enter to finish)", icon='REC')
+        else:
+            col.operator("object.auto_retopo_guides", icon='EMPTY_SINGLE_ARROW')
         col.operator("object.auto_retopo_clear", icon='TRASH')
         box.prop(s, "show_guides")
         row = layout.row()

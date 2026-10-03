@@ -141,12 +141,21 @@ def draw_guides_3d(context, obj, guides, current=None, hover=None):
 def draw_labels_2d(context, obj, guides, defs):
     region, rv3d = context.region, context.region_data
     order = {d[0]: i + 1 for i, d in enumerate(defs)}
-    for k, v in guides.items():
+    placed = []
+    for k in sorted(guides, key=lambda k: order.get(k, 0)):
         if k not in order:
             continue
-        p = view3d_utils.location_3d_to_region_2d(region, rv3d, obj.matrix_world @ Vector(v))
-        if p is not None:
-            _text(p.x + 8, p.y + 6, str(order[k]), size=12)
+        p = view3d_utils.location_3d_to_region_2d(region, rv3d,
+                                                  obj.matrix_world @ Vector(guides[k]))
+        if p is None:
+            continue
+        ui = context.preferences.system.ui_scale
+        x, y = p.x + 8 * ui, p.y + 6 * ui
+        # Nudge labels of guides that sit close together so they never overlap.
+        while any(abs(x - qx) < 18 * ui and abs(y - qy) < 14 * ui for qx, qy in placed):
+            y += 14 * ui
+        placed.append((x, y))
+        _text(x, y, str(order[k]), size=12 * ui)
 
 
 _persistent_handles = []
@@ -177,6 +186,7 @@ def _draw_persistent_2d():
 
 
 def register_draw():
+    unregister_draw()   # never stack handlers (e.g. after a reinstall)
     _persistent_handles.append(bpy.types.SpaceView3D.draw_handler_add(
         _draw_persistent_3d, (), 'WINDOW', 'POST_VIEW'))
     _persistent_handles.append(bpy.types.SpaceView3D.draw_handler_add(
@@ -206,10 +216,15 @@ class OBJECT_OT_auto_retopo_guides(bpy.types.Operator):
     @classmethod
     def poll(cls, context):
         ob = context.active_object
-        return (ob is not None and ob.type == 'MESH' and context.mode == 'OBJECT'
+        # Only one placement session at a time (a second one would draw its
+        # own prompt on top of the first).
+        return (not _GuideTool.running and ob is not None and ob.type == 'MESH'
+                and context.mode == 'OBJECT'
                 and context.area is not None and context.area.type == 'VIEW_3D')
 
     def invoke(self, context, event):
+        if _GuideTool.running:
+            return {'CANCELLED'}
         self.obj = context.active_object
         self.area = context.area
         self.region = context.region
@@ -370,18 +385,28 @@ class OBJECT_OT_auto_retopo_guides(bpy.types.Operator):
         draw_labels_2d(context, self.obj, self.guides, self.defs)
         n = len(self.defs)
         done = sum(d[0] in self.guides for d in self.defs)
-        x, y = 24, 120
+        lines = []   # (text, size, colour), top to bottom
         if self.current < n:
             lid, ja, en = self.defs[self.current]
             state = "（配置済み・クリックで置き直し）" if lid in self.guides else ""
-            _text(x, y + 44, f"ガイド {self.current + 1}/{n}：{ja}{state}", size=18,
-                  color=(1.0, 0.9, 0.3, 1.0))
-            _text(x, y + 22, en, size=13)
+            lines.append((f"ガイド {self.current + 1}/{n}：{ja}{state}", 18, (1.0, 0.9, 0.3, 1.0)))
+            lines.append((en, 13, (1, 1, 1, 0.95)))
         else:
-            _text(x, y + 44, f"全 {n} 点 配置済み — Enter で確定", size=18,
-                  color=(0.4, 1.0, 0.5, 1.0))
-        _text(x, y, f"{done}/{n} 配置済み   LMB: 配置 / ドラッグで移動   ←→: ガイド選択   "
-                    "Backspace: 1つ戻す   Enter: 確定   Esc: 取消", size=12)
+            lines.append((f"全 {n} 点 配置済み — Enter で確定", 18, (0.4, 1.0, 0.5, 1.0)))
+        lines.append((f"{done}/{n} 配置済み   LMB: 配置 / ドラッグで移動   ←→: ガイド選択   "
+                      "Backspace: 1つ戻す   Enter: 確定   Esc: 取消", 12, (1, 1, 1, 0.95)))
+        _text_block(context, 24, 60, lines)
+
+
+def _text_block(context, x, y, lines):
+    """Stack lines upwards from (x, y) using the real text height, so lines
+    never overlap whatever the UI scale is."""
+    ui = context.preferences.system.ui_scale
+    for text, size, colour in reversed(lines):
+        blf.size(0, size * ui)
+        h = blf.dimensions(0, "Hgあ")[1]
+        _text(x * ui, y, text, size=size * ui, color=colour)
+        y += h + 8 * ui
 
 
 # ---------------------------------------------------------------------------
@@ -417,7 +442,9 @@ class OBJECT_OT_auto_retopo_generate(bpy.types.Operator):
                                                 symmetric=s.symmetric, iters=s.iterations)
                 F = fit.orient_faces(V, F, surf.normal)
             else:
-                V, F = hand_builder.build_hand(pts, surf)
+                V, F = hand_builder.build_hand(pts, surf, segments=int(s.hand_segments),
+                                               forearm=s.forearm_loops,
+                                               knuckle_loops=s.knuckle_loops)
         except (ValueError, np.linalg.LinAlgError) as ex:
             self.report({'ERROR'}, f"生成に失敗しました: {ex}")
             return {'CANCELLED'}
