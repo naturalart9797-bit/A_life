@@ -1,0 +1,11 @@
+schema_version = "1.0.0"
+
+id = "slime_net"
+version = "1.0.0"
+name = "Slime Net"
+tagline = "Grow a slime-mould like network over an object from a point"
+maintainer = "A_life"
+type = "add-on"
+tags = ["Add Mesh", "Animation"]
+blender_version_min = "4.2.0"
+license = ["SPDX:GPL-3.0-or-later"]
