@@ -50,6 +50,25 @@ def sync_display(o):
     o.empty_display_size = max(o.vine_grow_reach / sc, 1e-6)
 
 
+def origin_density(o, P):
+    d = getattr(o, "vine_grow_density", -1.0)
+    return P.tangle_density if d < 0.0 else d
+
+
+DENSITY_DISPLAY = 0.02  # sphere radius (m) of a point at 10 vines / 100 cm^2
+
+
+def sync_density_display(o):
+    """In density mode the sphere size shows the density (cube root, so 8x denser = 2x bigger)."""
+    if o.vine_grow_density < 0.0:
+        return
+    sc = max(o.matrix_world.to_scale()) or 1.0
+    size = DENSITY_DISPLAY
+    if o.parent is not None and max(o.parent.dimensions) > 1e-6:
+        size *= max(o.parent.dimensions) / 1.7
+    o.empty_display_size = max(size * (max(o.vine_grow_density, 0.05) / 10.0) ** (1.0 / 3.0) / sc, 1e-6)
+
+
 def network_objects(target):
     return [o for o in bpy.data.objects if o.get(SOURCE_PROP) == target.name]
 
@@ -79,6 +98,8 @@ def add_origin(context, target, location, reach):
     o.hide_render = True
     o.matrix_world = target.matrix_world @ o.matrix_basis
     o.vine_grow_reach = reach
+    if context.scene.vine_grow.mode == "DENSITY":
+        o.vine_grow_density = context.scene.vine_grow.tangle_density
     others = [x.get("vine_grow_order", 0) for x in origin_objects(target) if x != o]
     o["vine_grow_order"] = (max(others) + 1) if others else 0
     return o
@@ -105,16 +126,18 @@ def generate(report, context, target):
         for o in origins:
             hit = sampler.nearest(o.matrix_world.translation)
             if hit is not None:
-                opts.append((hit, origin_reach(o)))
+                opts.append((hit, origin_density(o, P) if P.mode == "DENSITY" else origin_reach(o)))
         if not opts:
             return None, "起点の近くに対象の面がありません"
 
         push = colonize.Pusher(sampler, P.clearance * scale)
         tree = colonize.Tree()
         if P.mode == "DENSITY":
+            if not any(v > 0.0 for _, v in opts):
+                return None, "密度が0より大きい点がありません"
             field = tangle.Field(sampler, opts, P, scale, rng)
             if not field.ok():
-                return None, "範囲が小さすぎるか、起点の近くに面がありません。範囲を広げてください"
+                return None, "点の近くに対象の面がありません。「密度の広がり」を大きくしてみてください"
             radii = tangle.grow(tree, sampler, field, P, scale, push, rng)
             if len(tree.pos) < 2:
                 return None, "つるが伸びませんでした（密度・長さを確認）"

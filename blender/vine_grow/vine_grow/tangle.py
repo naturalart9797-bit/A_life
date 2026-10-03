@@ -1,8 +1,8 @@
 """Density mode: climbing vines growing thickly around the points.
 
-The points say *where* the plant should be dense (a density field that falls
-off along the body surface within each point's range). Vines start where the
-field is high and climb in random, curling directions, so there is no overall
+Each point carries its own density (vines per 100 cm^2) that fades smoothly
+along the body surface, so dense and sparse parts can be set point by point,
+with no hard range. Vines start where the field is high and climb in random, curling directions, so there is no overall
 flow. Each vine is one continuous stem, thick at its base and thin at its tip,
 with internodes (slight swellings), side branches and tendrils:
 
@@ -11,7 +11,8 @@ with internodes (slight swellings), side branches and tendrils:
 * some tips leave the body and reach out into the air;
 * tendrils coil around a neighbouring stem when one is in reach, otherwise
   they curl up on their own.
-Near the edge of a range the vines turn back toward the dense part.
+Each point sets its own density; vines lean back toward the dense parts
+but are free to wander anywhere.
 """
 
 import bisect
@@ -26,28 +27,40 @@ UP = Vector((0.0, 0.0, 1.0))
 
 
 class Field:
-    """Density on the body surface: max over points of exp(-k (geodesic d / range)^2)."""
+    """Vine density on the body surface (vines per 100 cm^2).
 
-    def __init__(self, sampler, opts, P, scale, rng):
-        reaches = [r for _, r in opts]
-        spacing = max(min(reaches) / 10.0, max(reaches) / 28.0, 0.002 * scale)
-        locs = [h.loc for h, _ in opts]
-        self.nodes = surface.scatter_nodes(sampler, locs, max(reaches), spacing, rng)
+    Every point adds its own density, fading smoothly with the distance along
+    the body (gaussian, width = falloff). Nothing is cut off: the vines may
+    wander anywhere, the field only decides where they are thick or sparse."""
+
+    def __init__(self, sampler, pts, P, scale, rng):
+        sigma = max(P.falloff * scale, 0.005 * scale)
+        extent = sigma * 2.5
+        spacing = max(sigma / 8.0, 0.002 * scale)
+        locs = [h.loc for h, _ in pts]
+        self.nodes = surface.scatter_nodes(sampler, locs, extent, spacing, rng)
         self.spacing = spacing
         n = len(self.nodes)
         self.dens = [0.0] * n
-        self.dist = [math.inf] * n  # distance (relative to range) to the nearest point: drives the growth animation
+        self.dist = [math.inf] * n  # distance to the nearest point: drives the growth animation
+        self.max = 0.0
+        self.total = 0.0
         if n < 4:
             return
         edges = surface.connect(sampler, self.nodes, spacing)
-        k = 1.0 + P.concentration * 5.0
-        for hit, reach in opts:
+        for hit, value in pts:
+            if value <= 0.0:
+                continue
             s = surface.nearest_node(self.nodes, hit.loc)
             for i, d in enumerate(surface.geodesic(self.nodes, edges, [s])):
-                u = d / max(reach, 1e-9)
-                if u <= 1.0:
-                    self.dens[i] = max(self.dens[i], math.exp(-k * u * u) - math.exp(-k) * u * u)
+                if d < extent:
+                    self.dens[i] += value * math.exp(-(d / sigma) ** 2)
                     self.dist[i] = min(self.dist[i], d)
+        self.max = max(self.dens)
+        if self.max > 0.0 and P.contrast != 1.0:
+            # sharpen dense vs sparse while keeping each point's peak value
+            m = self.max
+            self.dens = [m * (x / m) ** P.contrast for x in self.dens]
         self.kd = KDTree(n)
         for i, nd in enumerate(self.nodes):
             self.kd.insert(nd.co, i)
@@ -80,9 +93,9 @@ class Field:
         i = min(bisect.bisect_left(self.cdf, rng.random() * self.total), len(self.cdf) - 1)
         return self.nodes[i]
 
-    def area(self):
-        """Integral of the density over the surface (m^2)."""
-        return self.total * self.spacing * self.spacing
+    def count(self, scale):
+        """Number of vines: integral of the density (per 100 cm^2) over the surface."""
+        return self.total * self.spacing * self.spacing / (0.01 * scale * scale)
 
 
 class Occupancy:
@@ -189,19 +202,19 @@ class Grower:
                 skip.discard(parent_vid)
             u = j / steps
             dens = self.field.at(ps)
-            if dens < 0.01 and j > 2:
-                break
             nz = noise.noise(seed + Vector((s / self.curl_len, 0.0, 0.0)))
             ang = (curl * 0.25 + nz * P.curl * 1.6) * step / self.curl_len * math.tau * 0.25
             side = n.cross(d)
             if side.length_squared > 1e-12:
                 side.normalize()
                 probe = step * 4.0
-                edge = max(0.0, 1.0 - dens / 0.3)  # turn back only near the rim of the range
-                if edge > 0.0 and self.field.at(ps + d * probe) < dens:
+                # leaning back toward the dense parts (keeps sparse areas sparse)
+                fm = self.field.max or 1.0
+                edge = max(0.0, 1.0 - dens / fm)
+                if P.containment > 0.0 and edge > 0.0 and self.field.at(ps + d * probe) < dens:
                     dl = self.field.at(ps + side * probe)
                     dr = self.field.at(ps - side * probe)
-                    ang += P.containment * edge * (dl - dr) / max(dens, 0.05) * 0.8
+                    ang += P.containment * edge * (dl - dr) / max(dens, fm * 0.05) * 0.8
             d = Matrix.Rotation(ang, 3, n) @ d
             want = ps + d * step
             nh = self.sampler.nearest(want)
@@ -327,8 +340,7 @@ class Grower:
     # ------------------------------------------------------------------
     def run(self):
         P, rng, field = self.P, self.rng, self.field
-        # density = metres of stem per 100 cm^2 at the centre -> number of vines
-        count = int(round(P.tangle_density * field.area() / (0.01 * self.scale * self.scale)))
+        count = int(round(field.count(self.scale)))
         count = max(1, min(count, 5000))
         self.queue = []
         for _ in range(count):

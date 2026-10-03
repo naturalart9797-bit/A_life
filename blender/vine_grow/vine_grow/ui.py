@@ -68,7 +68,8 @@ class VINEGROW_PT_origins(_Base, bpy.types.Panel):
         row.operator("vine_grow.place_origin", text="経由点を置く" if route_mode else "起点を置く",
                      icon="RESTRICT_SELECT_OFF")
         row.operator("vine_grow.origin_at_cursor", text="", icon="PIVOT_CURSOR")
-        layout.prop(P, "default_width" if route_mode else "default_reach")
+        density_mode = P.mode == "DENSITY"
+        layout.prop(P, "default_width" if route_mode else "tangle_density" if density_mode else "default_reach")
         origins = pipeline.origin_objects(P.target)
         if not origins:
             layout.label(text="対象の上を順番にクリックして置きます" if route_mode else "対象の上をクリックして起点を置きます",
@@ -77,7 +78,9 @@ class VINEGROW_PT_origins(_Base, bpy.types.Panel):
             row = layout.row(align=True)
             sel = o.name in context.view_layer.objects and o.select_get()
             row.operator("vine_grow.origin_select", text="%d. %s" % (k + 1, o.name), depress=sel).name = o.name
-            if o.vine_grow_reach > 0.0:
+            if density_mode:
+                row.prop(o, "vine_grow_density", text="密度")
+            elif o.vine_grow_reach > 0.0:
                 row.prop(o, "vine_grow_reach", text="幅" if route_mode else "範囲")
             else:
                 row.prop(o, "empty_display_size", text="幅" if route_mode else "範囲")
@@ -91,7 +94,7 @@ class VINEGROW_PT_origins(_Base, bpy.types.Panel):
             layout.label(text="1→2→3… の順につるが通過（球の大きさ＝束の幅）", icon="INFO")
         else:
             layout.label(text="範囲 = 球の大きさ（体に沿った距離で広がる）" if P.mode == "RADIAL"
-                         else "球の中ほど密に茂る（球の大きさ＝範囲）", icon="INFO")
+                         else "点ごとに密度を設定（球の大きさ＝密度）", icon="INFO")
 
 
 class VINEGROW_PT_network(_Base, bpy.types.Panel):
@@ -105,7 +108,7 @@ class VINEGROW_PT_network(_Base, bpy.types.Panel):
         P = context.scene.vine_grow
         layout = self.layout
         if P.mode == "DENSITY":
-            _cols(layout, P, ("tangle_density", "concentration", "containment"),
+            _cols(layout, P, ("falloff", "contrast", "containment"),
                   ("tangle_length", "curl", "curl_length"),
                   ("internode", "fine_branch", "tendril_chance"),
                   ("spread", "cling", "fine_aerial", "aerial_lift", "clearance"),

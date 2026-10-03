@@ -17,6 +17,20 @@ def _growth_changed(self, context):
             node.outputs[0].default_value = self.growth
 
 
+def _mode_changed(self, context):
+    from . import pipeline
+    if self.target is None:
+        return
+    for o in pipeline.origin_objects(self.target):
+        if self.mode == "DENSITY":
+            if o.vine_grow_density < 0.0:
+                o.vine_grow_density = self.tangle_density
+            else:
+                pipeline.sync_density_display(o)
+        elif o.vine_grow_reach > 0.0:
+            pipeline.sync_display(o)
+
+
 def _reach_changed(self, context):
     from . import pipeline
     pipeline.sync_display(self)
@@ -33,7 +47,7 @@ class VineGrowSettings(bpy.types.PropertyGroup):
                                  description="新しく置く起点からつるが広がる範囲（体に沿った距離）")
 
     mode: EnumProperty(
-        name="生え方", default="DENSITY",
+        name="生え方", default="DENSITY", update=_mode_changed,
         items=[("DENSITY", "密度（起点の周りに茂る）", "起点の周りほど密に、細いつるが方向なく絡まり合って茂る"),
                ("ROUTE", "経路（起点を通過）", "起点を順番に通る経路に沿って、つるが絡み合いながら伸びる"),
                ("RADIAL", "放射（起点から広がる）", "起点から周囲に枝分かれしながら広がる")])
@@ -56,18 +70,20 @@ class VineGrowSettings(bpy.types.PropertyGroup):
     shoot_length: FloatProperty(name="脇芽の長さ", default=0.05, min=0.0, soft_max=0.5, unit="LENGTH")
 
     # --- density mode ----------------------------------------------------
-    tangle_density: FloatProperty(name="密度(本/100cm²)", default=5.0, min=0.1, soft_max=200.0,
-                                  description="起点の中心付近で、100cm²あたりに生えるつるの本数")
-    concentration: FloatProperty(name="中心への集まり", default=0.35, min=0.0, max=1.0, subtype="FACTOR",
-                                 description="0: 範囲内に均一 / 1: 起点の中心に強く集まる")
+    tangle_density: FloatProperty(name="新しい点の密度", default=6.0, min=0.0, soft_max=200.0,
+                                  description="新しく置く点の密度（その点の上での、100cm²あたりのつるの本数）")
+    falloff: FloatProperty(name="密度の広がり", default=0.12, min=0.005, soft_max=0.5, unit="LENGTH",
+                           description="各点の密度が体に沿ってなめらかに薄れていく距離。範囲の制限ではなく、つるはどこへでも伸びる")
+    contrast: FloatProperty(name="粗密の強さ", default=1.5, min=0.3, max=6.0,
+                            description="密な所と疎な所の差を強調する。1: そのまま / 大きいほど、密な所はより密に、疎な所はより疎に")
     tangle_length: FloatProperty(name="つるの長さ", default=0.3, min=0.005, soft_max=0.5, unit="LENGTH",
                                  description="1本のつるの平均の長さ")
     curl: FloatProperty(name="うねり", default=0.8, min=0.0, max=4.0,
                         description="つるが曲がりくねる強さ。大きいとループや渦を描いて絡まる")
     curl_length: FloatProperty(name="うねりの大きさ", default=0.025, min=0.001, soft_max=0.2, unit="LENGTH",
                                description="曲がりくねりの1つの弧の大きさ。小さいほど細かくうねる")
-    containment: FloatProperty(name="範囲に留まる強さ", default=1.0, min=0.0, max=3.0,
-                               description="範囲の外へ向かうつるを、密な方へ曲げて戻す強さ")
+    containment: FloatProperty(name="密な所に留まる強さ", default=0.15, min=0.0, max=3.0,
+                               description="疎な方へ伸びるつるを、密な方へ曲げ戻す強さ。0なら自由にどこへでも伸びる")
     fine_branch: FloatProperty(name="枝分かれ", default=0.25, min=0.0, max=1.0, subtype="FACTOR",
                                description="節ごとに脇枝が出る確率")
     internode: FloatProperty(name="節の間隔", default=0.025, min=0.003, soft_max=0.2, unit="LENGTH",
@@ -143,6 +159,14 @@ class VineGrowSettings(bpy.types.PropertyGroup):
 
 
 classes = (VineGrowSettings,)
+
+def _density_changed(self, context):
+    from . import pipeline
+    pipeline.sync_density_display(self)
+
+
+DENSITY = FloatProperty(name="密度", default=-1.0, min=-1.0, soft_max=200.0, update=_density_changed,
+                        description="この点の密度（点の上での、100cm²あたりのつるの本数）。0で生えない")
 
 REACH = FloatProperty(name="範囲", default=0.0, min=0.0, soft_max=5.0, unit="LENGTH", update=_reach_changed,
                       description="起点から体に沿ってつるが広がる距離（ワールド単位）")

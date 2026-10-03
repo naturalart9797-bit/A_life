@@ -1,7 +1,7 @@
 bl_info = {
     "name": "Vine Grow (つる植物ジェネレータ)",
     "author": "A_life",
-    "version": (1, 3, 0),
+    "version": (1, 4, 0),
     "blender": (3, 6, 0),
     "location": "3Dビューポート > サイドバー(N) > Vine Grow",
     "description": "オブジェクトの一点から、体に絡みつき少し空間にも広がる、つる植物の枝を生成する。アニメーションに追従",
@@ -25,9 +25,11 @@ def register():
         bpy.utils.register_class(cls)
     bpy.types.Scene.vine_grow = bpy.props.PointerProperty(type=properties.VineGrowSettings)
     bpy.types.Object.vine_grow_reach = properties.REACH
+    bpy.types.Object.vine_grow_density = properties.DENSITY
 
 
 def unregister():
+    del bpy.types.Object.vine_grow_density
     del bpy.types.Object.vine_grow_reach
     del bpy.types.Scene.vine_grow
     for cls in reversed(_classes):
