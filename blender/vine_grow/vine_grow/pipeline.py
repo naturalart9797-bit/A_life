@@ -6,7 +6,7 @@ import traceback
 
 import bpy
 
-from . import binding, colonize, surface
+from . import binding, colonize, route, surface
 from .mesh import MeshBuilder, assign_vertex_groups, blob, build_mesh, cap, tube
 from .sampler import BodySampler
 
@@ -34,7 +34,8 @@ def target_scale(target, P):
 
 
 def origin_objects(target):
-    return [o for o in bpy.data.objects if o.type == "EMPTY" and o.get(ORIGIN_PROP) == target.name]
+    objs = [o for o in bpy.data.objects if o.type == "EMPTY" and o.get(ORIGIN_PROP) == target.name]
+    return sorted(objs, key=lambda o: (o.get("vine_grow_order", 0), o.name))
 
 
 def origin_reach(o):
@@ -78,6 +79,8 @@ def add_origin(context, target, location, reach):
     o.hide_render = True
     o.matrix_world = target.matrix_world @ o.matrix_basis
     o.vine_grow_reach = reach
+    others = [x.get("vine_grow_order", 0) for x in origin_objects(target) if x != o]
+    o["vine_grow_order"] = (max(others) + 1) if others else 0
     return o
 
 
@@ -106,33 +109,46 @@ def generate(report, context, target):
         if not opts:
             return None, "起点の近くに対象の面がありません"
 
-        # Surface anchors within each origin's range (geodesic, along the body).
-        anchors = surface.scatter_nodes(sampler, [h.loc for h, _ in opts], max(r for _, r in opts), spacing, rng)
-        if len(anchors) < 4:
-            return None, ("範囲が小さすぎます（範囲 %.3g / 密度の間隔 %.3g）。範囲を広げるか、間隔を小さく"
-                          % (max(r for _, r in opts), spacing))
-        edges = surface.connect(sampler, anchors, spacing)
-        norm = [float("inf")] * len(anchors)
-        for hit, reach in opts:
-            s = surface.nearest_node(anchors, hit.loc)
-            for i, d in enumerate(surface.geodesic(anchors, edges, [s])):
-                norm[i] = min(norm[i], d / max(reach, 1e-9))
-        anchors = [a for a, d in zip(anchors, norm) if d <= 1.0]
-
         push = colonize.Pusher(sampler, P.clearance * scale)
-        attractors = colonize.make_attractors(anchors, P, scale, rng)
         tree = colonize.Tree()
-        for hit, _r in opts:
-            p, n = push(hit.loc + hit.normal * (P.clearance * scale))
-            tree.add(p, -1, hit.normal.copy(), n, 0, rng.uniform(0.0, 6.283))
-        colonize.colonize(tree, attractors, P, scale, push, rng, P.max_nodes)
-        tree = colonize.prune(tree, P.min_twig * scale)
-        colonize.add_aerial(tree, P, scale, push, rng)
-        colonize.add_tendrils(tree, P, scale, push, rng)
-        if len(tree.pos) <= len(opts):
-            return None, "つるが伸びませんでした（範囲・密度・影響距離を確認）"
+        if P.mode == "ROUTE":
+            if len(opts) < 2:
+                return None, "経路モードでは起点（経由点）が2つ以上必要です"
+            rt = route.build_route(sampler, [h for h, _ in opts], [r for _, r in opts], P, scale, rng)
+            if rt is None or len(rt[0]) < 2:
+                return None, "経路を作れませんでした"
+            radii = route.grow_strands(tree, rt, P, scale, push, rng, sampler)
+            route.add_shoots(tree, radii, P, scale, push, rng)
+            route.add_aerial_route(tree, radii, P, scale, push, rng)
+            route.add_tip_tendrils(tree, radii, P, scale, push, rng)
+            if len(tree.pos) < 2:
+                return None, "つるが伸びませんでした"
+        else:
+            # Surface anchors within each origin's range (geodesic, along the body).
+            anchors = surface.scatter_nodes(sampler, [h.loc for h, _ in opts], max(r for _, r in opts), spacing, rng)
+            if len(anchors) < 4:
+                return None, ("範囲が小さすぎます（範囲 %.3g / 密度の間隔 %.3g）。範囲を広げるか、間隔を小さく"
+                              % (max(r for _, r in opts), spacing))
+            edges = surface.connect(sampler, anchors, spacing)
+            norm = [float("inf")] * len(anchors)
+            for hit, reach in opts:
+                s = surface.nearest_node(anchors, hit.loc)
+                for i, d in enumerate(surface.geodesic(anchors, edges, [s])):
+                    norm[i] = min(norm[i], d / max(reach, 1e-9))
+            anchors = [a for a, d in zip(anchors, norm) if d <= 1.0]
 
-        radii = colonize.pipe_radii(tree, P.r_min * scale, P.r_max * scale, P.pipe_exponent)
+            attractors = colonize.make_attractors(anchors, P, scale, rng)
+            for hit, _r in opts:
+                p, n = push(hit.loc + hit.normal * (P.clearance * scale))
+                tree.add(p, -1, hit.normal.copy(), n, 0, rng.uniform(0.0, 6.283))
+            colonize.colonize(tree, attractors, P, scale, push, rng, P.max_nodes)
+            tree = colonize.prune(tree, P.min_twig * scale)
+            colonize.add_aerial(tree, P, scale, push, rng)
+            colonize.add_tendrils(tree, P, scale, push, rng)
+            if len(tree.pos) <= len(opts):
+                return None, "つるが伸びませんでした（範囲・密度・影響距離を確認）"
+
+            radii = colonize.pipe_radii(tree, P.r_min * scale, P.r_max * scale, P.pipe_exponent)
         plen = colonize.path_lengths(tree)
         maxlen = max(plen) or 1.0
         rmax = P.r_max * scale
@@ -167,7 +183,7 @@ def generate(report, context, target):
                 t = t.normalized() if t.length_squared > 1e-16 else normals[-1]
                 cap(b, pts[-1], normals[-1], t, rs[-1], rings[-1], ws[-1], dists[-1], thick[-1])
         for i, kids in enumerate(ch):
-            if len(kids) >= 2 or tree.parent[i] < 0:
+            if len(kids) >= 2 or (tree.parent[i] < 0 and P.mode != "ROUTE"):
                 blob(b, tree.pos[i], radii[i] * (1.3 if tree.parent[i] < 0 else 1.05), node_weights(i),
                      min(1.0, plen[i] / maxlen), min(1.0, radii[i] / rmax), seg=6, rings=4)
 

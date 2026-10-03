@@ -32,6 +32,28 @@ class VineGrowSettings(bpy.types.PropertyGroup):
     default_reach: FloatProperty(name="新しい起点の範囲", default=0.35, min=0.01, soft_max=3.0, unit="LENGTH",
                                  description="新しく置く起点からつるが広がる範囲（体に沿った距離）")
 
+    mode: EnumProperty(
+        name="生え方", default="ROUTE",
+        items=[("ROUTE", "経路（起点を通過）", "起点を順番に通る経路に沿って、つるが絡み合いながら伸びる"),
+               ("RADIAL", "放射（起点から広がる）", "起点から周囲に枝分かれしながら広がる")])
+    default_width: FloatProperty(name="新しい経由点の幅", default=0.05, min=0.002, soft_max=0.5, unit="LENGTH",
+                                 description="経路モードで新しく置く経由点の、つるの束の幅（半径）")
+    strand_count: IntProperty(name="つるの本数", default=7, min=1, max=200,
+                              description="経路に沿って伸びるつるの本数")
+    twist: FloatProperty(name="ねじれ(回/m)", default=2.0, min=0.0, soft_max=20.0,
+                         description="つるが経路の周りを巻く回数（1mあたり）。細い腕などではぐるぐる巻き付く")
+    wrap_threshold: FloatProperty(
+        name="巻き付く細さ", default=1.0, min=0.1, max=4.0,
+        description="束の幅が体の部分の半径のこの倍率以上になる所（腕・首など細い所）で、ぐるりと巻き付く。"
+                    "小さいほど太い所でも巻き付く")
+    counter_twist: BoolProperty(name="逆巻きを混ぜる", default=True,
+                                description="半分のつるを逆向きに巻いて、編み込んだように交差させる")
+    strand_sync: FloatProperty(name="始まりと終わりの揃い", default=0.5, min=0.0, max=1.0, subtype="FACTOR",
+                               description="1: 全部のつるが最初と最後の経由点で揃う / 0: ばらばらに始まり終わる")
+    shoot_density: FloatProperty(name="脇芽(本/m)", default=6.0, min=0.0, soft_max=60.0,
+                                 description="つるから横に出る短い脇芽の数（1mあたり）")
+    shoot_length: FloatProperty(name="脇芽の長さ", default=0.05, min=0.0, soft_max=0.5, unit="LENGTH")
+
     # --- where the vines go --------------------------------------------
     attractor_spacing: FloatProperty(
         name="密度（間隔）", default=0.02, min=0.003, soft_max=0.2, unit="LENGTH",

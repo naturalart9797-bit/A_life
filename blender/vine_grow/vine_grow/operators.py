@@ -107,7 +107,8 @@ class VINEGROW_OT_place_origin(bpy.types.Operator):
             if hit is None:
                 return {"RUNNING_MODAL"}
             P = context.scene.vine_grow
-            reach = P.default_reach * pipeline.target_scale(self.target, P)
+            base = P.default_width if P.mode == "ROUTE" else P.default_reach
+            reach = base * pipeline.target_scale(self.target, P)
             org = pipeline.add_origin(context, self.target, hit.loc, reach)
             for ob in context.selected_objects:
                 ob.select_set(False)
@@ -129,8 +130,9 @@ class VINEGROW_OT_origin_at_cursor(bpy.types.Operator):
         if target is None:
             return {"CANCELLED"}
         P = context.scene.vine_grow
+        base = P.default_width if P.mode == "ROUTE" else P.default_reach
         pipeline.add_origin(context, target, context.scene.cursor.location.copy(),
-                            P.default_reach * pipeline.target_scale(target, P))
+                            base * pipeline.target_scale(target, P))
         return {"FINISHED"}
 
 
@@ -166,6 +168,30 @@ class VINEGROW_OT_origin_select(bpy.types.Operator):
         return {"FINISHED"}
 
 
+class VINEGROW_OT_origin_move(bpy.types.Operator):
+    bl_idname = "vine_grow.origin_move"
+    bl_label = "経由点の順番を変える"
+    bl_options = {"REGISTER", "UNDO"}
+
+    name: bpy.props.StringProperty()
+    delta: bpy.props.IntProperty(default=-1)
+
+    def execute(self, context):
+        target = _target(self, context)
+        o = bpy.data.objects.get(self.name)
+        if target is None or o is None:
+            return {"CANCELLED"}
+        objs = pipeline.origin_objects(target)
+        i = objs.index(o)
+        j = i + self.delta
+        if not (0 <= j < len(objs)):
+            return {"CANCELLED"}
+        objs[i], objs[j] = objs[j], objs[i]
+        for k, ob in enumerate(objs):
+            ob["vine_grow_order"] = k
+        return {"FINISHED"}
+
+
 class VINEGROW_OT_toggle_rest(bpy.types.Operator):
     bl_idname = "vine_grow.toggle_rest"
     bl_label = "レスト/ポーズ切替"
@@ -188,5 +214,6 @@ classes = (
     VINEGROW_OT_origin_at_cursor,
     VINEGROW_OT_origin_remove,
     VINEGROW_OT_origin_select,
+    VINEGROW_OT_origin_move,
     VINEGROW_OT_toggle_rest,
 )
