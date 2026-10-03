@@ -46,6 +46,7 @@ class ScanSurface:
         finally:
             ob_eval.to_mesh_clear()
         co = co.reshape(-1, 3).astype(float)
+        self.co = co
         self.size = float(np.linalg.norm(co.max(0) - co.min(0))) if nv else 1.0
         self.bvh = BVHTree.FromPolygons(co.tolist(), tris.reshape(-1, 3).tolist(),
                                         all_triangles=True)
@@ -121,6 +122,86 @@ def _mirrored(context, guides):
         if paired and lid in guides:
             out[lid] = fit.reflect(np.array(guides[lid])[None], plane)[0]
     return out
+
+
+# ---------------------------------------------------------------------------
+# "Where to click" diagram shown while placing guides
+# ---------------------------------------------------------------------------
+
+_HAND_SKETCH = {   # back of a right hand, wrist at the bottom (x right, y up)
+    "wrist": (0.0, 0.0),
+    "thumb": [(-0.42, 0.28), (-0.66, 0.6), (-0.8, 0.9), (-0.88, 1.1)],
+    "index": [(-0.32, 1.0), (-0.34, 1.45), (-0.35, 1.72), (-0.355, 1.92)],
+    "middle": [(-0.1, 1.05), (-0.1, 1.55), (-0.1, 1.85), (-0.1, 2.07)],
+    "ring": [(0.12, 1.0), (0.14, 1.48), (0.15, 1.76), (0.16, 1.96)],
+    "pinky": [(0.32, 0.92), (0.36, 1.27), (0.38, 1.48), (0.39, 1.64)],
+}
+_diagram_cache = {}
+
+
+def _diagram(kind, symmetric):
+    """(segments [(p, q)], {guide id: point}) in a unit box."""
+    key = (kind, symmetric)
+    if key in _diagram_cache:
+        return _diagram_cache[key]
+    if kind == 'FACE':
+        T = face_template.FaceTemplate(1)
+        uv = T.uv
+        edges = set()
+        for f in T.faces:
+            for k in range(4):
+                a, b = f[k], f[(k + 1) % 4]
+                edges.add((min(a, b), max(a, b)))
+        segs = [(uv[a], uv[b]) for a, b in edges]
+        pts = {lid: uv[vi] for lid, vi, *_r in T.landmarks}
+    else:
+        H = _HAND_SKETCH
+        segs = []
+        pts = {"wrist": np.array(H["wrist"])}
+        for f in hand_builder.FINGERS:
+            chain = [H["wrist"]] + H[f]
+            for a, b in zip(chain, chain[1:]):
+                segs.append((np.array(a), np.array(b)))
+            for j, p in enumerate(H[f]):
+                pts[f"{f}_{j}"] = np.array(p)
+    allp = np.array([p for s_ in segs for p in s_])
+    lo, hi = allp.min(0), allp.max(0)
+    scale = 1.0 / max(hi - lo)
+    norm = lambda p: (np.asarray(p) - lo) * scale
+    out = ([(norm(a), norm(b)) for a, b in segs], {k: norm(v) for k, v in pts.items()},
+           (hi - lo) * scale)
+    _diagram_cache[key] = out
+    return out
+
+
+def draw_diagram(context, kind, symmetric, current, placed):
+    """Small map in the lower-right corner: the template (face) or a hand
+    sketch, with the guide to click next in red and placed guides in green."""
+    region = context.region
+    ui = context.preferences.system.ui_scale
+    size = 230 * ui
+    segs, pts, extent = _diagram(kind, symmetric)
+    w, h = size * extent[0], size * extent[1]
+    x0 = region.width - w - 30 * ui
+    y0 = 40 * ui
+    to_px = lambda p: (x0 + p[0] * size, y0 + p[1] * size, 0.0)
+    gpu.state.blend_set('ALPHA')
+    sh = gpu.shader.from_builtin('UNIFORM_COLOR')
+    pad = 12 * ui
+    bg = [(x0 - pad, y0 - pad, 0), (x0 + w + pad, y0 - pad, 0), (x0 + w + pad, y0 + h + pad, 0),
+          (x0 - pad, y0 - pad, 0), (x0 + w + pad, y0 + h + pad, 0), (x0 - pad, y0 + h + pad, 0)]
+    batch = batch_for_shader(sh, 'TRIS', {"pos": bg})
+    sh.uniform_float("color", (0.05, 0.05, 0.07, 0.75))
+    batch.draw(sh)
+    lines = [to_px(p) for s_ in segs for p in s_]
+    batch = batch_for_shader(sh, 'LINES', {"pos": lines})
+    sh.uniform_float("color", (0.7, 0.75, 0.85, 0.5 if kind == 'FACE' else 0.9))
+    batch.draw(sh)
+    done = [to_px(p) for k, p in pts.items() if k in placed and k != current]
+    _points(done, (0.2, 1.0, 0.45, 1.0), 6.0 * ui)
+    if current in pts:
+        _points([to_px(pts[current])], (1.0, 0.2, 0.2, 1.0), 13.0 * ui)
+    gpu.state.blend_set('NONE')
 
 
 def draw_guides_3d(context, obj, guides, current=None, hover=None):
@@ -396,6 +477,8 @@ class OBJECT_OT_auto_retopo_guides(bpy.types.Operator):
         lines.append((f"{done}/{n} 配置済み   LMB: 配置 / ドラッグで移動   ←→: ガイド選択   "
                       "Backspace: 1つ戻す   Enter: 確定   Esc: 取消", 12, (1, 1, 1, 0.95)))
         _text_block(context, 24, 60, lines)
+        cur = self.defs[self.current][0] if self.current < n else None
+        draw_diagram(context, self.kind, _settings(context).symmetric, cur, set(self.guides))
 
 
 def _text_block(context, x, y, lines):
@@ -439,12 +522,14 @@ class OBJECT_OT_auto_retopo_generate(bpy.types.Operator):
         try:
             if s.kind == 'FACE':
                 V, F = face_template.build_face(pts, surf.nearest_many, density=s.face_density,
-                                                symmetric=s.symmetric, iters=s.iterations)
+                                                symmetric=s.symmetric, iters=s.iterations,
+                                                samples=surf.co, ray=surf.ray)
                 F = fit.orient_faces(V, F, surf.normal)
             else:
                 V, F = hand_builder.build_hand(pts, surf, segments=int(s.hand_segments),
                                                forearm=s.forearm_loops,
-                                               knuckle_loops=s.knuckle_loops)
+                                               knuckle_loops=s.knuckle_loops,
+                                               loop_density=s.finger_loops)
         except (ValueError, np.linalg.LinAlgError) as ex:
             self.report({'ERROR'}, f"生成に失敗しました: {ex}")
             return {'CANCELLED'}

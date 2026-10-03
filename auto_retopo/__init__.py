@@ -12,7 +12,7 @@ bl_info = {
 }
 
 import bpy
-from bpy.props import BoolProperty, EnumProperty, IntProperty, PointerProperty
+from bpy.props import BoolProperty, EnumProperty, FloatProperty, IntProperty, PointerProperty
 
 from . import guides as G
 from . import ops
@@ -34,17 +34,22 @@ class AutoRetopoSettings(bpy.types.PropertyGroup):
     )
     face_density: IntProperty(
         name="Density", default=2, min=1, max=3,
-        description="1: ~230 verts, 2: ~870 verts, 3: ~1900 verts",
+        description="1: ~720 verts, 2: ~1800 verts, 3: ~3400 verts",
     )
     iterations: IntProperty(
-        name="Fit Iterations", default=40, min=5, max=200,
+        name="Fit Iterations", default=80, min=5, max=300,
         description="Snap / relax iterations when fitting the face template",
     )
     hand_segments: EnumProperty(
         name="Finger Edges",
-        items=(('12', "12", "12 edges around each finger (detailed)"),
+        items=(('16', "16", "16 edges around each finger (high detail)"),
+               ('12', "12", "12 edges around each finger (detailed)"),
                ('8', "8", "8 edges around each finger (light)")),
         default='12',
+    )
+    finger_loops: FloatProperty(
+        name="Finger Loop Density", default=1.0, min=0.5, max=2.0,
+        description="Loops along the fingers: 1 = square quads, 2 = twice as many",
     )
     knuckle_loops: BoolProperty(
         name="Knuckle Loops", default=True,
@@ -76,6 +81,7 @@ class VIEW3D_PT_auto_retopo(bpy.types.Panel):
         else:
             col = layout.column(align=True)
             col.row().prop(s, "hand_segments", expand=True)
+            col.prop(s, "finger_loops")
             col.prop(s, "knuckle_loops")
             col.prop(s, "forearm_loops")
         if ob is None or ob.type != 'MESH':

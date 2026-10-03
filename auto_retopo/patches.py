@@ -41,6 +41,7 @@ class Layout:
         self.points = {}
         self.curves = {}
         self.patches = []
+        self.npatches = []
 
     def point(self, name, uv):
         self.points[name] = np.asarray(uv, dtype=float)
@@ -51,6 +52,14 @@ class Layout:
 
     def patch(self, a, b, c, d):
         self.patches.append((a, b, c, d))
+
+    def npatch(self, *corners):
+        """An odd-sided patch (3 or 5 sides) filled with one quad per corner
+        around a centre pole (valence = number of sides). All its sides get
+        the same, even segment count and are split at their midpoints."""
+        if len(corners) % 2 == 0:
+            raise ValueError("npatch needs an odd number of corners")
+        self.npatches.append(tuple(corners))
 
     # ------------------------------------------------------------------
 
@@ -82,6 +91,10 @@ class Layout:
         for a, b, c, d in self.patches:
             union(key(a, b), key(c, d))
             union(key(b, c), key(d, a))
+        for cs in self.npatches:
+            n = len(cs)
+            for i in range(1, n):
+                union(key(cs[0], cs[1]), key(cs[i], cs[(i + 1) % n]))
         groups = {}
         for k in list(parent):
             groups.setdefault(find(k), []).append(k)
@@ -163,5 +176,56 @@ class Layout:
                 for j in range(m):
                     f = (grid[i][j], grid[i + 1][j], grid[i + 1][j + 1], grid[i][j + 1])
                     faces.append(f if area > 0 else tuple(reversed(f)))
+
+        for pi, cs in enumerate(self.npatches):
+            n = len(cs)
+            sc = seg[key(cs[0], cs[1])]
+            if sc % 2:
+                raise ValueError(f"odd segment count {sc} on n-sided patch {cs}")
+            k = sc // 2
+            mids = [edge_vid(cs[i], cs[(i + 1) % n], k, sc) for i in range(n)]
+            P = lambda v: verts[v]
+            z_pos = np.mean([P(m) for m in mids], axis=0)
+            z = vid(("Z", pi), z_pos)
+
+            def spoke(i, j):
+                """Vertex j (0..k) from midpoint i towards the centre."""
+                if j == 0:
+                    return mids[i]
+                if j == k:
+                    return z
+                return vid(("S", pi, i, j), P(mids[i]) + (z_pos - P(mids[i])) * j / k)
+
+            corner_pos = [self.points[c] for c in cs]
+            for i in range(n):
+                ci, cnext, cprev = cs[i], cs[(i + 1) % n], cs[i - 1]
+                g = [[None] * (k + 1) for _ in range(k + 1)]
+                for a in range(k + 1):
+                    for b in range(k + 1):
+                        if b == 0:
+                            g[a][b] = edge_vid(ci, cnext, a, sc)
+                        elif a == 0:
+                            g[a][b] = edge_vid(cprev, ci, sc - b, sc)
+                        elif b == k:
+                            g[a][b] = spoke(i - 1 if i else n - 1, a)
+                        elif a == k:
+                            g[a][b] = spoke(i, b)
+                for a in range(1, k):
+                    for b in range(1, k):
+                        s_, t_ = a / k, b / k
+                        C0, C1 = P(g[a][0]), P(g[a][k])
+                        D0, D1 = P(g[0][b]), P(g[k][b])
+                        uv = ((1 - t_) * C0 + t_ * C1 + (1 - s_) * D0 + s_ * D1
+                              - ((1 - s_) * (1 - t_) * P(g[0][0]) + s_ * (1 - t_) * P(g[k][0])
+                                 + (1 - s_) * t_ * P(g[0][k]) + s_ * t_ * P(g[k][k])))
+                        g[a][b] = vid(("NF", pi, i, a, b), uv)
+                # Every sub-quad runs c_i -> m_i along the polygon boundary, so
+                # the polygon's own orientation decides the winding.
+                area = sum(corner_pos[q][0] * corner_pos[(q + 1) % n][1]
+                           - corner_pos[(q + 1) % n][0] * corner_pos[q][1] for q in range(n))
+                for a in range(k):
+                    for b in range(k):
+                        f = (g[a][b], g[a + 1][b], g[a + 1][b + 1], g[a][b + 1])
+                        faces.append(f if area > 0 else tuple(reversed(f)))
 
         return np.array(verts), faces, point_ids

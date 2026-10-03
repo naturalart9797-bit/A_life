@@ -15,6 +15,8 @@ import math
 
 import numpy as np
 
+from .fit import orient_faces, relax_on_surface
+
 FINGERS = ["thumb", "index", "middle", "ring", "pinky"]
 _FINGER_JA = {"thumb": "親指", "index": "人差し指", "middle": "中指",
               "ring": "薬指", "pinky": "小指"}
@@ -63,6 +65,20 @@ class _Builder:
         p = origin + d * fallback_dist
         return self.surf.nearest(p)
 
+    def align(self, a, b):
+        """``b`` reordered (rotated / reversed) to match ring ``a``."""
+        n = len(a)
+        A = np.array([self.verts[i] for i in a])
+        best = None
+        for rev in (False, True):
+            bb = list(reversed(b)) if rev else list(b)
+            B = np.array([self.verts[i] for i in bb])
+            for off in range(n):
+                cost = np.linalg.norm(A - np.roll(B, -off, axis=0), axis=1).sum()
+                if best is None or cost < best[0]:
+                    best = (cost, bb[off:] + bb[:off])
+        return best[1]
+
     def bridge(self, a, b):
         """Quads between two closed rings of equal size, matching order."""
         n = len(a)
@@ -79,6 +95,40 @@ class _Builder:
         for k in range(n):
             self.faces.append((a[k], a[(k + 1) % n], bb[(k + 1) % n], bb[k]))
         return bb
+
+    def reduce_join(self, outer, inner):
+        """Join a bigger loop ``outer`` (P verts) to ``inner`` (N verts,
+        P - N even) with quads: (P - N) / 2 evenly spread 3-to-1 reductions
+        (two new verts each), 1-to-1 quads elsewhere. Returns ``inner``
+        reordered to match."""
+        P, n = len(outer), len(inner)
+        k = (P - n) // 2
+        steps = [3 if (i + 1) * k // n > i * k // n else 1 for i in range(n)]
+        Ov = np.array([self.verts[v] for v in outer])
+        best = None
+        for rev in (False, True):
+            inn = list(reversed(inner)) if rev else list(inner)
+            Iv = np.array([self.verts[v] for v in inn])
+            for off in range(P):
+                idx = [(off + sum(steps[:i])) % P for i in range(n)]
+                cost = np.linalg.norm(Ov[idx] - Iv, axis=1).sum()
+                if best is None or cost < best[0]:
+                    best = (cost, inn, off)
+        _c, inn, off = best
+        pos = off
+        for i in range(n):
+            t0_, t1_ = inn[i], inn[(i + 1) % n]
+            o = [outer[(pos + q) % P] for q in range(steps[i] + 1)]
+            if steps[i] == 1:
+                self.faces.append((o[0], o[1], t1_, t0_))
+            else:
+                T0, T1 = self.verts[t0_], self.verts[t1_]
+                x = self.add(self.surf.nearest(0.5 * self.verts[o[1]] + 0.5 * (T0 + (T1 - T0) / 3)))
+                y = self.add(self.surf.nearest(0.5 * self.verts[o[2]] + 0.5 * (T0 + (T1 - T0) * 2 / 3)))
+                self.faces += [(o[0], o[1], x, t0_), (o[1], o[2], y, x),
+                               (o[2], o[3], t1_, y), (x, y, t1_, t0_)]
+            pos += steps[i]
+        return inn
 
     def cast_hit(self, origin, direction, dist):
         """(point, hit?) -- like cast, but tells whether the skin was hit."""
@@ -142,7 +192,8 @@ def _dorsal_window(B, ring, centre, up, width):
     return [(best + t) % n for t in range(width)]
 
 
-def build_hand(guides, surf, segments=12, forearm=3, knuckle_loops=True):
+def build_hand(guides, surf, segments=12, forearm=3, knuckle_loops=True, loop_density=1.0,
+               relax_iters=8):
     """``surf`` provides ray(origin, dir, dist) -> point|None, nearest(p) and
     normal(p). ``segments`` = edges around a finger (8 or 12).
     Returns (verts (N, 3), faces)."""
@@ -240,25 +291,45 @@ def build_hand(guides, surf, segments=12, forearm=3, knuckle_loops=True):
         rings.append(palm_ring(cols, w_r * (1 - t) + finger_thick * t))
     infos = rings
 
-    # Thumb base block (w x w cells) on the index side of the palm.
-    tb = g["thumb_0"]
-    t_rel = (tb - W).dot(Y) / max(palm_len, 1e-9)
-    jc = int(round(t_rel * (palm_rings - 1) - w / 2.0)) + first_palm
-    jc = int(np.clip(jc, first_palm + 1, len(rings) - 2 - w))
-    block = [infos[jc + i][1] for i in range(w + 1)]          # rows = rings
-    removed = {block[i][j] for i in range(1, w) for j in range(1, w)}
+    # Thumb base: the thenar region (index side of the palm, wrapping onto
+    # the palm side) is opened as an a x b block sized after the thumb, and
+    # its 2a + 2b border is reduced to the thumb's N verts with 3-to-1 quad
+    # reductions, so the thumb grows out of a properly sized base.
+    t0, t1 = axes["thumb_0"][0], axes["thumb_1"][0]
+    thumb_r = max(axes["thumb_0"][1], axes["thumb_1"][1])
+    row_step = palm_len * dt
+    span = abs((t1 - t0).dot(Y)) + thumb_r
+    a_rows = int(round(span / max(row_step, 1e-9)))
+    a_rows = int(np.clip(a_rows, w, palm_rings - 3))
+    palm_w = np.linalg.norm(knuck[-1] - knuck[0])
+    col_w = palm_w / max(ncols - 1, 1)
+    palm_cols = int(np.clip(round(thumb_r * 1.3 / max(col_w, 1e-9)), 1, ncols // 2 - 1))
+    j0 = 1
+    b_cols = (w - j0) + palm_cols
+    while 2 * a_rows + 2 * b_cols < N:
+        a_rows += 1
+    mid_row = first_palm + ((t0 + t1) * 0.5 - W).dot(Y) / max(palm_len, 1e-9) * (palm_rings - 1)
+    r0 = int(round(mid_row - a_rows / 2.0))
+    r0 = int(np.clip(r0, first_palm, len(rings) - 2 - a_rows))
+
+    def strip(info):
+        """Index side of a ring from the back of the hand round onto the
+        palm: dorsal[0], side verts, palmar[0], palmar[1], ..."""
+        return list(info[1]) + list(info[4][1:])
+
+    blk = [[strip(infos[r0 + i])[j0 + j] for j in range(b_cols + 1)] for i in range(a_rows + 1)]
+    blk_set = {v for row in blk for v in row}
+    removed = {blk[i][j] for i in range(1, a_rows) for j in range(1, b_cols)}
     for ri in range(len(rings) - 1):
-        a, b = rings[ri][0], rings[ri + 1][0]
-        n = len(a)
+        ra, rb = rings[ri][0], rings[ri + 1][0]
+        n = len(ra)
         for k in range(n):
-            quad = (a[k], a[(k + 1) % n], b[(k + 1) % n], b[k])
-            if removed.intersection(quad):
-                continue
-            if all(v in {x for row in block for x in row} for v in quad):
+            quad = (ra[k], ra[(k + 1) % n], rb[(k + 1) % n], rb[k])
+            if removed.intersection(quad) or all(v in blk_set for v in quad):
                 continue
             B.faces.append(quad)
-    thumb_base = (list(block[0]) + [block[i][w] for i in range(1, w + 1)]
-                  + list(reversed(block[w]))[1:] + [block[i][0] for i in range(w - 1, 0, -1)])
+    thumb_base = (list(blk[0]) + [blk[i][b_cols] for i in range(1, a_rows + 1)]
+                  + list(reversed(blk[a_rows]))[1:] + [blk[i][0] for i in range(a_rows - 1, 0, -1)])
 
     # ---- finger bases and web strips (knuckle end of the palm) -----------
     _ring, index_col, _h, dors, palmr, pinky_side = infos[-1]
@@ -297,32 +368,45 @@ def build_hand(guides, surf, segments=12, forearm=3, knuckle_loops=True):
         pts = [axes[f"{f}_{j}"][0] for j in range(3)] + [g[f + "_3"]]
         radii = [axes[f"{f}_{j}"][1] for j in range(3)]
         up = _norm(sum(axes[f"{f}_{j}"][2] for j in range(3)))
-        seg = [np.linalg.norm(pts[j + 1] - pts[j]) for j in range(3)]
-        dl = 0.2 * min(seg)
+        seg = [max(np.linalg.norm(pts[j + 1] - pts[j]), 1e-9) for j in range(3)]
+        # Loop spacing ~ edge length around the finger -> square quads.
+        spacing = 2 * math.pi * np.mean(radii) / N * 1.1 / max(loop_density, 0.25)
+        dl = min(spacing * 0.55, 0.22 * min(seg))
 
         def at(j, frac):
             return pts[j] + (pts[j + 1] - pts[j]) * frac, j, frac
 
-        # Dense loops at every joint: base knuckle, middle and end joints.
-        stations = [at(0, dl / seg[0]), at(0, 0.5)]
+        def fill(j, f0, f1, out):
+            """Evenly spaced loops strictly between fractions f0 and f1."""
+            n = max(1, int(round(seg[j] * (f1 - f0) / spacing)))
+            for k in range(1, n):
+                out.append(at(j, f0 + (f1 - f0) * k / n))
+
+        stations = []
         joint_idx = []
+        # Proximal segment: fingers start at the knuckle (palm edge), the
+        # thumb where its metacarpal leaves the palm.
+        start = 0.45 if f == "thumb" else dl / seg[0]
+        stations.append(at(0, start))
+        fill(0, start, 1.0 - dl / seg[0], stations)
         for j in (1, 2):
-            stations.append(at(j - 1, 1.0 - dl / max(seg[j - 1], 1e-9)))
+            stations.append(at(j - 1, 1.0 - dl / seg[j - 1]))
             joint_idx.append(len(stations) + 1)   # index into ``aligned``
             stations.append((pts[j], j, 0.0))
-            stations.append(at(j, dl / max(seg[j], 1e-9)))
-            if j == 1:
-                stations.append(at(1, 0.5))
-        stations.append(at(2, 0.5))
-        stations.append(at(2, 0.8))
+            stations.append(at(j, dl / seg[j]))
+            end = 1.0 - dl / seg[j] if j == 1 else 0.82
+            fill(j, dl / seg[j], end, stations)
+        stations.append(at(2, 0.82))
 
         aligned = [base_rings[f]]
         centres = [None]
-        for c, j, _frac in stations:
+        for si, (c, j, _frac) in enumerate(stations):
             if j == 0:
                 tan = pts[1] - pts[0]
             elif j >= 2 and _frac > 0.0:
                 tan = pts[3] - pts[2]
+            elif _frac > 0.0:
+                tan = pts[j + 1] - pts[j]
             else:
                 tan = _norm(pts[j] - pts[j - 1]) + _norm(pts[j + 1] - pts[j])
             tan = _norm(tan)
@@ -333,7 +417,10 @@ def build_hand(guides, surf, segments=12, forearm=3, knuckle_loops=True):
             for k in range(N):
                 th = (k + offset) * 2 * math.pi / N
                 ring.append(B.add(B.cast(c, math.cos(th) * u + math.sin(th) * s, r, 1.6)))
-            aligned.append(B.bridge(aligned[-1], ring))
+            if si == 0 and len(aligned[-1]) != N:
+                aligned.append(B.reduce_join(aligned[-1], ring))
+            else:
+                aligned.append(B.bridge(aligned[-1], ring))
             centres.append(c)
 
         # Oval knuckle loops on the back of each joint.
@@ -387,5 +474,6 @@ def build_hand(guides, surf, segments=12, forearm=3, knuckle_loops=True):
     remap = {old: new for new, old in enumerate(used)}
     faces = [tuple(remap[i] for i in f) for f in B.faces]
     V = V[used]
-    from .fit import orient_faces
+    if relax_iters:
+        V = relax_on_surface(V, faces, surf.nearest, relax_iters)
     return V, orient_faces(V, faces, surf.normal)

@@ -76,37 +76,115 @@ def mirror_plane(points):
     return c, vt[2]
 
 
+def refine_mirror_plane(plane, samples, nearest, iters=20):
+    """Improve a mirror plane using the symmetry of the scan itself.
+
+    The plane through a few centre-line clicks is fragile (a slightly turned
+    head plus a protruding nose tilts it by 10-20 degrees). Here scan points
+    are mirrored, matched to their closest scan points, and the plane is
+    re-fitted to those pairs (normal along p - q, through the midpoints),
+    ignoring the worst-matching 25 %."""
+    c, n = (np.asarray(x, float) for x in plane)
+    P = np.asarray(samples, float)
+    if len(P) < 10:
+        return c, n
+    for _ in range(iters):
+        Q = nearest(reflect(P, (c, n)))
+        err = np.linalg.norm(reflect(Q, (c, n)) - P, axis=1)
+        keep = err <= np.percentile(err, 75)
+        D = P[keep] - Q[keep]
+        D *= np.where(D @ n < 0, -1.0, 1.0)[:, None]
+        if np.linalg.norm(D.sum(0)) < 1e-12:
+            break
+        n_new = D.sum(0) / np.linalg.norm(D.sum(0))
+        c = ((P[keep] + Q[keep]) * 0.5).mean(0)
+        if np.dot(n_new, n) > 0.999999:
+            n = n_new
+            break
+        n = n_new
+    return c, n
+
+
 def reflect(V, plane):
     c, n = plane
     d = (V - c) @ n
     return V - 2.0 * d[:, None] * n
 
 
-def conform(V, faces, pins, nearest, iters=40, lam=0.5, mirror=None, plane=None):
+def vertex_normals(V, faces):
+    F = np.asarray(faces)
+    p = V[F]
+    n = np.cross(p[:, 2] - p[:, 0], p[:, 3] - p[:, 1])
+    N = np.zeros_like(V)
+    for k in range(4):
+        np.add.at(N, F[:, k], n)
+    return N / np.maximum(np.linalg.norm(N, axis=1), 1e-12)[:, None]
+
+
+def make_snapper(nearest, ray=None):
+    """Snap function ``snap(V, faces, maxd)``: each vertex goes to the closest
+    surface hit along its +/- normal (keeps neighbouring vertices in order on
+    curved areas), falling back to the closest surface point."""
+    if ray is None:
+        return lambda V, faces, maxd: nearest(V)
+
+    def snap(V, faces, maxd):
+        N = vertex_normals(V, faces)
+        out = nearest(V)
+        # A hit much further away than the local edge length is another part
+        # of the scan (inside a nostril, the other lip...): use the closest
+        # point instead, so no vertex shoots off as a spike.
+        F = np.asarray(faces)
+        el = np.linalg.norm(V[F] - V[np.roll(F, 1, axis=1)], axis=2)
+        acc = np.zeros(len(V))
+        cnt = np.zeros(len(V))
+        for k in range(F.shape[1]):
+            np.add.at(acc, F[:, k], el[:, k])
+            np.add.at(cnt, F[:, k], 1)
+        local = acc / np.maximum(cnt, 1)
+        for i in range(len(V)):
+            best = None
+            lim = min(maxd, local[i] * 3.0)
+            for sgn in (1.0, -1.0):
+                hit = ray(V[i], N[i] * sgn, lim)
+                if hit is not None:
+                    d = np.linalg.norm(hit - V[i])
+                    if best is None or d < best[0]:
+                        best = (d, hit)
+            if best is not None:
+                out[i] = best[1]
+        return out
+    return snap
+
+
+def conform(V, faces, pins, nearest, iters=40, lam=0.5, mirror=None, plane=None, ray=None,
+            rest_shape=None):
     """Make the warped template ``V`` lie on the surface while keeping its
     shape: alternate a Laplacian step that preserves the warped template's
     own Laplacian (so the designed spacing/edge flow survives) with snapping
-    to the closest surface point. ``pins`` = (indices, targets)."""
+    to the surface along the vertex normals. ``pins`` = (indices, targets).
+    With a mirror map the halves are pulled towards symmetry, but the last
+    iterations and the final snap leave every vertex on the real surface."""
     V = np.array(V, float)
     adj = Adjacency(len(V), faces)
-    rest = adj.average(V) - V
+    R0 = V if rest_shape is None else np.asarray(rest_shape, float)
+    rest = adj.average(R0) - R0
     pin_idx, pin_co = pins
+    size = float(np.linalg.norm(V.max(0) - V.min(0)))
+    snap = make_snapper(nearest, ray)
     for it in range(iters):
         V = V + lam * ((adj.average(V) - V) - rest)
-        V = nearest(V)
+        V = snap(V, faces, size * 0.15)
         V[pin_idx] = pin_co
-        if mirror is not None and plane is not None:
+        if mirror is not None and plane is not None and it < iters - 5:
             V = 0.5 * (V + reflect(V[mirror], plane))
-    V = nearest(V)
+    V = snap(V, faces, size * 0.15)
     V[pin_idx] = pin_co
-    if mirror is not None and plane is not None:
-        V = 0.5 * (V + reflect(V[mirror], plane))
-        V = nearest(V)
     return V
 
 
 def fit_template(T0, faces, lm_index, lm_target, nearest, iters=40,
-                 mirror=None, plane=None):
+                 mirror=None, plane=None, ray=None):
     """Full pipeline for a template with vertex positions ``T0``."""
     T0 = np.asarray(T0, float)
     src = T0[lm_index]
@@ -114,10 +192,10 @@ def fit_template(T0, faces, lm_index, lm_target, nearest, iters=40,
     V = (s * (R @ T0.T)).T + t
     V = rbf_warp(V, V[lm_index], lm_target)
     flipped = np.linalg.det(R) < 0
-    V = conform(V, faces, (np.asarray(lm_index), np.asarray(lm_target, float)), nearest,
-                iters=iters, mirror=mirror, plane=plane)
     if flipped:
         faces = [tuple(reversed(f)) for f in faces]
+    V = conform(V, faces, (np.asarray(lm_index), np.asarray(lm_target, float)), nearest,
+                iters=iters, mirror=mirror, plane=plane, ray=ray)
     return V, faces
 
 
@@ -165,3 +243,32 @@ def orient_faces(V, faces, normal_at=None):
                 for fi in comp:
                     faces[fi].reverse()
     return [tuple(f) for f in faces]
+
+
+def relax_on_surface(V, faces, nearest_one, iters, lam=0.4):
+    """Even out stretched quads (thumb base, web strips) by Laplacian
+    smoothing followed by snapping back onto the scan. A vertex whose snap
+    would jump far (onto a neighbouring finger) keeps its old position."""
+    adj = Adjacency(len(V), faces)
+    counts = {}
+    for f in faces:
+        for k in range(4):
+            e = (min(f[k], f[(k + 1) % 4]), max(f[k], f[(k + 1) % 4]))
+            counts[e] = counts.get(e, 0) + 1
+    boundary = {v for e, c in counts.items() if c == 1 for v in e}
+    movable = np.array([i not in boundary for i in range(len(V))])
+    F = np.asarray(faces)
+    for _ in range(iters):
+        el = np.linalg.norm(V[F] - V[np.roll(F, 1, axis=1)], axis=2).mean(1)
+        local = np.zeros(len(V))
+        cnt = np.zeros(len(V))
+        for k in range(4):
+            np.add.at(local, F[:, k], el)
+            np.add.at(cnt, F[:, k], 1)
+        local /= np.maximum(cnt, 1)
+        target = V + lam * (adj.average(V) - V)
+        for i in np.nonzero(movable)[0]:
+            p = nearest_one(target[i])
+            if np.linalg.norm(p - target[i]) < local[i] * 0.6:
+                V[i] = p
+    return V
