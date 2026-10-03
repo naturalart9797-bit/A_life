@@ -6,12 +6,17 @@
 ```
 A_life/
 ├─ blender/
-│  ├─ slime_net/     いま開発中の Blender アドオン（粘菌ネットワーク）
+│  ├─ vine_grow/     つる植物ジェネレータ（起点から体に絡みつく枝を生成）
+│  ├─ slime_net/     粘菌ネットワーク（起点から表面に沿って網目を広げる）
 │  └─ old/           以前の Blender アドオン
 │     ├─ vine_dress/   つる植物ドレス（人物に纏わせる・水中スカート・ノードグラフ版）
 │     └─ vine_wrap/    つる植物ラップ（ガイドカーブで絡ませる・リアルな葉）
 └─ web_alife/        以前作ったブラウザ版の人工生命作品（HTML）
 ```
+
+## blender/vine_grow — つる植物ジェネレータ
+オブジェクトの一点から、体に絡みつきながら少し空間にも広がる、つる植物の枝を伸ばす Blender アドオン。
+インストールは `blender/vine_grow/vine_grow.zip`。詳しくは [blender/vine_grow/README.md](blender/vine_grow/README.md)。
 
 ## blender/slime_net — 粘菌ネットワーク
 オブジェクトの一点から、表面に沿って粘菌のようなネットワークを広げる Blender アドオン。
