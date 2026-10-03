@@ -90,7 +90,8 @@ class VINEGROW_PT_origins(_Base, bpy.types.Panel):
         if route_mode:
             layout.label(text="1→2→3… の順につるが通過（球の大きさ＝束の幅）", icon="INFO")
         else:
-            layout.label(text="範囲 = 球の大きさ（体に沿った距離で広がる）", icon="INFO")
+            layout.label(text="範囲 = 球の大きさ（体に沿った距離で広がる）" if P.mode == "RADIAL"
+                         else "球の中ほど密に茂る（球の大きさ＝範囲）", icon="INFO")
 
 
 class VINEGROW_PT_network(_Base, bpy.types.Panel):
@@ -103,7 +104,12 @@ class VINEGROW_PT_network(_Base, bpy.types.Panel):
     def draw(self, context):
         P = context.scene.vine_grow
         layout = self.layout
-        if P.mode == "ROUTE":
+        if P.mode == "DENSITY":
+            _cols(layout, P, ("tangle_density", "concentration", "containment"),
+                  ("tangle_length", "curl", "curl_length", "fine_branch", "fuse"),
+                  ("spread", "cling", "clearance"),
+                  ("tendril_chance", "fine_step", "max_nodes", "seed"))
+        elif P.mode == "ROUTE":
             col = layout.column(align=True)
             for name in ("strand_count", "twist", "wrap_threshold", "strand_sync"):
                 col.prop(P, name)
@@ -130,7 +136,11 @@ class VINEGROW_PT_look(_Base, bpy.types.Panel):
 
     def draw(self, context):
         P = context.scene.vine_grow
-        _cols(self.layout, P, ("r_min", "r_max") + (("pipe_exponent",) if P.mode != "ROUTE" else ()) + ("ring_res",),
+        if P.mode == "DENSITY":
+            sizes = ("fine_r_min", "fine_r_max", "ring_res")
+        else:
+            sizes = ("r_min", "r_max") + (("pipe_exponent",) if P.mode == "RADIAL" else ()) + ("ring_res",)
+        _cols(self.layout, P, sizes,
               ("color_thin", "color_thick", "roughness", "subsurface", "bump"))
 
 

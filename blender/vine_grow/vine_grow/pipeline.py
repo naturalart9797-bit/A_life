@@ -6,7 +6,7 @@ import traceback
 
 import bpy
 
-from . import binding, colonize, route, surface
+from . import binding, colonize, route, surface, tangle
 from .mesh import MeshBuilder, assign_vertex_groups, blob, build_mesh, cap, tube
 from .sampler import BodySampler
 
@@ -111,7 +111,15 @@ def generate(report, context, target):
 
         push = colonize.Pusher(sampler, P.clearance * scale)
         tree = colonize.Tree()
-        if P.mode == "ROUTE":
+        joins = []
+        if P.mode == "DENSITY":
+            field = tangle.Field(sampler, opts, P, scale, rng)
+            if not field.ok():
+                return None, "範囲が小さすぎるか、起点の近くに面がありません。範囲を広げてください"
+            radii, joins = tangle.grow(tree, sampler, field, P, scale, push, rng)
+            if len(tree.pos) < 2:
+                return None, "つるが伸びませんでした（密度・長さを確認）"
+        elif P.mode == "ROUTE":
             if len(opts) < 2:
                 return None, "経路モードでは起点（経由点）が2つ以上必要です"
             rt = route.build_route(sampler, [h for h, _ in opts], [r for _, r in opts], P, scale, rng)
@@ -151,7 +159,7 @@ def generate(report, context, target):
             radii = colonize.pipe_radii(tree, P.r_min * scale, P.r_max * scale, P.pipe_exponent)
         plen = colonize.path_lengths(tree)
         maxlen = max(plen) or 1.0
-        rmax = P.r_max * scale
+        rmax = (P.fine_r_max if P.mode == "DENSITY" else P.r_max) * scale
 
         weights_cache = {}
 
@@ -163,6 +171,7 @@ def generate(report, context, target):
             return w
 
         b = MeshBuilder()
+        join_set = set(joins)
         ch = tree.children()
         for seq in colonize.chains(tree):
             pts = [tree.pos[i].copy() for i in seq]
@@ -178,14 +187,17 @@ def generate(report, context, target):
             thick = [min(1.0, r / rmax) for r in rs]
             ws = [node_weights(i) for i in seq]
             rings = tube(b, pts, normals, rs, ws, dists, thick, P.ring_res)
-            if rings and not ch[seq[-1]]:
+            if rings and not ch[seq[-1]] and seq[-1] not in join_set:
                 t = pts[-1] - pts[-2]
                 t = t.normalized() if t.length_squared > 1e-16 else normals[-1]
                 cap(b, pts[-1], normals[-1], t, rs[-1], rings[-1], ws[-1], dists[-1], thick[-1])
         for i, kids in enumerate(ch):
-            if len(kids) >= 2 or (tree.parent[i] < 0 and P.mode != "ROUTE"):
+            if len(kids) >= 2 or (tree.parent[i] < 0 and P.mode == "RADIAL"):
                 blob(b, tree.pos[i], radii[i] * (1.3 if tree.parent[i] < 0 else 1.05), node_weights(i),
                      min(1.0, plen[i] / maxlen), min(1.0, radii[i] / rmax), seg=6, rings=4)
+        for i in joins:  # fused vines: a small knot where they meet
+            blob(b, tree.pos[i], radii[i] * 1.6, node_weights(i), min(1.0, plen[i] / maxlen),
+                 min(1.0, radii[i] / rmax), seg=6, rings=4)
 
         name = target.name + "_Vines"
         me = build_mesh(b, name, sampler.to_local)

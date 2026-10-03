@@ -29,12 +29,13 @@ class VineGrowSettings(bpy.types.PropertyGroup):
                              description="長さの値を「最大寸法1.7m」の物体を基準とし、対象の大きさに合わせて拡大縮小する")
     rest_pose: BoolProperty(name="レストポーズで処理", default=True)
     seed: IntProperty(name="シード", default=1, min=0)
-    default_reach: FloatProperty(name="新しい起点の範囲", default=0.35, min=0.01, soft_max=3.0, unit="LENGTH",
+    default_reach: FloatProperty(name="新しい起点の範囲", default=0.15, min=0.01, soft_max=3.0, unit="LENGTH",
                                  description="新しく置く起点からつるが広がる範囲（体に沿った距離）")
 
     mode: EnumProperty(
-        name="生え方", default="ROUTE",
-        items=[("ROUTE", "経路（起点を通過）", "起点を順番に通る経路に沿って、つるが絡み合いながら伸びる"),
+        name="生え方", default="DENSITY",
+        items=[("DENSITY", "密度（起点の周りに茂る）", "起点の周りほど密に、細いつるが方向なく絡まり合って茂る"),
+               ("ROUTE", "経路（起点を通過）", "起点を順番に通る経路に沿って、つるが絡み合いながら伸びる"),
                ("RADIAL", "放射（起点から広がる）", "起点から周囲に枝分かれしながら広がる")])
     default_width: FloatProperty(name="新しい経由点の幅", default=0.05, min=0.002, soft_max=0.5, unit="LENGTH",
                                  description="経路モードで新しく置く経由点の、つるの束の幅（半径）")
@@ -54,15 +55,37 @@ class VineGrowSettings(bpy.types.PropertyGroup):
                                  description="つるから横に出る短い脇芽の数（1mあたり）")
     shoot_length: FloatProperty(name="脇芽の長さ", default=0.05, min=0.0, soft_max=0.5, unit="LENGTH")
 
+    # --- density mode ----------------------------------------------------
+    tangle_density: FloatProperty(name="密度(本/100cm²)", default=50.0, min=0.1, soft_max=400.0,
+                                  description="起点の中心付近で、100cm²あたりに生えるつるの本数")
+    concentration: FloatProperty(name="中心への集まり", default=0.35, min=0.0, max=1.0, subtype="FACTOR",
+                                 description="0: 範囲内に均一 / 1: 起点の中心に強く集まる")
+    tangle_length: FloatProperty(name="つるの長さ", default=0.1, min=0.005, soft_max=0.5, unit="LENGTH",
+                                 description="1本のつるの平均の長さ")
+    curl: FloatProperty(name="うねり", default=0.8, min=0.0, max=4.0,
+                        description="つるが曲がりくねる強さ。大きいとループや渦を描いて絡まる")
+    curl_length: FloatProperty(name="うねりの大きさ", default=0.025, min=0.001, soft_max=0.2, unit="LENGTH",
+                               description="曲がりくねりの1つの弧の大きさ。小さいほど細かくうねる")
+    containment: FloatProperty(name="範囲に留まる強さ", default=1.0, min=0.0, max=3.0,
+                               description="範囲の外へ向かうつるを、密な方へ曲げて戻す強さ")
+    fuse: FloatProperty(name="つながり", default=0.4, min=0.0, max=1.0, subtype="FACTOR",
+                        description="つるが他のつるとつながる割合（出会ったとき・先端）。大きいほど先端の少ない網目（粘菌風）になる")
+    fine_branch: FloatProperty(name="枝分かれ", default=0.5, min=0.0, max=5.0,
+                               description="1本のつるが途中で枝分かれする回数の目安")
+    fine_step: FloatProperty(name="細かさ（ステップ）", default=0.0025, min=0.0003, soft_max=0.02, unit="LENGTH",
+                             description="つるの節の間隔。小さいほど細かく曲がる（重くなる）")
+    fine_r_min: FloatProperty(name="最小の太さ", default=0.0004, min=0.00002, soft_max=0.005, unit="LENGTH")
+    fine_r_max: FloatProperty(name="最大の太さ", default=0.002, min=0.0001, soft_max=0.01, unit="LENGTH")
+
     # --- where the vines go --------------------------------------------
     attractor_spacing: FloatProperty(
         name="密度（間隔）", default=0.02, min=0.003, soft_max=0.2, unit="LENGTH",
         description="つるが向かう目標点の間隔。小さいほど密に茂る（重くなる）")
-    spread: FloatProperty(name="空間への広がり", default=0.06, min=0.0, soft_max=0.5, unit="LENGTH",
+    spread: FloatProperty(name="空間への広がり", default=0.02, min=0.0, soft_max=0.5, unit="LENGTH",
                           description="体の表面からどれだけ離れた空間までつるが広がるか")
     cling: FloatProperty(name="密着度", default=0.5, min=0.0, max=1.0, subtype="FACTOR",
                          description="0: 空間に均一に広がる / 1: ほとんど体に沿う")
-    clearance: FloatProperty(name="体との最小距離", default=0.004, min=0.0, soft_max=0.05, unit="LENGTH",
+    clearance: FloatProperty(name="体との最小距離", default=0.001, min=0.0, soft_max=0.05, unit="LENGTH",
                              description="つるの中心線が体に近づける最小の距離（貫通防止）")
 
     # --- how they grow --------------------------------------------------
@@ -80,7 +103,7 @@ class VineGrowSettings(bpy.types.PropertyGroup):
     min_twig: FloatProperty(name="短い小枝を整理", default=0.035, min=0.0, soft_max=0.3, unit="LENGTH",
                             description="これより短い脇枝は取り除く（枝先は巻きひげになる）。0で整理しない")
     max_iterations: IntProperty(name="成長回数", default=400, min=10, max=5000)
-    max_nodes: IntProperty(name="最大の節数", default=20000, min=100, max=500000)
+    max_nodes: IntProperty(name="最大の節数", default=60000, min=100, max=500000)
 
     aerial_count: IntProperty(name="空中に伸びる枝", default=15, min=0, max=1000,
                               description="体から離れて空中に伸びる枝の本数")
