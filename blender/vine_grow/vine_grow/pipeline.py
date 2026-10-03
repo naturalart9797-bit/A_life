@@ -1,12 +1,13 @@
-"""Generation: origins -> space-colonisation vines -> tube mesh bound to the target."""
+"""Generation: origins -> vines (+ leaves) -> tube mesh bound to the target."""
 
 import random
 import time
 import traceback
 
 import bpy
+from mathutils import Vector
 
-from . import binding, colonize, route, surface, tangle
+from . import binding, colonize, leaves, route, surface, tangle
 from .mesh import MeshBuilder, assign_vertex_groups, blob, build_mesh, cap, tube
 from .sampler import BodySampler
 
@@ -55,18 +56,43 @@ def origin_density(o, P):
     return P.tangle_density if d < 0.0 else d
 
 
-DENSITY_DISPLAY = 0.02  # sphere radius (m) of a point at 10 vines / 100 cm^2
+class Params:
+    """Settings for one point: its own values when it has per-point settings, else the overall ones."""
+
+    def __init__(self, P, point=None):
+        self._P = P
+        self._point = point
+
+    def __getattr__(self, name):
+        from .properties import POINT_PROPS
+        if self._point is not None and name in POINT_PROPS:
+            return getattr(self._point, name)
+        return getattr(self._P, name)
 
 
-def sync_density_display(o):
-    """In density mode the sphere size shows the density (cube root, so 8x denser = 2x bigger)."""
-    if o.vine_grow_density < 0.0:
-        return
-    sc = max(o.matrix_world.to_scale()) or 1.0
-    size = DENSITY_DISPLAY
-    if o.parent is not None and max(o.parent.dimensions) > 1e-6:
-        size *= max(o.parent.dimensions) / 1.7
-    o.empty_display_size = max(size * (max(o.vine_grow_density, 0.05) / 10.0) ** (1.0 / 3.0) / sc, 1e-6)
+def params_for(o, P):
+    return Params(P, o.vine_grow_point if getattr(o, "vine_grow_custom", False) else None)
+
+
+LEAVES_PROP = "vine_grow_leaves"
+
+
+def leaves_objects(target):
+    return [o for o in network_objects(target) if o.get(LEAVES_PROP)]
+
+
+def vine_objects(target):
+    return [o for o in network_objects(target) if not o.get(LEAVES_PROP)]
+
+
+def sync_leaf_visibility(target, show):
+    for o in leaves_objects(target):
+        o.hide_viewport = not show
+        o.hide_render = not show
+        try:
+            o.hide_set(not show)
+        except RuntimeError:
+            pass
 
 
 def network_objects(target):
@@ -123,22 +149,28 @@ def generate(report, context, target):
         rng = random.Random(P.seed)
         spacing = P.attractor_spacing * scale
         opts = []
+        params = [Params(P)]  # settings per point (only density mode uses per-point settings)
         for o in origins:
             hit = sampler.nearest(o.matrix_world.translation)
             if hit is not None:
-                opts.append((hit, origin_density(o, P) if P.mode == "DENSITY" else origin_reach(o)))
+                if P.mode == "DENSITY":
+                    opts.append((hit, origin_density(o, P), origin_reach(o)))
+                    params.append(params_for(o, P))
+                else:
+                    opts.append((hit, origin_reach(o)))
         if not opts:
             return None, "起点の近くに対象の面がありません"
 
         push = colonize.Pusher(sampler, P.clearance * scale)
         tree = colonize.Tree()
         if P.mode == "DENSITY":
-            if not any(v > 0.0 for _, v in opts):
+            if not any(v > 0.0 for _, v, _r in opts):
                 return None, "密度が0より大きい点がありません"
             field = tangle.Field(sampler, opts, P, scale, rng)
             if not field.ok():
-                return None, "点の近くに対象の面がありません。「密度の広がり」を大きくしてみてください"
-            radii = tangle.grow(tree, sampler, field, P, scale, push, rng)
+                return None, "点の近くに対象の面がありません。範囲を大きくしてみてください"
+            params = params[1:]
+            radii, owner = tangle.grow(tree, sampler, field, params, scale, push, rng)
             if len(tree.pos) < 2:
                 return None, "つるが伸びませんでした（密度・長さを確認）"
         elif P.mode == "ROUTE":
@@ -179,9 +211,16 @@ def generate(report, context, target):
                 return None, "つるが伸びませんでした（範囲・密度・影響距離を確認）"
 
             radii = colonize.pipe_radii(tree, P.r_min * scale, P.r_max * scale, P.pipe_exponent)
+        if P.mode != "DENSITY":
+            owner = [0] * len(tree.pos)
         plen = colonize.path_lengths(tree)
         maxlen = max(plen) or 1.0
-        rmax = (P.fine_r_max if P.mode == "DENSITY" else P.r_max) * scale
+        if P.mode == "DENSITY":
+            rmax = max(p.fine_r_max for p in params) * scale
+            r_ref = [p.fine_r_max * scale for p in params]
+        else:
+            rmax = P.r_max * scale
+            r_ref = [rmax]
 
         weights_cache = {}
 
@@ -207,6 +246,7 @@ def generate(report, context, target):
             dists = [min(1.0, plen[i] / maxlen) for i in seq]
             thick = [min(1.0, r / rmax) for r in rs]
             ws = [node_weights(i) for i in seq]
+            b.cur_owner = owner[seq[1]] if len(seq) > 1 else owner[seq[0]]
             rings = tube(b, pts, normals, rs, ws, dists, thick, P.ring_res)
             if rings and tree.parent[seq[0]] < 0 and P.mode != "RADIAL":  # open base of a vine
                 t = pts[1] - pts[0]
@@ -218,11 +258,17 @@ def generate(report, context, target):
                 cap(b, pts[-1], normals[-1], t, rs[-1], rings[-1], ws[-1], dists[-1], thick[-1])
         for i, kids in enumerate(ch):
             if len(kids) >= 2 or (tree.parent[i] < 0 and P.mode == "RADIAL"):
+                b.cur_owner = owner[i]
                 blob(b, tree.pos[i], radii[i] * (1.3 if tree.parent[i] < 0 else 1.05), node_weights(i),
                      min(1.0, plen[i] / maxlen), min(1.0, radii[i] / rmax), seg=6, rings=4)
 
+        # colour per vertex from the settings of its point (thin -> thick)
+        cols = [(Vector(p.color_thin), Vector(p.color_thick)) for p in params]
+        for v, (k, th) in enumerate(zip(b.owner, b.thick)):
+            c = cols[k][0].lerp(cols[k][1], th)
+            b.col_of[v] = (c.x, c.y, c.z, 1.0)
         name = target.name + "_Vines"
-        me = build_mesh(b, name, sampler.to_local)
+        me = build_mesh(b, name, sampler.to_local, "vine_color")
         obj = bpy.data.objects.new(name, me)
         obj[SOURCE_PROP] = target.name
         colls = target.users_collection or (context.scene.collection,)
@@ -240,13 +286,45 @@ def generate(report, context, target):
         elif mode == "SURFACE":
             context.view_layer.update()
             binding.add_surface_deform(context, obj, target)
+        growth = None
         try:
-            add_growth(obj, P.growth)
+            growth = add_growth(obj, P.growth)
         except Exception as exc:  # noqa: BLE001
             traceback.print_exc()
             report({"WARNING"}, "成長アニメーションの設定に失敗しました: %s" % exc)
-    stats = "つる: 節 %d / 枝 %d 本 / 頂点 %d (%.1f秒)" % (
-        len(tree.pos), len(colonize.chains(tree)), len(b.verts), time.time() - t0)
+
+        # ---- leaves (a separate object, so they can be shown / hidden) ----
+        n_leaves = 0
+        if any(p.leaf_chance > 0.0 for p in params):
+            lb = MeshBuilder()
+            n_leaves = leaves.build(lb, tree, radii, owner, params, scale, push, random.Random(P.seed + 7),
+                                    node_weights, lambda i: min(1.0, plen[i] / maxlen), r_ref)
+            if n_leaves:
+                lname = target.name + "_Leaves"
+                lme = build_mesh(lb, lname, sampler.to_local, "leaf_color", attrs=("vine_dist",))
+                lobj = bpy.data.objects.new(lname, lme)
+                lobj[SOURCE_PROP] = target.name
+                lobj[LEAVES_PROP] = 1
+                colls[0].objects.link(lobj)
+                binding.attach(lobj, target)
+                try:
+                    lobj.data.materials.append(leaf_material(target, P))
+                except Exception as exc:  # noqa: BLE001
+                    traceback.print_exc()
+                    report({"WARNING"}, "葉のマテリアルの設定に失敗しました: %s" % exc)
+                assign_vertex_groups(lobj, lb, bone_names if mode == "ARMATURE" else set())
+                lobj.hide_select = True
+                if mode == "ARMATURE":
+                    binding.add_armature(lobj, target)
+                elif mode == "SURFACE":
+                    context.view_layer.update()
+                    binding.add_surface_deform(context, lobj, target)
+                if growth is not None:  # same growth group: one value drives vines and leaves
+                    gm = lobj.modifiers.new("成長", "NODES")
+                    gm.node_group = growth.node_group
+                sync_leaf_visibility(target, P.show_leaves)
+    stats = "つる: 節 %d / 枝 %d 本 / 葉 %d 枚 / 頂点 %d (%.1f秒)" % (
+        len(tree.pos), len(colonize.chains(tree)), n_leaves, len(b.verts), time.time() - t0)
     return obj, stats
 
 
@@ -311,12 +389,9 @@ def material(target, P):
     if nt is None:
         return mat
     nt.nodes.clear()
-    attr = nt.nodes.new("ShaderNodeAttribute")
-    attr.attribute_name = "vine_thick"
-    ramp = nt.nodes.new("ShaderNodeValToRGB")
-    ramp.color_ramp.elements[0].color = (*P.color_thin, 1.0)
-    ramp.color_ramp.elements[1].color = (*P.color_thick, 1.0)
-    nt.links.new(attr.outputs["Fac"], ramp.inputs["Fac"])
+    # colour per vertex (each point can have its own thin / thick colours)
+    ramp = nt.nodes.new("ShaderNodeAttribute")
+    ramp.attribute_name = "vine_color"
     tc = nt.nodes.new("ShaderNodeTexCoord")
     noise = nt.nodes.new("ShaderNodeTexNoise")
     noise.inputs["Scale"].default_value = 60.0
@@ -326,7 +401,7 @@ def material(target, P):
     nt.links.new(noise.outputs["Fac"], bump.inputs["Height"])
     bsdf = nt.nodes.new("ShaderNodeBsdfPrincipled")
     bsdf.inputs["Roughness"].default_value = P.roughness
-    nt.links.new(ramp.outputs["Color"], bsdf.inputs["Base Color"])
+    nt.links.new(ramp.outputs["Color"], bsdf.inputs["Base Color"])  # attribute colour
     nt.links.new(bump.outputs["Normal"], bsdf.inputs["Normal"])
     for key in ("Subsurface Weight", "Subsurface"):
         if key in bsdf.inputs:
@@ -337,6 +412,73 @@ def material(target, P):
     out = nt.nodes.new("ShaderNodeOutputMaterial")
     nt.links.new(bsdf.outputs[0], out.inputs["Surface"])
     mat.diffuse_color = (*P.color_thick, 1.0)
+    return mat
+
+
+def leaf_material(target, P):
+    """Green blade with lighter veins (from the leaf UVs), slightly translucent."""
+    name = "VineGrow_Leaf_" + target.name
+    mat = bpy.data.materials.get(name) or bpy.data.materials.new(name)
+    try:
+        mat.use_nodes = True
+    except (AttributeError, TypeError):
+        pass
+    nt = mat.node_tree
+    if nt is None:
+        return mat
+    nt.nodes.clear()
+    N, L = nt.nodes, nt.links
+
+    def math_node(op, a, b=None, value=None):
+        m = N.new("ShaderNodeMath")
+        m.operation = op
+        L.new(a, m.inputs[0])
+        if b is not None:
+            L.new(b, m.inputs[1])
+        elif value is not None:
+            m.inputs[1].default_value = value
+        return m.outputs[0]
+
+    col = N.new("ShaderNodeAttribute")
+    col.attribute_name = "leaf_color"
+    uv = N.new("ShaderNodeUVMap")
+    uv.uv_map = "leaf_uv"
+    sep = N.new("ShaderNodeSeparateXYZ")
+    L.new(uv.outputs["UV"], sep.inputs[0])
+    x = math_node("ABSOLUTE", math_node("SUBTRACT", sep.outputs[0], value=0.5))  # 0 on the midrib
+    y = sep.outputs[1]  # 0 at the base -> 1 at the tip
+    midrib = math_node("LESS_THAN", x, value=0.018)
+    side = math_node("SINE", math_node("MULTIPLY", math_node("SUBTRACT", y, math_node("MULTIPLY", x, value=1.1)),
+                                       value=36.0))
+    side = math_node("MULTIPLY", math_node("GREATER_THAN", side, value=0.93),
+                     math_node("LESS_THAN", x, value=0.45))
+    veins = math_node("MAXIMUM", midrib, side)
+    light = math_node("ADD", math_node("MULTIPLY", veins, value=0.7), value=1.0)
+    scale = N.new("ShaderNodeVectorMath")
+    scale.operation = "SCALE"
+    L.new(col.outputs["Color"], scale.inputs[0])
+    L.new(light, scale.inputs["Scale"])
+    bump = N.new("ShaderNodeBump")
+    bump.inputs["Strength"].default_value = 0.25
+    L.new(veins, bump.inputs["Height"])
+    bsdf = N.new("ShaderNodeBsdfPrincipled")
+    bsdf.inputs["Roughness"].default_value = P.leaf_roughness
+    L.new(scale.outputs[0], bsdf.inputs["Base Color"])
+    L.new(bump.outputs["Normal"], bsdf.inputs["Normal"])
+    trans = N.new("ShaderNodeBsdfTranslucent")
+    L.new(scale.outputs[0], trans.inputs["Color"])
+    L.new(bump.outputs["Normal"], trans.inputs["Normal"])
+    mix = N.new("ShaderNodeMixShader")
+    mix.inputs[0].default_value = P.leaf_translucency * 0.6
+    L.new(bsdf.outputs[0], mix.inputs[1])
+    L.new(trans.outputs[0], mix.inputs[2])
+    out = N.new("ShaderNodeOutputMaterial")
+    L.new(mix.outputs[0], out.inputs["Surface"])
+    mat.diffuse_color = (*P.leaf_color, 1.0)
+    try:
+        mat.use_backface_culling = False
+    except AttributeError:
+        pass
     return mat
 
 

@@ -1,6 +1,7 @@
 import bpy
 
 from . import pipeline
+from .properties import POINT_PROPS
 
 
 class _Base:
@@ -13,11 +14,36 @@ def _wrap(text, n):
     return [text[i:i + n] for i in range(0, len(text), n)] or [""]
 
 
-def _cols(layout, data, *groups):
+def _cols(layout, data, *groups, point=None):
+    """Draw property groups; names a point can override come from `point` when given."""
     for names in groups:
         col = layout.column(align=True)
         for name in names:
-            col.prop(data, name)
+            col.prop(point if (point is not None and name in POINT_PROPS) else data, name)
+
+
+def edit_point(context):
+    """The selected point whose own settings are being edited (density mode), else None."""
+    P = context.scene.vine_grow
+    if P.target is None or P.mode != "DENSITY":
+        return None
+    o = context.active_object
+    if o is not None and o.get(pipeline.ORIGIN_PROP) == P.target.name and o.vine_grow_custom:
+        return o
+    return None
+
+
+def _editing_header(layout, context):
+    P = context.scene.vine_grow
+    if P.mode != "DENSITY":
+        return None
+    o = edit_point(context)
+    box = layout.box()
+    if o is not None:
+        box.label(text="個別設定: %s" % o.name, icon="PREFERENCES")
+        return o.vine_grow_point
+    box.label(text="全体の設定", icon="WORLD")
+    return None
 
 
 class VINEGROW_PT_main(_Base, bpy.types.Panel):
@@ -45,6 +71,8 @@ class VINEGROW_PT_main(_Base, bpy.types.Panel):
         row.operator("vine_grow.clear", text="", icon="TRASH")
         nets = pipeline.network_objects(P.target)
         if nets:
+            if pipeline.leaves_objects(P.target):
+                layout.prop(P, "show_leaves", icon="HIDE_OFF" if P.show_leaves else "HIDE_ON", toggle=True)
             layout.prop(P, "growth", slider=True)
             node = pipeline.growth_node(nets[0])
             if node is not None:
@@ -69,7 +97,12 @@ class VINEGROW_PT_origins(_Base, bpy.types.Panel):
                      icon="RESTRICT_SELECT_OFF")
         row.operator("vine_grow.origin_at_cursor", text="", icon="PIVOT_CURSOR")
         density_mode = P.mode == "DENSITY"
-        layout.prop(P, "default_width" if route_mode else "tangle_density" if density_mode else "default_reach")
+        if density_mode:
+            row = layout.row(align=True)
+            row.prop(P, "tangle_density")
+            row.prop(P, "default_reach", text="範囲")
+        else:
+            layout.prop(P, "default_width" if route_mode else "default_reach")
         origins = pipeline.origin_objects(P.target)
         if not origins:
             layout.label(text="対象の上を順番にクリックして置きます" if route_mode else "対象の上をクリックして起点を置きます",
@@ -79,7 +112,13 @@ class VINEGROW_PT_origins(_Base, bpy.types.Panel):
             sel = o.name in context.view_layer.objects and o.select_get()
             row.operator("vine_grow.origin_select", text="%d. %s" % (k + 1, o.name), depress=sel).name = o.name
             if density_mode:
-                row.prop(o, "vine_grow_density", text="密度")
+                row.prop(o, "vine_grow_custom", text="個別", icon="PREFERENCES", toggle=True)
+                row.operator("vine_grow.origin_remove", text="", icon="X").name = o.name
+                sub = layout.row(align=True)
+                sub.prop(o, "vine_grow_density", text="密度")
+                sub.prop(o, "vine_grow_reach", text="範囲")
+                layout.separator(factor=0.3)
+                continue
             elif o.vine_grow_reach > 0.0:
                 row.prop(o, "vine_grow_reach", text="幅" if route_mode else "範囲")
             else:
@@ -94,7 +133,13 @@ class VINEGROW_PT_origins(_Base, bpy.types.Panel):
             layout.label(text="1→2→3… の順につるが通過（球の大きさ＝束の幅）", icon="INFO")
         else:
             layout.label(text="範囲 = 球の大きさ（体に沿った距離で広がる）" if P.mode == "RADIAL"
-                         else "点ごとに密度を設定（球の大きさ＝密度）", icon="INFO")
+                         else "点ごとに密度と範囲（球の大きさ）を設定", icon="INFO")
+        if density_mode:
+            layout.label(text="⚙ をオンにして点を選ぶと、その点だけの設定を", icon="PREFERENCES")
+            layout.label(text="下のパネルで編集できます")
+            o = edit_point(context)
+            if o is not None:
+                layout.operator("vine_grow.point_from_global", icon="LOOP_BACK").name = o.name
 
 
 class VINEGROW_PT_network(_Base, bpy.types.Panel):
@@ -108,11 +153,12 @@ class VINEGROW_PT_network(_Base, bpy.types.Panel):
         P = context.scene.vine_grow
         layout = self.layout
         if P.mode == "DENSITY":
-            _cols(layout, P, ("falloff", "contrast", "containment"),
+            pt = _editing_header(layout, context)
+            _cols(layout, P, ("contrast", "containment"),
                   ("tangle_length", "curl", "curl_length"),
                   ("internode", "fine_branch", "tendril_chance"),
                   ("spread", "cling", "fine_aerial", "aerial_lift", "clearance"),
-                  ("fine_step", "max_nodes", "seed"))
+                  ("fine_step", "max_nodes", "seed"), point=pt)
         elif P.mode == "ROUTE":
             col = layout.column(align=True)
             for name in ("strand_count", "twist", "wrap_threshold", "strand_sync"):
@@ -140,12 +186,33 @@ class VINEGROW_PT_look(_Base, bpy.types.Panel):
 
     def draw(self, context):
         P = context.scene.vine_grow
+        pt = _editing_header(self.layout, context)
         if P.mode == "DENSITY":
             sizes = ("fine_r_min", "fine_r_max", "ring_res")
         else:
             sizes = ("r_min", "r_max") + (("pipe_exponent",) if P.mode == "RADIAL" else ()) + ("ring_res",)
-        _cols(self.layout, P, sizes,
-              ("color_thin", "color_thick", "roughness", "subsurface", "bump"))
+        _cols(self.layout, P, sizes, ("color_thin", "color_thick", "roughness", "subsurface", "bump"), point=pt)
+
+
+class VINEGROW_PT_leaves(_Base, bpy.types.Panel):
+    bl_label = "葉"
+
+    @classmethod
+    def poll(cls, context):
+        return context.scene.vine_grow.target is not None
+
+    def draw(self, context):
+        P = context.scene.vine_grow
+        layout = self.layout
+        layout.prop(P, "show_leaves", icon="HIDE_OFF" if P.show_leaves else "HIDE_ON", toggle=True)
+        pt = _editing_header(layout, context)
+        _cols(layout, P, ("leaf_chance", "leaf_spacing"),
+              ("leaf_size", "leaf_size_var", "leaf_tip_small"),
+              ("leaf_width", "leaf_lobe", "leaf_point", "leaf_petiole"),
+              ("leaf_cup", "leaf_fold", "leaf_droop", "leaf_face"),
+              ("leaf_color", "leaf_color_young"), point=pt)
+        _cols(layout, P, ("leaf_translucency", "leaf_roughness"))
+        layout.label(text="形・付き方を変えたら「つるを生成」し直す", icon="INFO")
 
 
 class VINEGROW_PT_settings(_Base, bpy.types.Panel):
@@ -162,4 +229,5 @@ class VINEGROW_PT_settings(_Base, bpy.types.Panel):
         _cols(self.layout, P, ("auto_scale", "rest_pose"))
 
 
-classes = (VINEGROW_PT_main, VINEGROW_PT_origins, VINEGROW_PT_network, VINEGROW_PT_look, VINEGROW_PT_settings)
+classes = (VINEGROW_PT_main, VINEGROW_PT_origins, VINEGROW_PT_network, VINEGROW_PT_look, VINEGROW_PT_leaves,
+           VINEGROW_PT_settings)

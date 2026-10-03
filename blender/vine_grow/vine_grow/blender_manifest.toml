@@ -1,7 +1,7 @@
 schema_version = "1.0.0"
 
 id = "vine_grow"
-version = "1.4.0"
+version = "1.5.0"
 name = "Vine Grow"
 tagline = "Grow vine branches that wind around an object from a point"
 maintainer = "A_life"

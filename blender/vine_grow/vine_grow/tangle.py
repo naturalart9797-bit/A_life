@@ -34,33 +34,40 @@ class Field:
     wander anywhere, the field only decides where they are thick or sparse."""
 
     def __init__(self, sampler, pts, P, scale, rng):
-        sigma = max(P.falloff * scale, 0.005 * scale)
-        extent = sigma * 2.5
-        spacing = max(sigma / 8.0, 0.002 * scale)
-        locs = [h.loc for h, _ in pts]
-        self.nodes = surface.scatter_nodes(sampler, locs, extent, spacing, rng)
+        """pts: (surface hit, density, range) per point. The density fades to ~2% at the range."""
+        reaches = [max(r, 0.005 * scale) for _, _, r in pts]
+        spacing = max(min(reaches) / 16.0, max(reaches) / 40.0, 0.002 * scale)
+        locs = [h.loc for h, _, _ in pts]
+        self.nodes = surface.scatter_nodes(sampler, locs, max(reaches) * 1.25, spacing, rng)
         self.spacing = spacing
         n = len(self.nodes)
         self.dens = [0.0] * n
+        self.owner = [0] * n  # point with the strongest contribution: its settings are used there
         self.dist = [math.inf] * n  # distance to the nearest point: drives the growth animation
         self.max = 0.0
         self.total = 0.0
         if n < 4:
             return
         edges = surface.connect(sampler, self.nodes, spacing)
-        for hit, value in pts:
+        best = [0.0] * n
+        for k, ((hit, value, _r), reach) in enumerate(zip(pts, reaches)):
             if value <= 0.0:
                 continue
+            sigma = reach * 0.5
             s = surface.nearest_node(self.nodes, hit.loc)
             for i, d in enumerate(surface.geodesic(self.nodes, edges, [s])):
-                if d < extent:
-                    self.dens[i] += value * math.exp(-(d / sigma) ** 2)
+                if d < reach * 1.25:
+                    c = value * math.exp(-(d / sigma) ** 2)
+                    self.dens[i] += c
+                    if c > best[i]:
+                        best[i], self.owner[i] = c, k
                     self.dist[i] = min(self.dist[i], d)
+        if P.contrast != 1.0:
+            # sharpen dense vs sparse while keeping each point's own value at its centre
+            peaks = [v for _, v, _ in pts]
+            self.dens = [(peaks[k] * (x / peaks[k]) ** P.contrast) if x > 0.0 and peaks[k] > 0.0 else x
+                         for x, k in zip(self.dens, self.owner)]
         self.max = max(self.dens)
-        if self.max > 0.0 and P.contrast != 1.0:
-            # sharpen dense vs sparse while keeping each point's peak value
-            m = self.max
-            self.dens = [m * (x / m) ** P.contrast for x in self.dens]
         self.kd = KDTree(n)
         for i, nd in enumerate(self.nodes):
             self.kd.insert(nd.co, i)
@@ -91,7 +98,7 @@ class Field:
 
     def sample(self, rng):
         i = min(bisect.bisect_left(self.cdf, rng.random() * self.total), len(self.cdf) - 1)
-        return self.nodes[i]
+        return self.nodes[i], self.owner[i]
 
     def count(self, scale):
         """Number of vines: integral of the density (per 100 cm^2) over the surface."""
@@ -153,30 +160,49 @@ def _smooth01(x):
     return x * x * (3.0 - 2.0 * x)
 
 
-class Grower:
-    def __init__(self, tree, sampler, field, P, scale, push, rng):
-        self.tree, self.sampler, self.field, self.P = tree, sampler, field, P
-        self.scale, self.push, self.rng = scale, push, rng
+class _VP:
+    """Settings of one point, converted to lengths for this target."""
+
+    def __init__(self, P, scale):
+        self.P = P
         self.step = P.fine_step * scale
-        self.r_lo, self.r_hi = P.fine_r_min * scale, P.fine_r_max * scale
+        self.r_lo, self.r_hi = P.fine_r_min * scale, max(P.fine_r_max, P.fine_r_min) * scale
         self.clear = P.clearance * scale
         self.spread = P.spread * scale
         self.k_cling = 1.0 + P.cling * 4.0
         self.curl_len = max(P.curl_length * scale, self.step * 2.0)
         self.mean_len = P.tangle_length * scale
         self.internode = max(P.internode * scale, self.step * 2.0)
-        self.occ = Occupancy(max(self.r_hi * 4.0 + self.step, self.step * 1.5))
+
+
+class Grower:
+    def __init__(self, tree, sampler, field, params, scale, push, rng):
+        self.tree, self.sampler, self.field = tree, sampler, field
+        self.scale, self.push, self.rng = scale, push, rng
+        self.vps = [_VP(p, scale) for p in params]
+        self.occ = Occupancy(max(max(v.r_hi * 4.0 + v.step, v.step * 1.5) for v in self.vps))
         self.radii = []
-        self.tendril_spots = []  # (node, radius)
+        self.owner = {}  # node -> point index (nodes added by helpers inherit from their parent)
+        self.tendril_spots = []  # (node, radius, point)
         self.vid = 0
+        self.use(0)
+
+    def use(self, k):
+        v = self.vps[k]
+        self.k = k
+        self.P, self.step, self.r_lo, self.r_hi = v.P, v.step, v.r_lo, v.r_hi
+        self.clear, self.spread, self.k_cling = v.clear, v.spread, v.k_cling
+        self.curl_len, self.mean_len, self.internode = v.curl_len, v.mean_len, v.internode
 
     def add(self, p, parent, d, n, kind, vid, r):
         idx = self.tree.add(p, parent, d, n, kind, vid)
         self.radii.append(r)
+        self.owner[idx] = self.k
         return idx
 
     # ------------------------------------------------------------------
-    def vine(self, hit, d, parent, length, r_start, h0):
+    def vine(self, hit, d, parent, length, r_start, h0, k):
+        self.use(k)
         P, rng, tree, step = self.P, self.rng, self.tree, self.step
         self.vid += 1
         vid = self.vid
@@ -253,14 +279,14 @@ class Grower:
                     bd = Matrix.Rotation(rng.uniform(0.5, 1.1) * (1 if rng.random() < 0.5 else -1), 3, n) @ d
                     rest = (steps - j) * step
                     self.queue.append((nh, _tangent(bd, n), idx, max(rest * rng.uniform(0.4, 0.9), step * 6),
-                                       r * 0.75, height))
+                                       r * 0.75, height, k))
                 if rng.random() < P.tendril_chance * 0.4:
-                    self.tendril_spots.append((idx, r))
+                    self.tendril_spots.append((idx, r, k))
         if cur >= 0 and tree.parent[cur] >= 0:
             if rng.random() < P.fine_aerial:
                 cur = self.aerial(cur, vid, r_tip)
             if cur >= 0 and rng.random() < 0.5:
-                self.tendril_spots.append((cur, r_tip))
+                self.tendril_spots.append((cur, r_tip, k))
 
     # ------------------------------------------------------------------
     def aerial(self, cur, vid, r_end):
@@ -290,7 +316,9 @@ class Grower:
     # ------------------------------------------------------------------
     def tendrils(self):
         P, rng, tree = self.P, self.rng, self.tree
-        for idx, r in self.tendril_spots:
+        for idx, r, k in self.tendril_spots:
+            self.use(k)
+            P = self.P
             rt = max(self.r_lo * 0.45, r * 0.35)
             reach = self.curl_len * 0.8
             tgt = self.occ.nearest(tree.pos[idx], reach, {tree.phase[idx]})
@@ -344,20 +372,24 @@ class Grower:
         count = max(1, min(count, 5000))
         self.queue = []
         for _ in range(count):
-            nd = field.sample(rng)
+            nd, k = field.sample(rng)
+            self.use(k)
             hit = self.sampler.nearest(nd.co + colonize._rand_unit(rng) * field.spacing * 0.5)
             if hit is None:
                 continue
             d0 = _tangent(colonize._rand_unit(rng), hit.normal)
             r0 = self.r_lo + (self.r_hi - self.r_lo) * (rng.random() ** 1.3)
             self.queue.append((hit, d0, -1, self.mean_len * rng.lognormvariate(0.0, 0.35), r0,
-                               self.clear + r0))
+                               self.clear + r0, k))
         while self.queue and len(self.tree.pos) < P.max_nodes:
             self.vine(*self.queue.pop(0))
         self.tendrils()
-        return self.radii
+        own = []
+        for i, par in enumerate(self.tree.parent):
+            own.append(self.owner.get(i, own[par] if par >= 0 else 0))
+        return self.radii, own
 
 
-def grow(tree, sampler, field, P, scale, push, rng):
-    """Fill `tree` with the vines. Returns per-node radii."""
-    return Grower(tree, sampler, field, P, scale, push, rng).run()
+def grow(tree, sampler, field, params, scale, push, rng):
+    """Fill `tree` with the vines (params: settings per point). Returns (per-node radii, per-node point)."""
+    return Grower(tree, sampler, field, params, scale, push, rng).run()

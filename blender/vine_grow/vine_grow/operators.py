@@ -192,6 +192,25 @@ class VINEGROW_OT_origin_move(bpy.types.Operator):
         return {"FINISHED"}
 
 
+class VINEGROW_OT_point_from_global(bpy.types.Operator):
+    bl_idname = "vine_grow.point_from_global"
+    bl_label = "全体の設定をこの点にコピー"
+    bl_description = "この点の個別設定を、今の全体の設定で上書きする"
+    bl_options = {"REGISTER", "UNDO"}
+
+    name: bpy.props.StringProperty()
+
+    def execute(self, context):
+        from .properties import POINT_PROPS
+        o = bpy.data.objects.get(self.name)
+        if o is None:
+            return {"CANCELLED"}
+        P = context.scene.vine_grow
+        for name in POINT_PROPS:
+            setattr(o.vine_grow_point, name, getattr(P, name))
+        return {"FINISHED"}
+
+
 class VINEGROW_OT_toggle_rest(bpy.types.Operator):
     bl_idname = "vine_grow.toggle_rest"
     bl_label = "レスト/ポーズ切替"
@@ -215,5 +234,6 @@ classes = (
     VINEGROW_OT_origin_remove,
     VINEGROW_OT_origin_select,
     VINEGROW_OT_origin_move,
+    VINEGROW_OT_point_from_global,
     VINEGROW_OT_toggle_rest,
 )

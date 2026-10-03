@@ -14,12 +14,17 @@ class MeshBuilder:
     def __init__(self):
         self.verts, self.weights, self.dist, self.thick = [], [], [], []
         self.faces = []
+        self.owner = []  # settings (point) index per vertex
+        self.cur_owner = 0
+        self.uv_of = {}  # vertex -> (u, v), optional
+        self.col_of = {}  # vertex -> RGBA, optional
 
     def vert(self, co, w, dist, thick):
         self.verts.append(co)
         self.weights.append(w)
         self.dist.append(dist)
         self.thick.append(thick)
+        self.owner.append(self.cur_owner)
         return len(self.verts) - 1
 
 
@@ -87,7 +92,7 @@ def blob(b, center, radius, weight, dist, thick, seg=8, rings=5):
             b.faces.append((grid[i][j], grid[i + 1][j], grid[i + 1][j2], grid[i][j2]))
 
 
-def build_mesh(b, name, to_local):
+def build_mesh(b, name, to_local, color_name=None, attrs=("vine_dist", "vine_thick")):
     me = bpy.data.meshes.new(name)
     me.from_pydata([to_local(v) for v in b.verts], [], b.faces)
     me.update()
@@ -96,8 +101,24 @@ def build_mesh(b, name, to_local):
     except (AttributeError, TypeError, RuntimeError):
         me.shade_smooth()
     for nm, vals in (("vine_dist", b.dist), ("vine_thick", b.thick)):
+        if nm not in attrs:
+            continue
         a = me.attributes.new(name=nm, type="FLOAT", domain="POINT")
         a.data.foreach_set("value", vals)
+    if color_name and b.col_of:
+        a = me.attributes.new(name=color_name, type="FLOAT_COLOR", domain="POINT")
+        flat = []
+        for i in range(len(b.verts)):
+            flat.extend(b.col_of.get(i, (0.5, 0.5, 0.5, 1.0)))
+        a.data.foreach_set("color", flat)
+    if b.uv_of:
+        uv = me.uv_layers.new(name="leaf_uv")
+        loops = [0] * len(me.loops)
+        me.loops.foreach_get("vertex_index", loops)
+        flat = []
+        for vi in loops:
+            flat.extend(b.uv_of.get(vi, (0.5, 0.5)))
+        uv.data.foreach_set("uv", flat)
     me.update()
     return me
 
