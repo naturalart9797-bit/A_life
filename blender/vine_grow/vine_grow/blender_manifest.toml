@@ -1,9 +1,9 @@
 schema_version = "1.0.0"
 
 id = "vine_grow"
-version = "1.6.0"
+version = "1.7.0"
 name = "Vine Grow"
-tagline = "Grow vine branches that wind around an object from a point"
+tagline = "Paint vine density on an object and grow tangled climbing vines with leaves"
 maintainer = "A_life"
 type = "add-on"
 tags = ["Add Mesh", "Animation"]

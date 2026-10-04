@@ -17,11 +17,6 @@ def _growth_changed(self, context):
             node.outputs[0].default_value = self.growth
 
 
-def _reach_changed(self, context):
-    from . import pipeline
-    pipeline.sync_display(self)
-
-
 def _point_props():
     """Vine / leaf settings (kept as a group so they can be copied together)."""
     return {
@@ -119,93 +114,37 @@ class VineGrowSettings(bpy.types.PropertyGroup):
                              description="長さの値を「最大寸法1.7m」の物体を基準とし、対象の大きさに合わせて拡大縮小する")
     rest_pose: BoolProperty(name="レストポーズで処理", default=True)
     seed: IntProperty(name="シード", default=1, min=0)
-    default_reach: FloatProperty(name="新しい点の範囲", default=0.15, min=0.01, soft_max=3.0, unit="LENGTH",
-                                 description="新しく置く起点の範囲（体に沿った距離）")
-
-    mode: EnumProperty(
-        name="生え方", default="DENSITY",
-        items=[("DENSITY", "密度（塗った所に茂る）", "表面に打った点に密度を塗り、密な所ほどつるが方向なく絡まり合って茂る"),
-               ("ROUTE", "経路（起点を通過）", "起点を順番に通る経路に沿って、つるが絡み合いながら伸びる"),
-               ("RADIAL", "放射（起点から広がる）", "起点から周囲に枝分かれしながら広がる")])
-    default_width: FloatProperty(name="新しい経由点の幅", default=0.05, min=0.002, soft_max=0.5, unit="LENGTH",
-                                 description="経路モードで新しく置く経由点の、つるの束の幅（半径）")
-    strand_count: IntProperty(name="つるの本数", default=7, min=1, max=200,
-                              description="経路に沿って伸びるつるの本数")
-    twist: FloatProperty(name="ねじれ(回/m)", default=2.0, min=0.0, soft_max=20.0,
-                         description="つるが経路の周りを巻く回数（1mあたり）。細い腕などではぐるぐる巻き付く")
-    wrap_threshold: FloatProperty(
-        name="巻き付く細さ", default=1.0, min=0.1, max=4.0,
-        description="束の幅が体の部分の半径のこの倍率以上になる所（腕・首など細い所）で、ぐるりと巻き付く。"
-                    "小さいほど太い所でも巻き付く")
-    counter_twist: BoolProperty(name="逆巻きを混ぜる", default=True,
-                                description="半分のつるを逆向きに巻いて、編み込んだように交差させる")
-    strand_sync: FloatProperty(name="始まりと終わりの揃い", default=0.5, min=0.0, max=1.0, subtype="FACTOR",
-                               description="1: 全部のつるが最初と最後の経由点で揃う / 0: ばらばらに始まり終わる")
-    shoot_density: FloatProperty(name="脇芽(本/m)", default=6.0, min=0.0, soft_max=60.0,
-                                 description="つるから横に出る短い脇芽の数（1mあたり）")
-    shoot_length: FloatProperty(name="脇芽の長さ", default=0.05, min=0.0, soft_max=0.5, unit="LENGTH")
-
-    # --- density mode ----------------------------------------------------
     contrast: FloatProperty(name="粗密の強さ", default=1.5, min=0.3, max=6.0,
                             description="密な所と疎な所の差を強調する。1: そのまま / 大きいほど、密な所はより密に、疎な所はより疎に")
 
-    # --- where the vines go --------------------------------------------
-    attractor_spacing: FloatProperty(
-        name="密度（間隔）", default=0.02, min=0.003, soft_max=0.2, unit="LENGTH",
-        description="つるが向かう目標点の間隔。小さいほど密に茂る（重くなる）")
-
-    # --- how they grow --------------------------------------------------
-    step: FloatProperty(name="成長ステップ", default=0.008, min=0.001, soft_max=0.05, unit="LENGTH")
-    influence: FloatProperty(name="引き寄せ距離", default=0.1, min=0.005, soft_max=0.5, unit="LENGTH",
-                             description="枝がどれだけ遠くの目標点に引き寄せられるか。大きいほど長く伸びて分岐が少ない")
-    inertia: FloatProperty(name="直進性", default=0.6, min=0.0, max=0.95, subtype="FACTOR",
-                           description="枝が前の向きを保つ度合い。大きいとなめらかな長い弧になる")
-    wander: FloatProperty(name="揺らぎ", default=0.2, min=0.0, max=2.0,
-                          description="成長方向のランダムな揺らぎ")
-    meander: FloatProperty(name="くねり", default=0.35, min=0.0, max=1.5,
-                           description="枝が左右にくねくねと曲がる強さ")
-    meander_length: FloatProperty(name="くねりの周期", default=0.12, min=0.005, soft_max=0.5, unit="LENGTH",
-                                  description="くねりの1往復の長さ")
-    min_twig: FloatProperty(name="短い小枝を整理", default=0.035, min=0.0, soft_max=0.3, unit="LENGTH",
-                            description="これより短い脇枝は取り除く（枝先は巻きひげになる）。0で整理しない")
-    max_iterations: IntProperty(name="成長回数", default=400, min=10, max=5000)
     max_nodes: IntProperty(name="最大の節数", default=60000, min=100, max=500000)
 
-    aerial_count: IntProperty(name="空中に伸びる枝", default=15, min=0, max=1000,
-                              description="体から離れて空中に伸びる枝の本数")
-    aerial_length: FloatProperty(name="空中の枝の長さ", default=0.15, min=0.0, soft_max=1.0, unit="LENGTH")
-    tendril_length: FloatProperty(name="巻きひげの長さ", default=0.04, min=0.0, soft_max=0.3, unit="LENGTH")
-
     # --- look ---------------------------------------------------------------
-    r_min: FloatProperty(name="最小の太さ", default=0.0008, min=0.00005, soft_max=0.01, unit="LENGTH")
-    r_max: FloatProperty(name="最大の太さ", default=0.0045, min=0.0002, soft_max=0.05, unit="LENGTH")
-    pipe_exponent: FloatProperty(name="太さの変化", default=2.5, min=1.5, max=4.0,
-                                 description="枝分かれでの太さの減り方（小さいほど根元が急に太くなる）")
     ring_res: IntProperty(name="断面分割数", default=6, min=3, max=16)
     roughness: FloatProperty(name="粗さ", default=0.45, min=0.0, max=1.0, subtype="FACTOR")
     subsurface: FloatProperty(name="透け感(SSS)", default=0.15, min=0.0, max=1.0, subtype="FACTOR")
     bump: FloatProperty(name="表面の凹凸", default=0.2, min=0.0, max=1.0, subtype="FACTOR")
 
     # --- density points (Yeti-style) --------------------------------------
+    density: FloatProperty(name="全体の密度", default=30.0, min=0.0, soft_max=200.0,
+                           description="値 100 で塗った所の密度（100cm² あたりのつるの本数）。塗った値はこれに対する割合")
     show_points: BoolProperty(name="点を表示", default=True, update=_redraw,
-                              description="密度の点を、値に応じた色（紫=低い → 黄=高い）で表示")
+                              description="密度の点を、値に応じた色（紫=0 → 緑=100）で表示")
     show_vines: BoolProperty(name="つるを表示", default=True, update=_show_vines_changed,
                              description="つるの表示・非表示（点を塗るときは隠すと見やすい）")
     point_spacing: FloatProperty(name="点の間隔", default=0.015, min=0.002, soft_max=0.1, unit="LENGTH",
                                  description="散布・追加する点どうしの間隔")
     point_size: FloatProperty(name="点の表示サイズ", default=0.003, min=0.0002, soft_max=0.03, unit="LENGTH",
                               update=_redraw)
-    point_default: FloatProperty(name="新しい点の密度", default=0.0, min=0.0, soft_max=200.0,
-                                 description="散布・追加した点の最初の密度")
-    paint_max: FloatProperty(name="色の最大", default=40.0, min=0.1, soft_max=400.0, update=_redraw,
-                             description="この密度で黄色になる（色の目盛り）")
+    point_default: FloatProperty(name="新しい点の値", default=0.0, min=0.0, max=100.0,
+                                 description="散布・追加した点の最初の値（0〜100）")
     brush_tool: EnumProperty(
         name="ブラシ", default="PAINT",
         items=[("PAINT", "塗る", "点の密度を塗る（Ctrl: 減らす / Shift: ぼかす）"),
                ("ADD", "追加", "点を追加（Ctrl: 削除）"),
                ("REMOVE", "削除", "点を削除")])
-    brush_value: FloatProperty(name="密度", default=25.0, min=0.0, soft_max=200.0,
-                               description="塗る密度（その辺りの 100cm² あたりのつるの本数）")
+    brush_value: FloatProperty(name="値", default=100.0, min=0.0, max=100.0,
+                               description="塗る値（0〜100）。100 で「全体の密度」になる")
     brush_radius: IntProperty(name="半径(px)", default=60, min=2, max=1000)
     brush_strength: FloatProperty(name="強さ", default=0.5, min=0.0, max=1.0, subtype="FACTOR")
     add_with_value: BoolProperty(name="追加した点をブラシの値で塗る", default=False)
@@ -218,7 +157,7 @@ class VineGrowSettings(bpy.types.PropertyGroup):
     leaf_roughness: FloatProperty(name="葉の粗さ", default=0.4, min=0.0, max=1.0, subtype="FACTOR")
 
     growth: FloatProperty(name="成長", default=1.0, min=0.0, max=1.0, subtype="FACTOR", update=_growth_changed,
-                          description="0: 起点だけ → 1: 全体。アニメーションには下の「成長（キーフレーム用）」を使う")
+                          description="0: なし → 1: 全体（つるは根元から伸びる）。アニメーションには下の「成長（キーフレーム用）」を使う")
     last_message: bpy.props.StringProperty(default="")
     last_ok: BoolProperty(default=True)
     bind_mode: EnumProperty(
@@ -233,7 +172,3 @@ VineGrowSettings.__annotations__.update(_point_props())
 
 
 classes = (VineGrowSettings,)
-
-
-REACH = FloatProperty(name="範囲", default=0.0, min=0.0, soft_max=5.0, unit="LENGTH", update=_reach_changed,
-                      description="起点から体に沿ってつるが広がる距離（ワールド単位）")

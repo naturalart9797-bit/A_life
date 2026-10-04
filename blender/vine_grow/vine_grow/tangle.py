@@ -85,7 +85,8 @@ class PointField(_FieldBase):
             self.kd.insert(nd.co, i)
         self.kd.balance()
         blend = max(P.point_blend * scale, self.spacing * 0.5)
-        vals = list(ps.val)
+        # painted 0..100 (100 = the overall density)
+        vals = [max(0.0, v) / 100.0 * P.density for v in ps.val]
         for i, nd in enumerate(self.nodes):
             sw = sv = 0.0
             for _co, j, d in self.kd.find_range(nd.co, blend * 2.0):

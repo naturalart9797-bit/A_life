@@ -104,7 +104,7 @@ class VINEGROW_OT_brush(bpy.types.Operator):
     bl_idname = "vine_grow.brush"
     bl_label = "ブラシ"
     bl_description = ("左ドラッグ: 塗る / 点を追加 / 点を削除。Ctrl: 減らす（追加ブラシでは削除）、Shift: ぼかす。"
-                      "[ ]: ブラシの大きさ。1/2/3: 塗る/追加/削除。Enter/右クリック/Esc: 終了")
+                      "B を押したまま上下: ブラシの大きさ。1/2/3: 塗る/追加/削除。Enter/右クリック/Esc: 終了")
     bl_options = {"REGISTER", "UNDO"}
 
     @classmethod
@@ -126,6 +126,8 @@ class VINEGROW_OT_brush(bpy.types.Operator):
         self.rng = random.Random()
         self.stroke = False
         self.mouse = (event.mouse_region_x, event.mouse_region_y)
+        self.resize_at = None  # B held: (x, y) where resizing started
+        self.resize_from = (0, 0)
         P = context.scene.vine_grow
         P.show_points = True
         self._draw = bpy.types.SpaceView3D.draw_handler_add(self._draw_circle, (context,), "WINDOW", "POST_PIXEL")
@@ -138,7 +140,7 @@ class VINEGROW_OT_brush(bpy.types.Operator):
         P = context.scene.vine_grow
         name = {"PAINT": "塗る", "ADD": "点を追加", "REMOVE": "点を削除"}[P.brush_tool]
         context.area.header_text_set(
-            "ブラシ: %s（値 %.3g）  左ドラッグ: 適用  Ctrl: 減らす/削除  Shift: ぼかす  [ ]: 大きさ  "
+            "ブラシ: %s（値 %.3g）  左ドラッグ: 適用  Ctrl: 減らす/削除  Shift: ぼかす  B+上下: 大きさ  "
             "1/2/3: 塗る/追加/削除  Alt・中ボタン: 視点  Enter/右クリック/Esc: 終了" % (name, P.brush_value))
 
     def _draw_circle(self, context):
@@ -156,11 +158,11 @@ class VINEGROW_OT_brush(bpy.types.Operator):
                 return
             P = context.scene.vine_grow
             r = P.brush_radius
-            x, y = self.mouse
+            x, y = self.resize_at if self.resize_at else self.mouse
             pts = [(x + math.cos(a) * r, y + math.sin(a) * r) for a in (math.tau * k / 48 for k in range(48))]
             batch = batch_for_shader(shader, "LINE_LOOP", {"pos": pts})
             shader.bind()
-            col = {"PAINT": points.ramp(min(1.0, P.brush_value / max(P.paint_max, 1e-6))),
+            col = {"PAINT": points.ramp(P.brush_value / points.VALUE_MAX),
                    "ADD": (0.9, 0.9, 0.9), "REMOVE": (1.0, 0.3, 0.3)}[P.brush_tool]
             shader.uniform_float("color", (col[0], col[1], col[2], 1.0))
             gpu.state.line_width_set(2.0)
@@ -272,8 +274,22 @@ class VINEGROW_OT_brush(bpy.types.Operator):
     # ------------------------------------------------------------------
     def modal(self, context, event):
         P = context.scene.vine_grow
+        if event.type == "B":
+            # hold B and move the mouse up / down to resize the brush
+            if event.value == "PRESS" and not event.is_repeat and self.resize_at is None:
+                self.resize_at = self.mouse
+                self.resize_from = (event.mouse_region_y, P.brush_radius)
+            elif event.value == "RELEASE":
+                self.resize_at = None
+            context.area.tag_redraw()
+            return {"RUNNING_MODAL"}
         if event.type in {"MOUSEMOVE", "INBETWEEN_MOUSEMOVE"}:
             self.mouse = (event.mouse_region_x, event.mouse_region_y)
+            if self.resize_at is not None:
+                y0, r0 = self.resize_from
+                P.brush_radius = max(2, min(1000, int(r0 * math.exp((event.mouse_region_y - y0) / 200.0))))
+                context.area.tag_redraw()
+                return {"RUNNING_MODAL"}
             if self.stroke:
                 self._apply(context, event)
             context.area.tag_redraw()
@@ -284,6 +300,8 @@ class VINEGROW_OT_brush(bpy.types.Operator):
             self._finish(context)
             return {"FINISHED"}
         if event.type == "LEFTMOUSE":
+            if self.resize_at is not None:
+                return {"RUNNING_MODAL"}
             if event.value == "PRESS":
                 region = context.region
                 self.mouse = (event.mouse_region_x, event.mouse_region_y)

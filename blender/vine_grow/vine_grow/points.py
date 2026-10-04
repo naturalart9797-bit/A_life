@@ -12,9 +12,11 @@ POINTS_PROP = "vine_grow_points"
 ATTR_VALUE = "vg_density"
 ATTR_NORMAL = "vg_normal"
 
-# purple (low) -> blue -> cyan -> green -> yellow (high), like a heat map
-RAMP = ((0.0, (0.50, 0.12, 0.85)), (0.25, (0.12, 0.40, 1.00)), (0.5, (0.10, 0.85, 0.90)),
-        (0.75, (0.25, 0.90, 0.20)), (1.0, (1.00, 0.88, 0.10)))
+VALUE_MAX = 100.0  # painted values are 0..100 (100 = the overall density)
+
+# 0 purple -> blue -> cyan -> 100 green
+RAMP = ((0.0, (0.55, 0.12, 0.85)), (0.33, (0.15, 0.35, 1.00)), (0.66, (0.10, 0.85, 0.90)),
+        (1.0, (0.20, 0.95, 0.20)))
 ZERO_COLOR = (0.55, 0.55, 0.58)  # unpainted: small and close to a grey body so it stays quiet
 
 
@@ -242,7 +244,7 @@ def draw():
         context = bpy.context
         P = context.scene.vine_grow
         target = P.target
-        if target is None or not P.show_points or P.mode != "DENSITY":
+        if target is None or not P.show_points:
             return
         ps = get(target)
         if ps is None or not len(ps):
@@ -250,10 +252,10 @@ def draw():
         mw = target.matrix_world
         sc = max(mw.to_scale()) or 1.0
         size = P.point_size / sc
-        key = (id(ps), ps.version, ps.mesh_version, round(size, 9), P.paint_max)
+        key = (id(ps), ps.version, ps.mesh_version, round(size, 9))
         cached = _batch.get(target.name)
         if cached is None or cached[0] != key:
-            shader, batch = _build(ps, size, max(P.paint_max, 1e-6))
+            shader, batch = _build(ps, size, VALUE_MAX)
             cached = (key, shader, batch)
             _batch[target.name] = cached
         _key, shader, batch = cached
