@@ -1,0 +1,11 @@
+schema_version = "2.0.0"
+
+id = "vine_dress"
+version = "2.0.1"
+name = "Vine Dress"
+tagline = "Grow animated vine clothing with an underwater skirt on a character"
+maintainer = "A_life"
+type = "add-on"
+tags = ["Add Mesh", "Animation"]
+blender_version_min = "4.2.0"
+license = ["SPDX:GPL-3.0-or-later"]
