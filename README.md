@@ -8,9 +8,11 @@ A_life/
 ├─ blender/
 │  ├─ vine_grow/     つる植物ジェネレータ（密度をペイントして、体に絡みつく茎と葉を生成）
 │  ├─ slime_net/     粘菌ネットワーク（起点から表面に沿って網目を広げる）
+│  ├─ water_flower/  水をためる花（中央の器に水がたまる花、つぼみアニメーション）
 │  └─ old/           以前の Blender アドオン
 │     ├─ vine_dress/   つる植物ドレス（人物に纏わせる・水中スカート・ノードグラフ版）
-│     └─ vine_wrap/    つる植物ラップ（ガイドカーブで絡ませる・リアルな葉）
+│     ├─ vine_wrap/    つる植物ラップ（ガイドカーブで絡ませる・リアルな葉）
+│     └─ water_flower_v1/ 水をためる花の旧版（ボクセルで水位を計算）
 └─ web_alife/        以前作ったブラウザ版の人工生命作品（HTML）
 ```
 
@@ -21,6 +23,10 @@ A_life/
 ## blender/slime_net — 粘菌ネットワーク
 オブジェクトの一点から、表面に沿って粘菌のようなネットワークを広げる Blender アドオン。
 インストールは `blender/slime_net/slime_net.zip`。詳しくは [blender/slime_net/README.md](blender/slime_net/README.md)。
+
+## blender/water_flower — 水をためる花
+中央の器（水をためる花びら）に水がたまる花を生成する Blender アドオン。外側の花びらはねじれ・うねり、つぼみに閉じるアニメーションも作れる。部品どうしは交差しない。
+インストールは `blender/water_flower/water_flower.zip`。詳しくは [blender/water_flower/README.md](blender/water_flower/README.md)。
 
 ## web_alife — ブラウザ版の作品
 `web_alife/index.html` が作品一覧のページです（ブラウザで開くだけで動きます）。`alife_site.zip` は同じ作品一式の zip です。

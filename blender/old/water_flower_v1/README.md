@@ -1,4 +1,6 @@
-# Water Flower Petals（水をためる花）— Blender アドオン
+# Water Flower Petals v1（旧版・ボクセルで水位を計算）— Blender アドオン
+
+> 旧版です。新しい版は [blender/water_flower](../../water_flower/README.md) にあります。
 
 絡み合った花びらを何層も重ねて、中央に風呂のような水たまりをつくる花を生成します。
 
