@@ -1,7 +1,7 @@
 schema_version = "1.0.0"
 
 id = "water_flower"
-version = "2.0.0"
+version = "2.1.0"
 name = "Water Flower"
 tagline = "Flowers whose central cup holds water, with playful petals and bud animation"
 maintainer = "A_life"

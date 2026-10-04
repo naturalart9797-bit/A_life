@@ -103,6 +103,16 @@ class WATERFLOWER_OT_clear_animation(bpy.types.Operator):
         return {'FINISHED'}
 
 
+def should_check(ka, kb):
+    """付け根で接して付いている組 (花びら・がくと子房、しべと器) は調べない。"""
+    pair = {ka, kb}
+    if 'STEM' in pair:
+        return False
+    if 'CORONA' in pair and pair & {'STAMEN', 'PISTIL'}:
+        return False
+    return True
+
+
 def find_collisions(s, blooms):
     """部品どうしが交差・接触 (厚み以内) する組を探す。"""
     hits = []
@@ -120,6 +130,8 @@ def find_collisions(s, blooms):
                           min(zs) - tol, max(zs) + tol))
         for i in range(len(pieces)):
             for j in range(i + 1, len(pieces)):
+                if not should_check(pieces[i].kind, pieces[j].kind):
+                    continue
                 a, c = boxes[i], boxes[j]
                 if a[1] < c[0] or c[1] < a[0] or a[3] < c[2] or c[3] < a[2] or a[5] < c[4] or c[5] < a[4]:
                     continue

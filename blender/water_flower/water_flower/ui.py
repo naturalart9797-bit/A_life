@@ -60,7 +60,7 @@ class WATERFLOWER_PT_corona(_Base, bpy.types.Panel):
         _props(self.layout, s, (
             "corona_radius", "corona_height", "corona_bottom", "corona_bulge",
             "corona_flare", "corona_lobes", "corona_lobe_depth", "corona_ribs",
-            "corona_rib_depth", "rim_frill", "rim_frill_freq",
+            "corona_rib_depth", "rim_frill", "rim_frill_freq", "rim_crimp", "rim_crimp_freq",
             "corona_res_t", "corona_res_phi"))
 
 
@@ -79,17 +79,33 @@ class WATERFLOWER_PT_petals(_Base, bpy.types.Panel):
         _props(layout, s, ("whorls", "petals_per_whorl", "petal_rotation"))
         layout.label(text="形")
         _props(layout, s, ("petal_length", "petal_width", "petal_widest",
-                           "petal_pointiness", "petal_claw", "petal_midrib"))
+                           "petal_pointiness", "petal_midrib", "petal_fold", "petal_reflex",
+                           "petal_tip_curl", "petal_detail"))
         layout.label(text="開き方")
         _props(layout, s, ("petal_tilt", "petal_curl", "petal_cup", "petal_wrap_open",
-                           "petal_attach"))
+                           "petal_attach", "tube_radius"))
         layout.label(text="あそび")
-        _props(layout, s, ("petal_twist", "twist_alternate", "petal_wave", "petal_wave_freq",
+        _props(layout, s, ("petal_twist", "twist_alternate", "petal_sweep", "petal_wave", "petal_wave_freq",
                            "petal_ruffle", "petal_ruffle_freq", "petal_jitter"))
         layout.label(text="層")
         _props(layout, s, ("whorl_tilt_step", "whorl_length_step", "whorl_width_step"))
         layout.label(text="解像度")
         _props(layout, s, ("petal_res_u", "petal_res_v"))
+
+
+class WATERFLOWER_PT_sepals(_Base, bpy.types.Panel):
+    bl_label = "がく"
+    bl_parent_id = "WATERFLOWER_PT_main"
+    bl_options = {'DEFAULT_CLOSED'}
+
+    @classmethod
+    def poll(cls, context):
+        return active_flower(context) is not None
+
+    def draw(self, context):
+        s = active_flower(context).water_flower
+        _props(self.layout, s, ("sepal_count", "sepal_length", "sepal_width", "sepal_tilt",
+                                "sepal_curl", "sepal_cup"))
 
 
 class WATERFLOWER_PT_bud(_Base, bpy.types.Panel):
@@ -107,7 +123,8 @@ class WATERFLOWER_PT_bud(_Base, bpy.types.Panel):
         layout = self.layout
         layout.label(text="閉じた時の形")
         _props(layout, s, ("bud_tilt", "bud_close", "bud_spiral", "bud_scale",
-                           "bud_pinch", "bud_flare", "anim_stagger"))
+                           "bud_pinch", "bud_flare", "bud_corona_radius", "bud_corona_height",
+                           "sepal_bud_tilt", "anim_stagger"))
         layout.label(text="アニメーション")
         _props(layout, s, ("anim_mode", "anim_start", "anim_duration"))
         if s.anim_mode in ('CLOSE_OPEN', 'OPEN_CLOSE'):
@@ -133,8 +150,8 @@ class WATERFLOWER_PT_stamen(_Base, bpy.types.Panel):
         s = active_flower(context).water_flower
         _props(self.layout, s, (
             "stamen_count", "stamen_height", "stamen_spread", "stamen_curve",
-            "stamen_radius", "stamen_anther", "stem", "stem_length", "stem_radius",
-            "stem_bend", "ovary_radius", "ovary_length"))
+            "stamen_radius", "stamen_anther", "pistil", "pistil_height",
+            "stem", "stem_length", "stem_radius", "stem_bend", "ovary_radius", "ovary_length"))
 
 
 class WATERFLOWER_PT_finish(_Base, bpy.types.Panel):
@@ -154,7 +171,7 @@ class WATERFLOWER_PT_finish(_Base, bpy.types.Panel):
 
 
 class WATERFLOWER_PT_colors(_Base, bpy.types.Panel):
-    bl_label = "色"
+    bl_label = "色・質感"
     bl_parent_id = "WATERFLOWER_PT_main"
     bl_options = {'DEFAULT_CLOSED'}
 
@@ -166,13 +183,16 @@ class WATERFLOWER_PT_colors(_Base, bpy.types.Panel):
         s = active_flower(context).water_flower
         _props(self.layout, s, (
             "color_petal_base", "color_petal_tip", "color_corona_base",
-            "color_corona_rim", "color_stamen", "color_stem"))
+            "color_corona_rim", "color_stamen", "color_filament", "color_pistil",
+            "color_sepal_base", "color_sepal_tip", "color_ovary", "color_stem",
+            "vein_strength", "translucency"))
 
 
 classes = (
     WATERFLOWER_PT_main,
     WATERFLOWER_PT_corona,
     WATERFLOWER_PT_petals,
+    WATERFLOWER_PT_sepals,
     WATERFLOWER_PT_bud,
     WATERFLOWER_PT_stamen,
     WATERFLOWER_PT_finish,
