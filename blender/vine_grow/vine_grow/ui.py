@@ -106,8 +106,7 @@ class VINEGROW_PT_network(_Base, _Targeted, bpy.types.Panel):
     bl_label = "つるの広がり"
 
     def draw(self, context):
-        _cols(self.layout, context.scene.vine_grow, ("contrast", "containment"),
-              ("tangle_length", "curl", "curl_length"),
+        _cols(self.layout, context.scene.vine_grow, ("tangle_length", "curl", "curl_length"),
               ("internode", "fine_branch", "tendril_chance"),
               ("spread", "cling", "fine_aerial", "aerial_lift", "clearance"),
               ("fine_step", "max_nodes", "seed"))

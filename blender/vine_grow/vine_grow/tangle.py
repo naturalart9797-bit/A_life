@@ -96,9 +96,6 @@ class PointField(_FieldBase):
                 sw += w
                 sv += w * vals[j]
             self.dens[i] = max(0.0, sv / sw) if sw else max(0.0, vals[i])
-        m = max(self.dens)
-        if m > 0.0 and P.contrast != 1.0:
-            self.dens = [m * (x / m) ** P.contrast for x in self.dens]
         self.max = max(self.dens)
         self.cdf, acc = [], 0.0
         for d in self.dens:
@@ -229,20 +226,21 @@ class Grower:
             if j == 6 and parent_vid is not None:
                 skip.discard(parent_vid)
             u = j / steps
-            dens = self.field.at(ps)
             nz = noise.noise(seed + Vector((s / self.curl_len, 0.0, 0.0)))
             ang = (curl * 0.25 + nz * P.curl * 1.6) * step / self.curl_len * math.tau * 0.25
-            side = n.cross(d)
-            if side.length_squared > 1e-12:
-                side.normalize()
-                probe = step * 4.0
-                # leaning back toward the dense parts (keeps sparse areas sparse)
-                fm = self.field.max or 1.0
-                edge = max(0.0, 1.0 - dens / fm)
-                if P.containment > 0.0 and edge > 0.0 and self.field.at(ps + d * probe) < dens:
-                    dl = self.field.at(ps + side * probe)
-                    dr = self.field.at(ps - side * probe)
-                    ang += P.containment * edge * (dl - dr) / max(dens, fm * 0.05) * 0.8
+            # stay where it was painted: turn away from where the density drops (no turning inside an
+            # evenly painted area, so the vines keep their own wandering there)
+            here = self.field.at(ps)
+            probe = step * 4.0
+            ahead = self.field.at(ps + d * probe)
+            if here > 0.0 and ahead < here * 0.7:
+                side = n.cross(d)
+                if side.length_squared > 1e-12:
+                    side.normalize()
+                    dl = self.field.at(ps + (d + side).normalized() * probe)
+                    dr = self.field.at(ps + (d - side).normalized() * probe)
+                    turn = 0.9 * (1.0 - ahead / here)
+                    ang += turn if dl >= dr else -turn
             d = Matrix.Rotation(ang, 3, n) @ d
             want = ps + d * step
             nh = self.sampler.nearest(want)
@@ -371,7 +369,7 @@ class Grower:
     def run(self):
         P, rng, field = self.P, self.rng, self.field
         count = int(round(field.count(self.scale)))
-        count = max(1, min(count, 5000))
+        count = max(1, count)
         self.queue = []
         for _ in range(count):
             nd, k = field.sample(rng)

@@ -26,8 +26,6 @@ def _point_props():
                             description="つるが曲がりくねる強さ。大きいとループや渦を描いて絡まる"),
         'curl_length': FloatProperty(name="うねりの大きさ", default=0.025, min=0.001, soft_max=0.2, unit="LENGTH",
                                    description="曲がりくねりの1つの弧の大きさ。小さいほど細かくうねる"),
-        'containment': FloatProperty(name="密な所に留まる強さ", default=0.15, min=0.0, max=3.0,
-                                   description="疎な方へ伸びるつるを、密な方へ曲げ戻す強さ。0なら自由にどこへでも伸びる"),
         'fine_branch': FloatProperty(name="枝分かれ", default=0.25, min=0.0, max=1.0, subtype="FACTOR",
                                    description="節ごとに脇枝が出る確率"),
         'internode': FloatProperty(name="節の間隔", default=0.025, min=0.003, soft_max=0.2, unit="LENGTH",
@@ -114,10 +112,9 @@ class VineGrowSettings(bpy.types.PropertyGroup):
                              description="長さの値を「最大寸法1.7m」の物体を基準とし、対象の大きさに合わせて拡大縮小する")
     rest_pose: BoolProperty(name="レストポーズで処理", default=True)
     seed: IntProperty(name="シード", default=1, min=0)
-    contrast: FloatProperty(name="粗密の強さ", default=1.5, min=0.3, max=6.0,
-                            description="密な所と疎な所の差を強調する。1: そのまま / 大きいほど、密な所はより密に、疎な所はより疎に")
 
-    max_nodes: IntProperty(name="最大の節数", default=60000, min=100, max=500000)
+    max_nodes: IntProperty(name="最大の節数", default=500000, min=100, max=20000000,
+                           description="重くなりすぎないための上限。これに達するとそこで生成を止める")
 
     # --- look ---------------------------------------------------------------
     ring_res: IntProperty(name="断面分割数", default=6, min=3, max=16)
@@ -126,7 +123,7 @@ class VineGrowSettings(bpy.types.PropertyGroup):
     bump: FloatProperty(name="表面の凹凸", default=0.2, min=0.0, max=1.0, subtype="FACTOR")
 
     # --- density points (Yeti-style) --------------------------------------
-    density: FloatProperty(name="全体の密度", default=30.0, min=0.0, soft_max=200.0,
+    density: FloatProperty(name="全体の密度", default=50.0, min=0.0, soft_max=500.0,
                            description="値 100 で塗った所の密度（100cm² あたりのつるの本数）。塗った値はこれに対する割合")
     show_points: BoolProperty(name="点を表示", default=True, update=_redraw,
                               description="密度の点を、値に応じた色（紫=0 → 緑=100）で表示")
