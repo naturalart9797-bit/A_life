@@ -5,6 +5,7 @@ import math
 
 from mathutils import Vector
 from mathutils.bvhtree import BVHTree
+from mathutils.kdtree import KDTree
 from mathutils.interpolate import poly_3d_calc
 
 
@@ -22,15 +23,11 @@ class BodySampler:
     """Snapshot of the target mesh in world space (taken in rest pose)."""
 
     def __init__(self, context, body, mask_group="", bone_names=None):
+        # Always work on the surface as it is displayed (after Subdivision etc.), so points and vines
+        # sit on the visible skin and not on the coarser cage.
         depsgraph = context.evaluated_depsgraph_get()
         body_eval = body.evaluated_get(depsgraph)
         mesh = body_eval.to_mesh()
-        from_eval = len(mesh.vertices) == len(body.data.vertices)
-        if not from_eval:
-            # Topology-changing modifiers: fall back to the original mesh so
-            # vertex indices still match the vertex groups.
-            body_eval.to_mesh_clear()
-            mesh = body.data
 
         self.matrix_world = body.matrix_world.copy()
         self.matrix_world_inv = self.matrix_world.inverted()
@@ -42,8 +39,38 @@ class BodySampler:
         mesh.calc_loop_triangles()
         self.tris = [tuple(t.vertices) for t in mesh.loop_triangles]
 
-        if from_eval:
-            body_eval.to_mesh_clear()
+        # Per-vertex weights (only bone groups when bone names are known). Modifiers such as
+        # Subdivision carry the vertex groups over; when one does not, take the nearest original vertex.
+        names = {vg.index: vg.name for vg in body.vertex_groups}
+        mask_index = body.vertex_groups[mask_group].index if mask_group in body.vertex_groups else -1
+        self.has_mask = mask_index >= 0
+
+        def read(groups):
+            ws = []
+            m = 0.0
+            for g in groups:
+                if g.group == mask_index:
+                    m = g.weight
+                    continue
+                name = names.get(g.group)
+                if name is None or g.weight <= 0.0:
+                    continue
+                if bone_names is not None and name not in bone_names:
+                    continue
+                ws.append((name, g.weight))
+            return ws, m
+
+        eval_groups = [read(v.groups) for v in mesh.vertices]
+        body_eval.to_mesh_clear()
+        if names and not any(ws or m for ws, m in eval_groups) and len(body.data.vertices):
+            orig = [read(v.groups) for v in body.data.vertices]
+            kd = KDTree(len(body.data.vertices))
+            for i, v in enumerate(body.data.vertices):
+                kd.insert(mw @ v.co, i)
+            kd.balance()
+            eval_groups = [orig[kd.find(c)[1]] for c in self.co]
+        self.vweights = [ws for ws, _m in eval_groups]
+        self.vmask = [m for _ws, m in eval_groups]
 
         if not self.tris:
             raise ValueError("対象メッシュに面がありません")
@@ -54,28 +81,6 @@ class BodySampler:
         self.zmin = min(zs)
         self.zmax = max(zs)
         self.height = max(self.zmax - self.zmin, 1e-6)
-
-        # Per-vertex weights (only bone groups when bone names are known).
-        names = {vg.index: vg.name for vg in body.vertex_groups}
-        mask_index = body.vertex_groups[mask_group].index if mask_group in body.vertex_groups else -1
-        self.has_mask = mask_index >= 0
-        self.vweights = []
-        self.vmask = []
-        for v in body.data.vertices:
-            ws = []
-            m = 0.0
-            for g in v.groups:
-                if g.group == mask_index:
-                    m = g.weight
-                    continue
-                name = names.get(g.group)
-                if name is None or g.weight <= 0.0:
-                    continue
-                if bone_names is not None and name not in bone_names:
-                    continue
-                ws.append((name, g.weight))
-            self.vweights.append(ws)
-            self.vmask.append(m)
 
         # Area-weighted triangle sampling table.
         acc = 0.0

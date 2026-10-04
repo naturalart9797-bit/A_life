@@ -221,7 +221,7 @@ def _build(ps, size, vmax):
     for c, n, v in zip(ps.co, ps.nrm, ps.val):
         t1 = n.orthogonal().normalized()
         t2 = n.cross(t1)
-        ctr = c + n * (size * 0.6)
+        ctr = c + n * (size * 0.15)  # just above the skin (avoids z-fighting)
         if v > 1e-6:
             rgb = ramp(v / vmax)
             r = size * 1.25
@@ -251,7 +251,8 @@ def draw():
             return
         mw = target.matrix_world
         sc = max(mw.to_scale()) or 1.0
-        size = P.point_size / sc
+        from .pipeline import target_scale
+        size = P.point_size * target_scale(target, P) / sc
         key = (id(ps), ps.version, ps.mesh_version, round(size, 9))
         cached = _batch.get(target.name)
         if cached is None or cached[0] != key:

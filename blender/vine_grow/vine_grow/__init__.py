@@ -1,7 +1,7 @@
 bl_info = {
     "name": "Vine Grow (つる植物ジェネレータ)",
     "author": "A_life",
-    "version": (1, 9, 0),
+    "version": (1, 9, 1),
     "blender": (3, 6, 0),
     "location": "3Dビューポート > サイドバー(N) > Vine Grow",
     "description": "体に打った点に密度をペイントして、体に絡みつき少し空間にも広がる、つる植物（茎・葉）を生成する。アニメーションに追従",
