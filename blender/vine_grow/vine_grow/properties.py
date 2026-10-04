@@ -17,23 +17,13 @@ def _growth_changed(self, context):
             node.outputs[0].default_value = self.growth
 
 
-def _mode_changed(self, context):
-    from . import pipeline
-    if self.target is None:
-        return
-    for o in pipeline.origin_objects(self.target):
-        if self.mode == "DENSITY":
-            if o.vine_grow_density < 0.0:
-                o.vine_grow_density = self.tangle_density
-
-
 def _reach_changed(self, context):
     from . import pipeline
     pipeline.sync_display(self)
 
 
 def _point_props():
-    """Settings that each point can override (fresh property objects on every call)."""
+    """Vine / leaf settings (kept as a group so they can be copied together)."""
     return {
         'tangle_length': FloatProperty(name="つるの長さ", default=0.3, min=0.005, soft_max=0.5, unit="LENGTH",
                                      description="1本のつるの平均の長さ"),
@@ -108,6 +98,20 @@ def _show_leaves_changed(self, context):
         pipeline.sync_leaf_visibility(self.target, self.show_leaves)
 
 
+def _show_vines_changed(self, context):
+    from . import pipeline
+    if self.target is not None:
+        for o in pipeline.vine_objects(self.target):
+            o.hide_viewport = not self.show_vines
+            o.hide_render = not self.show_vines
+
+
+def _redraw(self, context):
+    for area in context.screen.areas if context.screen else ():
+        if area.type == "VIEW_3D":
+            area.tag_redraw()
+
+
 class VineGrowSettings(bpy.types.PropertyGroup):
     target: PointerProperty(name="対象", type=bpy.types.Object, poll=_is_target,
                             description="つるを生やすメッシュオブジェクト")
@@ -116,11 +120,11 @@ class VineGrowSettings(bpy.types.PropertyGroup):
     rest_pose: BoolProperty(name="レストポーズで処理", default=True)
     seed: IntProperty(name="シード", default=1, min=0)
     default_reach: FloatProperty(name="新しい点の範囲", default=0.15, min=0.01, soft_max=3.0, unit="LENGTH",
-                                 description="新しく置く点の範囲（体に沿った距離）。密度モードでは密度が届く範囲")
+                                 description="新しく置く起点の範囲（体に沿った距離）")
 
     mode: EnumProperty(
-        name="生え方", default="DENSITY", update=_mode_changed,
-        items=[("DENSITY", "密度（起点の周りに茂る）", "起点の周りほど密に、細いつるが方向なく絡まり合って茂る"),
+        name="生え方", default="DENSITY",
+        items=[("DENSITY", "密度（塗った所に茂る）", "表面に打った点に密度を塗り、密な所ほどつるが方向なく絡まり合って茂る"),
                ("ROUTE", "経路（起点を通過）", "起点を順番に通る経路に沿って、つるが絡み合いながら伸びる"),
                ("RADIAL", "放射（起点から広がる）", "起点から周囲に枝分かれしながら広がる")])
     default_width: FloatProperty(name="新しい経由点の幅", default=0.05, min=0.002, soft_max=0.5, unit="LENGTH",
@@ -142,8 +146,6 @@ class VineGrowSettings(bpy.types.PropertyGroup):
     shoot_length: FloatProperty(name="脇芽の長さ", default=0.05, min=0.0, soft_max=0.5, unit="LENGTH")
 
     # --- density mode ----------------------------------------------------
-    tangle_density: FloatProperty(name="新しい点の密度", default=15.0, min=0.0, soft_max=200.0,
-                                  description="新しく置く点の密度（その点の上での、100cm²あたりのつるの本数）")
     contrast: FloatProperty(name="粗密の強さ", default=1.5, min=0.3, max=6.0,
                             description="密な所と疎な所の差を強調する。1: そのまま / 大きいほど、密な所はより密に、疎な所はより疎に")
 
@@ -184,6 +186,32 @@ class VineGrowSettings(bpy.types.PropertyGroup):
     subsurface: FloatProperty(name="透け感(SSS)", default=0.15, min=0.0, max=1.0, subtype="FACTOR")
     bump: FloatProperty(name="表面の凹凸", default=0.2, min=0.0, max=1.0, subtype="FACTOR")
 
+    # --- density points (Yeti-style) --------------------------------------
+    show_points: BoolProperty(name="点を表示", default=True, update=_redraw,
+                              description="密度の点を、値に応じた色（紫=低い → 黄=高い）で表示")
+    show_vines: BoolProperty(name="つるを表示", default=True, update=_show_vines_changed,
+                             description="つるの表示・非表示（点を塗るときは隠すと見やすい）")
+    point_spacing: FloatProperty(name="点の間隔", default=0.015, min=0.002, soft_max=0.1, unit="LENGTH",
+                                 description="散布・追加する点どうしの間隔")
+    point_size: FloatProperty(name="点の表示サイズ", default=0.003, min=0.0002, soft_max=0.03, unit="LENGTH",
+                              update=_redraw)
+    point_default: FloatProperty(name="新しい点の密度", default=0.0, min=0.0, soft_max=200.0,
+                                 description="散布・追加した点の最初の密度")
+    paint_max: FloatProperty(name="色の最大", default=40.0, min=0.1, soft_max=400.0, update=_redraw,
+                             description="この密度で黄色になる（色の目盛り）")
+    brush_tool: EnumProperty(
+        name="ブラシ", default="PAINT",
+        items=[("PAINT", "塗る", "点の密度を塗る（Ctrl: 減らす / Shift: ぼかす）"),
+               ("ADD", "追加", "点を追加（Ctrl: 削除）"),
+               ("REMOVE", "削除", "点を削除")])
+    brush_value: FloatProperty(name="密度", default=25.0, min=0.0, soft_max=200.0,
+                               description="塗る密度（その辺りの 100cm² あたりのつるの本数）")
+    brush_radius: IntProperty(name="半径(px)", default=60, min=2, max=1000)
+    brush_strength: FloatProperty(name="強さ", default=0.5, min=0.0, max=1.0, subtype="FACTOR")
+    add_with_value: BoolProperty(name="追加した点をブラシの値で塗る", default=False)
+    point_blend: FloatProperty(name="なじませる距離", default=0.02, min=0.0, soft_max=0.2, unit="LENGTH",
+                               description="隣り合う点の密度をなめらかにつなぐ距離")
+
     show_leaves: BoolProperty(name="葉を表示", default=True, update=_show_leaves_changed,
                               description="葉の表示・非表示（ビューポートとレンダー）")
     leaf_translucency: FloatProperty(name="葉の透け感", default=0.3, min=0.0, max=1.0, subtype="FACTOR")
@@ -204,30 +232,8 @@ class VineGrowSettings(bpy.types.PropertyGroup):
 VineGrowSettings.__annotations__.update(_point_props())
 
 
-class VinePointSettings(bpy.types.PropertyGroup):
-    pass
+classes = (VineGrowSettings,)
 
-
-VinePointSettings.__annotations__ = _point_props()
-
-
-classes = (VinePointSettings, VineGrowSettings)
-
-
-def _custom_changed(self, context):
-    """Turning on per-point settings starts from the current overall settings."""
-    if self.vine_grow_custom and not self.get("vine_grow_custom_init"):
-        P = context.scene.vine_grow
-        for name in POINT_PROPS:
-            setattr(self.vine_grow_point, name, getattr(P, name))
-        self["vine_grow_custom_init"] = 1
-
-
-CUSTOM = BoolProperty(name="個別に設定", default=False, update=_custom_changed,
-                      description="この点の周りのつると葉を、全体とは別の設定にする")
-
-DENSITY = FloatProperty(name="密度", default=-1.0, min=-1.0, soft_max=200.0,
-                        description="この点の密度（点の上での、100cm²あたりのつるの本数）。0で生えない")
 
 REACH = FloatProperty(name="範囲", default=0.0, min=0.0, soft_max=5.0, unit="LENGTH", update=_reach_changed,
-                      description="起点から体に沿ってつるが広がる距離（ワールド単位）。密度モードでは、この点の密度が届く範囲")
+                      description="起点から体に沿ってつるが広がる距離（ワールド単位）")

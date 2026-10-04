@@ -1,8 +1,8 @@
 """Density mode: climbing vines growing thickly around the points.
 
-Each point carries its own density (vines per 100 cm^2) that fades smoothly
-along the body surface, so dense and sparse parts can be set point by point,
-with no hard range. Vines start where the field is high and climb in random, curling directions, so there is no overall
+The density is painted on many points scattered over the surface (vines per
+100 cm^2, Yeti-style), blended smoothly between neighbours. There is no hard
+range. Vines start where the field is high and climb in random, curling directions, so there is no overall
 flow. Each vine is one continuous stem, thick at its base and thin at its tip,
 with internodes (slight swellings), side branches and tendrils:
 
@@ -26,57 +26,8 @@ from . import colonize, surface
 UP = Vector((0.0, 0.0, 1.0))
 
 
-class Field:
-    """Vine density on the body surface (vines per 100 cm^2).
-
-    Every point adds its own density, fading smoothly with the distance along
-    the body (gaussian, width = falloff). Nothing is cut off: the vines may
-    wander anywhere, the field only decides where they are thick or sparse."""
-
-    def __init__(self, sampler, pts, P, scale, rng):
-        """pts: (surface hit, density, range) per point. The density fades to ~2% at the range."""
-        reaches = [max(r, 0.005 * scale) for _, _, r in pts]
-        spacing = max(min(reaches) / 16.0, max(reaches) / 40.0, 0.002 * scale)
-        locs = [h.loc for h, _, _ in pts]
-        self.nodes = surface.scatter_nodes(sampler, locs, max(reaches) * 1.25, spacing, rng)
-        self.spacing = spacing
-        n = len(self.nodes)
-        self.dens = [0.0] * n
-        self.owner = [0] * n  # point with the strongest contribution: its settings are used there
-        self.dist = [math.inf] * n  # distance to the nearest point: drives the growth animation
-        self.max = 0.0
-        self.total = 0.0
-        if n < 4:
-            return
-        edges = surface.connect(sampler, self.nodes, spacing)
-        best = [0.0] * n
-        for k, ((hit, value, _r), reach) in enumerate(zip(pts, reaches)):
-            if value <= 0.0:
-                continue
-            sigma = reach * 0.5
-            s = surface.nearest_node(self.nodes, hit.loc)
-            for i, d in enumerate(surface.geodesic(self.nodes, edges, [s])):
-                if d < reach * 1.25:
-                    c = value * math.exp(-(d / sigma) ** 2)
-                    self.dens[i] += c
-                    if c > best[i]:
-                        best[i], self.owner[i] = c, k
-                    self.dist[i] = min(self.dist[i], d)
-        if P.contrast != 1.0:
-            # sharpen dense vs sparse while keeping each point's own value at its centre
-            peaks = [v for _, v, _ in pts]
-            self.dens = [(peaks[k] * (x / peaks[k]) ** P.contrast) if x > 0.0 and peaks[k] > 0.0 else x
-                         for x, k in zip(self.dens, self.owner)]
-        self.max = max(self.dens)
-        self.kd = KDTree(n)
-        for i, nd in enumerate(self.nodes):
-            self.kd.insert(nd.co, i)
-        self.kd.balance()
-        self.cdf, acc = [], 0.0
-        for d in self.dens:
-            acc += d
-            self.cdf.append(acc)
-        self.total = acc
+class _FieldBase:
+    """Density on the body surface (vines per 100 cm^2), sampled at surface nodes."""
 
     def ok(self):
         return len(self.nodes) >= 4 and self.total > 0.0
@@ -103,6 +54,56 @@ class Field:
     def count(self, scale):
         """Number of vines: integral of the density (per 100 cm^2) over the surface."""
         return self.total * self.spacing * self.spacing / (0.01 * scale * scale)
+
+
+class _PNode:
+    __slots__ = ("co", "normal")
+
+    def __init__(self, co, normal):
+        self.co, self.normal = co, normal
+
+
+class PointField(_FieldBase):
+    """Density from the painted points (Yeti-style). The points already sample the surface, so
+    they are the field's nodes; the values are blended over `blend` so neighbouring points merge."""
+
+    def __init__(self, sampler, ps, mw, P, scale):
+        rot = mw.to_3x3()
+        self.nodes = [_PNode(mw @ c, (rot @ n).normalized()) for c, n in zip(ps.co, ps.nrm)]
+        n = len(self.nodes)
+        sc = max(mw.to_scale()) or 1.0
+        self.spacing = max(ps.spacing() * sc, 1e-6)
+        self.owner = [0] * n
+        self.dist = [0.0] * n
+        self.max = 0.0
+        self.total = 0.0
+        self.dens = [0.0] * n
+        if n < 2:
+            return
+        self.kd = KDTree(n)
+        for i, nd in enumerate(self.nodes):
+            self.kd.insert(nd.co, i)
+        self.kd.balance()
+        blend = max(P.point_blend * scale, self.spacing * 0.5)
+        vals = list(ps.val)
+        for i, nd in enumerate(self.nodes):
+            sw = sv = 0.0
+            for _co, j, d in self.kd.find_range(nd.co, blend * 2.0):
+                if self.nodes[j].normal.dot(nd.normal) < 0.0:
+                    continue  # other side of a thin part
+                w = math.exp(-(d / blend) ** 2)
+                sw += w
+                sv += w * vals[j]
+            self.dens[i] = max(0.0, sv / sw) if sw else max(0.0, vals[i])
+        m = max(self.dens)
+        if m > 0.0 and P.contrast != 1.0:
+            self.dens = [m * (x / m) ** P.contrast for x in self.dens]
+        self.max = max(self.dens)
+        self.cdf, acc = [], 0.0
+        for d in self.dens:
+            acc += d
+            self.cdf.append(acc)
+        self.total = acc
 
 
 class Occupancy:

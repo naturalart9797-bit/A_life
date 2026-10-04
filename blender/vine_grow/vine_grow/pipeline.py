@@ -7,7 +7,7 @@ import traceback
 import bpy
 from mathutils import Vector
 
-from . import binding, colonize, leaves, route, surface, tangle
+from . import binding, colonize, leaves, points, route, surface, tangle
 from .mesh import MeshBuilder, assign_vertex_groups, blob, build_mesh, cap, tube
 from .sampler import BodySampler
 
@@ -51,29 +51,6 @@ def sync_display(o):
     o.empty_display_size = max(o.vine_grow_reach / sc, 1e-6)
 
 
-def origin_density(o, P):
-    d = getattr(o, "vine_grow_density", -1.0)
-    return P.tangle_density if d < 0.0 else d
-
-
-class Params:
-    """Settings for one point: its own values when it has per-point settings, else the overall ones."""
-
-    def __init__(self, P, point=None):
-        self._P = P
-        self._point = point
-
-    def __getattr__(self, name):
-        from .properties import POINT_PROPS
-        if self._point is not None and name in POINT_PROPS:
-            return getattr(self._point, name)
-        return getattr(self._P, name)
-
-
-def params_for(o, P):
-    return Params(P, o.vine_grow_point if getattr(o, "vine_grow_custom", False) else None)
-
-
 LEAVES_PROP = "vine_grow_leaves"
 
 
@@ -89,10 +66,6 @@ def sync_leaf_visibility(target, show):
     for o in leaves_objects(target):
         o.hide_viewport = not show
         o.hide_render = not show
-        try:
-            o.hide_set(not show)
-        except RuntimeError:
-            pass
 
 
 def network_objects(target):
@@ -124,8 +97,6 @@ def add_origin(context, target, location, reach):
     o.hide_render = True
     o.matrix_world = target.matrix_world @ o.matrix_basis
     o.vine_grow_reach = reach
-    if context.scene.vine_grow.mode == "DENSITY":
-        o.vine_grow_density = context.scene.vine_grow.tangle_density
     others = [x.get("vine_grow_order", 0) for x in origin_objects(target) if x != o]
     o["vine_grow_order"] = (max(others) + 1) if others else 0
     return o
@@ -134,8 +105,15 @@ def add_origin(context, target, location, reach):
 # ----------------------------------------------------------------------
 def generate(report, context, target):
     P = context.scene.vine_grow
-    origins = origin_objects(target)
-    if not origins:
+    origins = origin_objects(target) if P.mode != "DENSITY" else []
+    pset = None
+    if P.mode == "DENSITY":
+        pset = points.get(target)
+        if pset is None or not len(pset):
+            return None, "点がありません。「全体に点を散布」してから、ブラシで密度を塗ってください"
+        if max(pset.val) <= 0.0:
+            return None, "密度が塗られていません。ブラシで点に密度を塗ってください"
+    elif not origins:
         return None, "起点がありません。「起点を置く」で対象の上をクリックしてください"
     remove_network(target)
     mode = P.bind_mode
@@ -149,27 +127,20 @@ def generate(report, context, target):
         rng = random.Random(P.seed)
         spacing = P.attractor_spacing * scale
         opts = []
-        params = [Params(P)]  # settings per point (only density mode uses per-point settings)
+        params = [P]  # settings per owner index (all nodes use the overall settings)
         for o in origins:
             hit = sampler.nearest(o.matrix_world.translation)
             if hit is not None:
-                if P.mode == "DENSITY":
-                    opts.append((hit, origin_density(o, P), origin_reach(o)))
-                    params.append(params_for(o, P))
-                else:
-                    opts.append((hit, origin_reach(o)))
-        if not opts:
+                opts.append((hit, origin_reach(o)))
+        if not opts and P.mode != "DENSITY":
             return None, "起点の近くに対象の面がありません"
 
         push = colonize.Pusher(sampler, P.clearance * scale)
         tree = colonize.Tree()
         if P.mode == "DENSITY":
-            if not any(v > 0.0 for _, v, _r in opts):
-                return None, "密度が0より大きい点がありません"
-            field = tangle.Field(sampler, opts, P, scale, rng)
+            field = tangle.PointField(sampler, pset, target.matrix_world, P, scale)
             if not field.ok():
-                return None, "点の近くに対象の面がありません。範囲を大きくしてみてください"
-            params = params[1:]
+                return None, "密度の点が少なすぎます"
             radii, owner = tangle.grow(tree, sampler, field, params, scale, push, rng)
             if len(tree.pos) < 2:
                 return None, "つるが伸びませんでした（密度・長さを確認）"
@@ -274,6 +245,7 @@ def generate(report, context, target):
         colls = target.users_collection or (context.scene.collection,)
         colls[0].objects.link(obj)
         binding.attach(obj, target)
+        obj.hide_viewport = obj.hide_render = not P.show_vines
         try:
             obj.data.materials.append(material(target, P))
         except Exception as exc:  # noqa: BLE001
