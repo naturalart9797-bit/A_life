@@ -14,9 +14,11 @@
 
 1. Blender で **Edit > Preferences > Add-ons**
 2. 右上の **▼ > Install from Disk...** で **`plant_spear.zip`** を選択
-3. 一覧の「Twisted Plant Spear」にチェックを入れて有効化
+3. **インストールしただけでは有効になりません。** Add-ons 一覧の検索欄に `Twisted` と入力し、
+   「Twisted Plant Spear」の **チェックボックスをオン** にしてください
+   - 下部に `Modules Installed () ...` と括弧が空で表示されても、2回目以降のインストール（上書き）なら正常です
 
-Blender 3.6 / 4.x / 5.0 向け（5.0.1 で zip からのインストールを確認済み）。
+Blender 3.6 / 4.x / 5.x 向け（5.0.1 / 5.2.2 で zip からのインストールと動作を確認済み）。
 
 ## 使い方
 
