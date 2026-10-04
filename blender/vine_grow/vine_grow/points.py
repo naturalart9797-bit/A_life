@@ -17,7 +17,7 @@ VALUE_MAX = 100.0  # painted values are 0..100 (100 = the overall density)
 # 0 purple -> 25 blue -> 50 green -> 75 yellow -> 100 orange
 RAMP = ((0.0, (0.55, 0.12, 0.85)), (0.25, (0.15, 0.35, 1.00)), (0.5, (0.20, 0.85, 0.25)),
         (0.75, (1.00, 0.90, 0.10)), (1.0, (1.00, 0.45, 0.05)))
-ZERO_COLOR = (0.55, 0.55, 0.58)  # unpainted: small and close to a grey body so it stays quiet
+ZERO_COLOR = (0.55, 0.55, 0.58)  # unpainted: close to a grey body so it stays quiet
 
 
 def ramp(t):
@@ -222,12 +222,8 @@ def _build(ps, size, vmax):
         t1 = n.orthogonal().normalized()
         t2 = n.cross(t1)
         ctr = c + n * (size * 0.15)  # just above the skin (avoids z-fighting)
-        if v > 1e-6:
-            rgb = ramp(v / vmax)
-            r = size * 1.25
-        else:
-            rgb = ZERO_COLOR
-            r = size * 0.45
+        rgb = ramp(v / vmax) if v > 1e-6 else ZERO_COLOR
+        r = size  # every point the same size; only the colour shows the value
         rgba = (rgb[0], rgb[1], rgb[2], 1.0)
         pts = [ctr + (t1 * x + t2 * y) * r for x, y in ring]
         for k in range(seg):
