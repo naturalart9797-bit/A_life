@@ -92,7 +92,7 @@ class VINEGROW_PT_points(_Base, _Targeted, bpy.types.Panel):
             box.prop(P, "add_with_value")
         box.label(text="Ctrl: 減らす/削除  Shift: ぼかす", icon="INFO")
         box.label(text="B を押したまま上下: ブラシの大きさ")
-        layout.label(text="色: 紫=0 → 青 → 水色 → 緑=100")
+        layout.label(text="色: 紫0 → 青 → 緑 → 黄 → 橙100")
         c = layout.column(align=True)
         c.prop(P, "point_size")
         c.prop(P, "point_blend")

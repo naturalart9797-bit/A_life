@@ -14,9 +14,9 @@ ATTR_NORMAL = "vg_normal"
 
 VALUE_MAX = 100.0  # painted values are 0..100 (100 = the overall density)
 
-# 0 purple -> blue -> cyan -> 100 green
-RAMP = ((0.0, (0.55, 0.12, 0.85)), (0.33, (0.15, 0.35, 1.00)), (0.66, (0.10, 0.85, 0.90)),
-        (1.0, (0.20, 0.95, 0.20)))
+# 0 purple -> 25 blue -> 50 green -> 75 yellow -> 100 orange
+RAMP = ((0.0, (0.55, 0.12, 0.85)), (0.25, (0.15, 0.35, 1.00)), (0.5, (0.20, 0.85, 0.25)),
+        (0.75, (1.00, 0.90, 0.10)), (1.0, (1.00, 0.45, 0.05)))
 ZERO_COLOR = (0.55, 0.55, 0.58)  # unpainted: small and close to a grey body so it stays quiet
 
 

@@ -126,7 +126,7 @@ class VineGrowSettings(bpy.types.PropertyGroup):
     density: FloatProperty(name="全体の密度", default=50.0, min=0.0, soft_max=500.0,
                            description="値 100 で塗った所の密度（100cm² あたりのつるの本数）。塗った値はこれに対する割合")
     show_points: BoolProperty(name="点を表示", default=True, update=_redraw,
-                              description="密度の点を、値に応じた色（紫=0 → 緑=100）で表示")
+                              description="密度の点を、値に応じた色（紫=0 → 青 → 緑 → 黄 → オレンジ=100）で表示")
     show_vines: BoolProperty(name="つるを表示", default=True, update=_show_vines_changed,
                              description="つるの表示・非表示（点を塗るときは隠すと見やすい）")
     point_spacing: FloatProperty(name="点の間隔", default=0.015, min=0.002, soft_max=0.1, unit="LENGTH",

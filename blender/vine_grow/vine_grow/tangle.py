@@ -85,8 +85,9 @@ class PointField(_FieldBase):
             self.kd.insert(nd.co, i)
         self.kd.balance()
         blend = max(P.point_blend * scale, self.spacing * 0.5)
-        # painted 0..100 (100 = the overall density)
-        vals = [max(0.0, v) / 100.0 * P.density for v in ps.val]
+        # painted 0..100 -> density. Squared so the colours read clearly: 100 (orange) is the full
+        # overall density, 50 (green) a quarter, 25 (blue) only a few vines, 0 (purple) none.
+        vals = [(max(0.0, min(v, 100.0)) / 100.0) ** 2 * P.density for v in ps.val]
         for i, nd in enumerate(self.nodes):
             sw = sv = 0.0
             for _co, j, d in self.kd.find_range(nd.co, blend * 2.0):
@@ -222,25 +223,34 @@ class Grower:
         next_node = self.internode * rng.uniform(0.3, 1.0)
         swell = 0
         steps = max(3, int(length / step))
+        home = self.field.at(ps)  # the density where this vine started: it keeps to that level
+        outside = 0
         for j in range(steps):
             if j == 6 and parent_vid is not None:
                 skip.discard(parent_vid)
             u = j / steps
             nz = noise.noise(seed + Vector((s / self.curl_len, 0.0, 0.0)))
             ang = (curl * 0.25 + nz * P.curl * 1.6) * step / self.curl_len * math.tau * 0.25
-            # stay where it was painted: turn away from where the density drops (no turning inside an
-            # evenly painted area, so the vines keep their own wandering there)
-            here = self.field.at(ps)
-            probe = step * 4.0
-            ahead = self.field.at(ps + d * probe)
-            if here > 0.0 and ahead < here * 0.7:
-                side = n.cross(d)
-                if side.length_squared > 1e-12:
-                    side.normalize()
-                    dl = self.field.at(ps + (d + side).normalized() * probe)
-                    dr = self.field.at(ps + (d - side).normalized() * probe)
-                    turn = 0.9 * (1.0 - ahead / here)
-                    ang += turn if dl >= dr else -turn
+            # stay where it was painted: turn away from where the density falls below the level the vine
+            # started at (no turning inside an evenly painted area, so the vines wander freely there)
+            if home > 0.0:
+                here = self.field.at(ps)
+                probe = step * 4.0
+                ahead = self.field.at(ps + d * probe)
+                if ahead < home * 0.75:
+                    side = n.cross(d)
+                    if side.length_squared > 1e-12:
+                        side.normalize()
+                        dl = self.field.at(ps + (d + side).normalized() * probe)
+                        dr = self.field.at(ps + (d - side).normalized() * probe)
+                        turn = 1.2 * min(1.0, 1.0 - ahead / home)
+                        ang += turn if dl >= dr else -turn
+                if here < home * 0.5:
+                    outside += 3 if here < home * 0.05 else 1  # unpainted ground: give up quickly
+                else:
+                    outside = 0
+                if outside > 6:
+                    break  # strayed into a much sparser part: end here
             d = Matrix.Rotation(ang, 3, n) @ d
             want = ps + d * step
             nh = self.sampler.nearest(want)
