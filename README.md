@@ -15,7 +15,7 @@ A_life/
 ```
 
 ## blender/vine_grow — つる植物ジェネレータ
-オブジェクトの一点から、体に絡みつきながら少し空間にも広がる、つる植物の枝を伸ばす Blender アドオン。
+体に打った点に密度をペイントして、体に絡みつきながら少し空間にも広がる、つる植物（茎と葉）を生やす Blender アドオン。
 インストールは `blender/vine_grow/vine_grow.zip`。詳しくは [blender/vine_grow/README.md](blender/vine_grow/README.md)。
 
 ## blender/slime_net — 粘菌ネットワーク
