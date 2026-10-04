@@ -28,6 +28,7 @@ import math
 import random
 import sys
 
+import bmesh
 import bpy
 from mathutils import Vector, noise
 
@@ -66,9 +67,14 @@ rng = random.Random(OPTS["seed"])
 # ---------------------------------------------------------------------------
 
 def reset_scene():
-    bpy.ops.wm.read_factory_settings(use_empty=True)
+    """現在のシーンを空にする。GUI のコンテキストを壊さないよう ops は使わない。"""
+    for ob in list(bpy.data.objects):
+        bpy.data.objects.remove(ob, do_unlink=True)
+    for c in list(bpy.data.collections):
+        bpy.data.collections.remove(c)
     for coll in (bpy.data.meshes, bpy.data.materials, bpy.data.curves,
-                 bpy.data.lights, bpy.data.cameras, bpy.data.textures):
+                 bpy.data.lights, bpy.data.cameras, bpy.data.textures,
+                 bpy.data.particles, bpy.data.actions, bpy.data.worlds):
         for block in list(coll):
             coll.remove(block)
 
@@ -90,6 +96,21 @@ def mesh_object(name, verts, edges=(), faces=(), coll=None):
     me.update()
     ob = bpy.data.objects.new(name, me)
     link(ob, coll or bpy.context.scene.collection)
+    return ob
+
+
+def primitive_object(name, kind, coll, **kw):
+    """bmesh でプリミティブを作る（bpy.ops / context に依存しない）。"""
+    me = bpy.data.meshes.new(name)
+    bm = bmesh.new()
+    if kind == "ICO":
+        bmesh.ops.create_icosphere(bm, subdivisions=kw.get("subdivisions", 2), radius=1.0)
+    else:
+        bmesh.ops.create_cube(bm, size=1.0)
+    bm.to_mesh(me)
+    bm.free()
+    ob = bpy.data.objects.new(name, me)
+    link(ob, coll)
     return ob
 
 
@@ -308,12 +329,7 @@ def build_seabed(coll):
 
 
 def build_rock(name, pos, scale, mat, coll):
-    bpy.ops.mesh.primitive_ico_sphere_add(subdivisions=4, radius=1.0)
-    ob = bpy.context.active_object
-    for c in ob.users_collection:
-        c.objects.unlink(ob)
-    link(ob, coll)
-    ob.name = name
+    ob = primitive_object(name, "ICO", coll, subdivisions=4)
     seed = Vector((rng.random() * 100, rng.random() * 100, rng.random() * 100))
     for v in ob.data.vertices:
         d = noise.fractal(v.co * 1.3 + seed, 0.5, 2.0, 4)
@@ -490,12 +506,8 @@ def build_jellyfish(name, pos, size, color, coll, frame_end, phase):
 # ---------------------------------------------------------------------------
 
 def build_plankton(coll, frame_end):
-    bpy.ops.mesh.primitive_ico_sphere_add(subdivisions=1, radius=1.0, location=(0, 0, -50))
-    mote = bpy.context.active_object
-    mote.name = "PlanktonMote"
-    for c in mote.users_collection:
-        c.objects.unlink(mote)
-    link(mote, coll)
+    mote = primitive_object("PlanktonMote", "ICO", coll, subdivisions=1)
+    mote.location = (0, 0, -50)
     mote.data.materials.append(mat_emit("Plankton", (0.4, 1.0, 0.9, 1), 12.0))
     mote.hide_render = True
     mote.hide_viewport = True
@@ -542,12 +554,8 @@ def build_environment(coll):
     bg.inputs["Strength"].default_value = 1.0
 
     # 水のボリューム（カメラも中に入る大きさ）
-    bpy.ops.mesh.primitive_cube_add(size=1, location=(0, 0, 6))
-    water = bpy.context.active_object
-    for c in water.users_collection:
-        c.objects.unlink(water)
-    link(water, coll)
-    water.name = "WaterVolume"
+    water = primitive_object("WaterVolume", "CUBE", coll)
+    water.location = (0, 0, 6)
     water.scale = (40, 40, 14)
     water.data.materials.append(mat_water_volume())
     water.display_type = "BOUNDS"
