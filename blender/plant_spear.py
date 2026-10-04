@@ -296,7 +296,10 @@ class SpearGenerator:
     # ---- parts ------------------------------------------------------------
     def build(self):
         p = self.p
-        self.build_shaft()
+        if p.body_mode == 'TWISTED':
+            self.build_strands()
+        else:
+            self.build_shaft()
         self.build_head()
         if p.sheath_count > 0:
             self.build_sheath()
@@ -311,6 +314,93 @@ class SpearGenerator:
         if p.thorn_count > 0:
             self.build_thorns()
         return self.mb
+
+    # ---- twisted body -----------------------------------------------------
+    def _twist_table(self):
+        """中心線サンプルごとの累積ねじり角（縛り付近はきつく巻く）。"""
+        p = self.p
+        K = self.K
+        cum = [0.0]
+        acc = 0.0
+        for k in range(1, K):
+            t = (k - 0.5) / (K - 1)
+            dens = p.strand_twist * (1.0 + p.strand_tighten * gauss(t, p.wrap_position, p.strand_tighten_width))
+            acc += dens * TAU / (K - 1)
+            cum.append(acc)
+        self._twist = cum
+
+    def twist_at(self, t):
+        f = clamp(t) * (self.K - 1)
+        i = min(int(f), self.K - 2)
+        return lerp(self._twist[i], self._twist[i + 1], f - i)
+
+    def build_strands(self):
+        """支柱なし：何本もの茎・葉をねじり合わせた本体。"""
+        p = self.p
+        self._twist_table()
+        n = max(1, int(p.strand_count))
+        rnd = p.strand_randomness
+        k = math.sin(math.pi / n) / (1.0 + math.sin(math.pi / n)) if n > 1 else 1.0
+        hs = self.head_start
+        t_top = hs + p.strand_head_reach * (1.0 - hs)
+        r_cap = self.shaft_radius(hs) * k * p.strand_fill * 1.4
+        sides = self.res(int(p.strand_sides), 3)
+        flat = p.strand_flatness
+        rng = random.Random(p.seed * 101 + 7)
+        for i in range(n):
+            theta = TAU * i / n + rng.uniform(-0.25, 0.25) * rnd
+            thick_mul = rng.uniform(1.0 - 0.35 * rnd, 1.0 + 0.2 * rnd)
+            t0 = rng.uniform(0.0, 0.03) * rnd
+            t1 = t_top * rng.uniform(1.0 - 0.03 * rnd, 1.0)
+            fray = rng.random() < p.strand_fray
+            if fray:
+                t1 = rng.uniform(p.fray_zone_start, max(p.fray_zone_start, p.fray_zone_end))
+            splay = p.strand_splay * rng.uniform(0.3, 1.3)
+            splay_pos = p.splay_position + rng.uniform(-0.04, 0.04) * rnd
+            nseed = Vector((i * 9.7 + p.seed, i * 3.3, 7.0))
+            span = max(t1 - t0, 1e-3)
+            segs = self.res(int(p.strand_segments * span * max(1.0, p.strand_twist / 4.0)), 8)
+            pts, rx, ry, sidev, roll = [], [], [], [], []
+            info = []
+            radial = Vector((1.0, 0.0, 0.0))
+            for j in range(segs + 1):
+                u = j / segs
+                t = lerp(t0, t1, u)
+                P, T, N, B = self.frame(t)
+                R = self.body_radius(t)
+                rs = min(R * k * p.strand_fill, r_cap) * thick_mul
+                d = max(R - rs, 0.0) if n > 1 else 0.0
+                d += splay * gauss(t, splay_pos, p.splay_width)
+                d += p.strand_looseness * (0.5 + 0.5 * noise.noise(nseed + Vector((t * 8.0, 0.0, 0.0))))
+                ang = theta + self.twist_at(t) + noise.noise(nseed + Vector((0.0, t * 5.0, 0.0))) * 0.25 * rnd
+                radial = N * math.cos(ang) + B * math.sin(ang)
+                pos = P + radial * d
+                # 端の細り（上端は穂先の下へ潜り込むように細く）
+                taper = lerp(0.35, 1.0, smoothstep(1.0, 0.85, u)) if not fray else lerp(0.6, 1.0, smoothstep(1.0, 0.9, u))
+                r = rs * taper
+                pts.append(pos)
+                rx.append(r * (1.0 + 0.9 * flat))
+                ry.append(r * (1.0 - 0.6 * flat))
+                tang_dir = (T * (self.L / max(p.strand_twist, 1e-3) / TAU) + radial.cross(T) * max(d, 1e-5))
+                sidev.append(radial.cross(tang_dir.normalized()))
+                roll.append(p.strand_ribbon_twist * TAU * u + i)
+                info.append((pos, radial, r))
+            if fray and len(pts) > 2:
+                self.append_curl(pts, rx, ry, sidev, roll, radial,
+                                 p.fray_length * rng.uniform(0.6, 1.4), p.fray_curl_turns, rng, out=1.2)
+            self.mb.add_sweep(pts, rx, ry, sides=sides, mat=MAT_SHAFT, side_vecs=sidev,
+                              roll=roll, cap_start=True, cap_end=True)
+            if len(info) > 3:
+                self.vines.append(info)  # 小葉・トゲの取り付け先として使う
+
+        # 中心の詰め物（隙間から向こうが透けないように）
+        if p.strand_core and n > 2:
+            segs = self.res(int(p.shaft_segments), 4)
+            ts = [lerp(0.0, t_top, j / segs) for j in range(segs + 1)]
+            cpts = [self.frame(t)[0] for t in ts]
+            cr = [max(self.shaft_radius(t) * (1.0 - 2.0 * k) * 1.15, 1e-5) for t in ts]
+            self.mb.add_sweep(cpts, cr, sides=self.res(6, 3), mat=MAT_SHAFT,
+                              cap_start=True, cap_end=True)
 
     def build_shaft(self):
         p = self.p
@@ -431,6 +521,29 @@ class SpearGenerator:
             pts.append(pos.copy())
         return pts
 
+    def append_curl(self, pts, rx, ry, sidev, roll, radial, length, turns, rng, out=0.8):
+        """チューブ経路の末端に、外側へ伸びてくるっと巻く先端を継ぎ足す。"""
+        p = self.p
+        tv = (pts[-1] - pts[-2]).normalized()
+        a = (tv + radial * out).normalized()
+        b = (a.cross(tv) if rng.random() < 0.5 else tv.cross(a))
+        if b.length < 1e-6:
+            b = perpendicular(a)
+        b = b.normalized()
+        b = (b * 0.7 + UP * 0.3 * (1 if rng.random() < 0.5 else -1)).normalized()
+        b = (b - a * b.dot(a)).normalized()
+        csegs = self.res(int(28 * max(1.0, turns)), 8)
+        cpts = self.tendril_path(pts[-1], a, b, length, turns, p.tendril_tightness, 0.3, csegs)[1:]
+        r_end_x, r_end_y = rx[-1], ry[-1]
+        for ci, cp in enumerate(cpts):
+            u = (ci + 1) / len(cpts)
+            k = lerp(1.0, 0.15, u)
+            pts.append(cp)
+            rx.append(lerp(r_end_x, (r_end_x + r_end_y) * 0.5, min(1.0, u * 3)) * k)
+            ry.append(r_end_y * k)
+            sidev.append(sidev[-1])
+            roll.append(roll[-1])
+
     def build_vines(self):
         p = self.p
         rng = random.Random(p.seed * 101 + 2)
@@ -474,28 +587,8 @@ class SpearGenerator:
 
             # 末端の巻きひげ
             if rng.random() < p.vine_end_curl and len(pts) > 2:
-                tv = (pts[-1] - pts[-2]).normalized()
-                radial = info[-1][1]
-                a = (tv + radial * 0.8).normalized()
-                b = (a.cross(tv) if rng.random() < 0.5 else tv.cross(a))
-                if b.length < 1e-6:
-                    b = perpendicular(a)
-                b = b.normalized()
-                b = (b * 0.7 + UP * 0.3 * (1 if rng.random() < 0.5 else -1)).normalized()
-                b = (b - a * b.dot(a)).normalized()
-                L = p.vine_curl_length * rng.uniform(0.7, 1.3)
-                csegs = self.res(int(28 * max(1.0, p.vine_curl_turns)), 8)
-                cpts = self.tendril_path(pts[-1], a, b, L, p.vine_curl_turns, p.tendril_tightness,
-                                         0.3, csegs)[1:]
-                r_end_x, r_end_y = rx[-1], ry[-1]
-                for ci, cp in enumerate(cpts):
-                    u = (ci + 1) / len(cpts)
-                    k = lerp(1.0, 0.15, u)
-                    pts.append(cp)
-                    rx.append(lerp(r_end_x, (r_end_x + r_end_y) * 0.5, min(1.0, u * 3)) * k)
-                    ry.append(r_end_y * k)
-                    sidev.append(sidev[-1])
-                    roll.append(roll[-1])
+                self.append_curl(pts, rx, ry, sidev, roll, info[-1][1],
+                                 p.vine_curl_length * rng.uniform(0.7, 1.3), p.vine_curl_turns, rng)
 
             self.mb.add_sweep(pts, rx, ry, sides=sides, mat=MAT_VINE, side_vecs=sidev,
                               roll=roll, cap_start=True, cap_end=True)
@@ -630,7 +723,7 @@ class SpearGenerator:
 
 def _color_pairs(p):
     return (
-        (p.color_shaft_dark, p.color_shaft_light, 0.55, (30.0, 30.0, 1.5)),
+        (p.color_shaft_dark, p.color_shaft_light, 0.5, (30.0, 30.0, 1.5)),
         (p.color_head_dark, p.color_head_light, 0.45, (6.0, 6.0, 2.0)),
         (p.color_vine_dark, p.color_vine_light, 0.45, (8.0, 8.0, 8.0)),
         (p.color_leaf_dark, p.color_leaf_light, 0.45, (12.0, 12.0, 12.0)),
@@ -797,8 +890,37 @@ class PlantSpearSettings(bpy.types.PropertyGroup):
     use_materials: BoolProperty(name="Auto Materials", default=True, update=_on_update,
                                 description="マテリアルを自動作成する")
 
+    # body mode
+    body_mode: EnumProperty(
+        name="Body", update=_on_update,
+        items=[('TWISTED', "Twisted", "支柱なし：茎や葉をねじり合わせたものが本体"),
+               ('POLE', "Pole", "芯となる柄に蔓が巻きつく")],
+        default='TWISTED')
+    strand_count: I("Strands", 7, 1, 64, "ねじり合わせる茎・葉の本数")
+    strand_twist: F("Twist", 3.0, -50.0, 50.0, "全長でのねじり回数", soft=(-10.0, 10.0))
+    strand_tighten: F("Tighten at Wrap", 2.5, 0.0, 20.0, "縛り位置付近でねじりをきつくする量")
+    strand_tighten_width: F("Tighten Width", 0.06, 0.005, 1.0, "きつくなる範囲")
+    strand_fill: F("Fill", 1.15, 0.3, 2.0, "束の詰まり具合（1で隣と接する）")
+    strand_flatness: F("Flatness", 0.45, 0.0, 1.0, "0=丸い茎, 1=平たい葉")
+    strand_ribbon_twist: F("Ribbon Twist", 0.0, -20.0, 20.0, "各ストランド自体のねじれ回数")
+    strand_looseness: F("Looseness", 0.0015, 0.0, 0.2, "束のゆるみ", length=True, soft=(0.0, 0.02))
+    strand_splay: F("Splay", 0.022, 0.0, 1.0, "束がほどけて広がる量", length=True, soft=(0.0, 0.1))
+    splay_position: F("Splay Position", 0.76, 0.0, 1.0, "ほどける位置（全長比）")
+    splay_width: F("Splay Width", 0.07, 0.005, 1.0, "ほどける範囲")
+    strand_head_reach: F("Head Reach", 0.25, 0.0, 1.0, "ストランドが穂先のどこまで包むか（穂先長比）")
+    strand_randomness: F("Randomness", 0.6, 0.0, 1.0, "ストランドごとのばらつき")
+    strand_fray: F("Fray Chance", 0.3, 0.0, 1.0, "途中で束から抜け出して巻く確率")
+    fray_zone_start: F("Fray Zone Start", 0.45, 0.0, 1.0, "抜け出す範囲の下端（全長比）")
+    fray_zone_end: F("Fray Zone End", 0.82, 0.0, 1.0, "抜け出す範囲の上端（全長比）")
+    fray_length: F("Fray Length", 0.08, 0.0, 2.0, "抜け出した先の長さ", length=True, soft=(0.0, 0.3))
+    fray_curl_turns: F("Fray Curl", 1.2, 0.0, 10.0, "抜け出した先の巻き数")
+    strand_core: BoolProperty(name="Core Fill", default=True, update=_on_update,
+                              description="束の中心に細い詰め物を入れて隙間を埋める")
+    strand_segments: I("Segments", 160, 8, 4000, "ストランドの分割数", soft=(16, 600))
+    strand_sides: I("Sides", 7, 3, 32, "ストランドの周方向の分割数")
+
     # shaft
-    shaft_radius: F("Radius", 0.012, 0.0005, 1.0, "柄の太さ（半径）", length=True, soft=(0.002, 0.08))
+    shaft_radius: F("Radius", 0.016, 0.0005, 1.0, "柄の太さ（半径）", length=True, soft=(0.002, 0.08))
     shaft_taper: F("Taper", 0.8, 0.1, 3.0, "上端の太さ比（下端=1）")
     shaft_bend: F("Bend", 0.02, -1.0, 1.0, "全体の反り量", length=True, soft=(-0.2, 0.2))
     bend_direction: A("Bend Direction", 0.0, -360.0, 360.0, "反る方向")
@@ -835,7 +957,7 @@ class PlantSpearSettings(bpy.types.PropertyGroup):
     sheath_randomness: F("Randomness", 0.5, 0.0, 1.0, "苞葉のばらつき")
 
     # vines
-    vine_count: I("Count", 4, 0, 64, "巻きつく蔓の本数")
+    vine_count: I("Count", 2, 0, 64, "巻きつく蔓の本数")
     vine_start: F("Start", 0.03, 0.0, 1.0, "蔓の始点（全長比）")
     vine_end: F("End", 0.86, 0.0, 1.0, "蔓の終点（全長比）")
     vine_turns: F("Turns", 2.5, 0.0, 50.0, "巻き数", soft=(0.0, 10.0))
@@ -893,8 +1015,8 @@ class PlantSpearSettings(bpy.types.PropertyGroup):
                                  description="オン: 蔓に生やす / オフ: 柄に生やす")
 
     # colors
-    color_shaft_dark: C("Shaft Dark", (0.12, 0.15, 0.08), "柄の暗い色")
-    color_shaft_light: C("Shaft Light", (0.42, 0.45, 0.30), "柄の明るい色")
+    color_shaft_dark: C("Body Dark", (0.06, 0.12, 0.05), "本体（柄・ストランド）の暗い色")
+    color_shaft_light: C("Body Light", (0.36, 0.46, 0.26), "本体（柄・ストランド）の明るい色")
     color_head_dark: C("Head Dark", (0.12, 0.22, 0.10), "穂先の暗い色")
     color_head_light: C("Head Light", (0.55, 0.68, 0.45), "穂先の明るい色")
     color_vine_dark: C("Vine Dark", (0.03, 0.09, 0.04), "蔓の暗い色")
@@ -908,25 +1030,39 @@ class PlantSpearSettings(bpy.types.PropertyGroup):
 # ---------------------------------------------------------------------------
 
 PRESETS = {
-    "REFERENCE": ("Reference", "参考画像風：細い柄に平たい蔓が絡み、苞葉に包まれた穂先", {}),
+    "REFERENCE": ("Twisted", "支柱なし：茎と葉をねじり合わせた本体、苞葉に包まれた穂先", {}),
+    "POLE": ("Pole + Vines", "芯の柄に平たい蔓が巻きつくタイプ", {
+        "body_mode": 'POLE', "shaft_radius": 0.012, "vine_count": 4,
+        "color_shaft_dark": (0.12, 0.15, 0.08), "color_shaft_light": (0.42, 0.45, 0.30),
+    }),
+    "BRAID": ("Tight Braid", "細い茎をきつく大量にねじった縄のような槍", {
+        "strand_count": 12, "strand_twist": 7.0, "strand_flatness": 0.1, "strand_splay": 0.0,
+        "strand_fray": 0.1, "strand_tighten": 1.0, "vine_count": 0, "leaf_count": 0,
+        "tendril_count": 2, "thorn_count": 0, "shaft_radius": 0.015, "strand_sides": 6,
+    }),
     "THORNY": ("Thorny", "丸い蔓とトゲだらけの攻撃的な槍", {
-        "vine_flatness": 0.0, "vine_thickness": 0.0028, "vine_count": 6, "vine_turns": 4.0,
+        "vine_flatness": 0.0, "vine_thickness": 0.0028, "vine_count": 3, "vine_turns": 4.0,
+        "strand_flatness": 0.0, "strand_count": 5, "strand_fray": 0.15, "strand_splay": 0.01,
         "vine_bulge": 0.008, "thorn_count": 80, "thorn_size": 0.009, "thorn_on_vines": True,
         "leaf_count": 4, "head_facets": 4, "head_facet_amount": 0.9, "head_sharpness": 2.4,
         "sheath_count": 3, "sheath_flare": 1.5, "tendril_count": 2,
         "color_vine_dark": (0.06, 0.05, 0.02), "color_vine_light": (0.25, 0.2, 0.1),
     }),
     "LUSH": ("Lush", "葉と巻きひげがたっぷりの生い茂った槍", {
-        "vine_count": 7, "vine_bulge": 0.045, "vine_looseness": 0.012, "leaf_count": 70,
+        "vine_count": 3, "vine_bulge": 0.045, "vine_looseness": 0.012, "leaf_count": 70,
+        "strand_splay": 0.035, "strand_fray": 0.5,
         "leaf_size": 0.03, "tendril_count": 14, "tendril_zone_start": 0.3, "tendril_zone_end": 0.85,
         "sheath_count": 7, "sheath_flare": 0.9, "thorn_count": 0, "vine_end": 0.82,
     }),
     "MINIMAL": ("Minimal", "装飾少なめのすっきりした槍", {
-        "vine_count": 2, "vine_turns": 1.5, "vine_bulge": 0.0, "leaf_count": 0, "tendril_count": 0,
+        "vine_count": 0, "vine_turns": 1.5, "vine_bulge": 0.0, "leaf_count": 0, "tendril_count": 0,
+        "strand_count": 5, "strand_splay": 0.008, "strand_fray": 0.0, "strand_randomness": 0.3,
         "thorn_count": 0, "sheath_count": 3, "wrap_cross": False, "shaft_wobble": 0.0,
     }),
     "WILD": ("Wild", "大きくうねり、ゆるく絡んだ野生的な槍", {
-        "shaft_bend": 0.06, "shaft_wobble": 0.015, "vine_count": 5, "vine_bulge": 0.07,
+        "shaft_bend": 0.06, "shaft_wobble": 0.015, "vine_count": 3, "vine_bulge": 0.07,
+        "strand_splay": 0.06, "splay_width": 0.14, "strand_fray": 0.6, "strand_looseness": 0.005,
+        "fray_length": 0.12, "fray_curl_turns": 2.0,
         "vine_bulge_width": 0.2, "vine_looseness": 0.02, "vine_reverse_ratio": 0.5,
         "vine_ribbon_twist": 3.0, "vine_curl_length": 0.12, "vine_curl_turns": 2.0,
         "tendril_count": 9, "tendril_length": 0.14, "sheath_flare": 1.2, "sheath_twist": math.radians(120),
@@ -1117,6 +1253,7 @@ class PLANTSPEAR_PT_main(_Base, bpy.types.Panel):
         row.operator(PLANTSPEAR_OT_randomize.bl_idname, text="", icon='FILE_REFRESH')
         col.operator_menu_enum(PLANTSPEAR_OT_preset.bl_idname, "preset", text="Apply Preset", icon='PRESET')
         col.operator(PLANTSPEAR_OT_duplicate_variant.bl_idname, icon='DUPLICATE')
+        layout.prop(p, "body_mode", expand=True)
         col = layout.column(align=True)
         col.prop(p, "length")
         col.prop(p, "detail")
@@ -1131,7 +1268,7 @@ class PLANTSPEAR_PT_main(_Base, bpy.types.Panel):
         layout.operator(PLANTSPEAR_OT_freeze.bl_idname, icon='MESH_DATA')
 
 
-def _sub(label, props, idname, header_prop=None):
+def _sub(label, props, idname, header_prop=None, mode=None):
     def draw(self, context):
         p = _active_spear(context).plant_spear
         col = self.layout.column(align=True)
@@ -1147,7 +1284,8 @@ def _sub(label, props, idname, header_prop=None):
         bl_label=label,
         bl_parent_id="PLANTSPEAR_PT_main",
         bl_options={'DEFAULT_CLOSED'},
-        poll=classmethod(lambda cls, context: _active_spear(context) is not None),
+        poll=classmethod(lambda cls, context: _active_spear(context) is not None and
+                         (mode is None or _active_spear(context).plant_spear.body_mode == mode)),
         draw=draw,
     )
     if header_prop:
@@ -1158,7 +1296,15 @@ def _sub(label, props, idname, header_prop=None):
 
 
 SUBPANELS = [
-    _sub("Shaft (柄)", ["shaft_radius", "shaft_taper", None, "shaft_bend", "bend_direction",
+    _sub("Twisted Body (ねじり本体)", ["strand_count", "strand_twist", "strand_tighten",
+                                       "strand_tighten_width", "strand_fill", None,
+                                       "strand_flatness", "strand_ribbon_twist", "strand_looseness",
+                                       "strand_randomness", None, "strand_splay", "splay_position",
+                                       "splay_width", None, "strand_fray", "fray_zone_start",
+                                       "fray_zone_end", "fray_length", "fray_curl_turns", None,
+                                       "strand_head_reach", "strand_core", "strand_segments",
+                                       "strand_sides"], "PLANTSPEAR_PT_strands", mode='TWISTED'),
+    _sub("Shaft / Bundle (柄・束の形)", ["shaft_radius", "shaft_taper", None, "shaft_bend", "bend_direction",
                         "shaft_wobble", "wobble_frequency", None, "shaft_grain", "grain_frequency",
                         None, "butt_length", "butt_sharpness", None, "shaft_segments", "shaft_sides"],
          "PLANTSPEAR_PT_shaft"),
@@ -1168,7 +1314,7 @@ SUBPANELS = [
     _sub("Sheath Leaves (苞葉)", ["sheath_count", "sheath_length", "sheath_base", "sheath_width",
                                   "sheath_flare", "sheath_twist", "sheath_offset", "sheath_randomness"],
          "PLANTSPEAR_PT_sheath"),
-    _sub("Vines (蔓)", ["vine_count", "vine_start", "vine_end", "vine_turns", "vine_reverse_ratio",
+    _sub("Extra Vines (追加の蔓)", ["vine_count", "vine_start", "vine_end", "vine_turns", "vine_reverse_ratio",
                         None, "vine_thickness", "vine_flatness", "vine_ribbon_width", "vine_ribbon_twist",
                         None, "vine_gap", "vine_looseness", "vine_bulge", "vine_bulge_position",
                         "vine_bulge_width", "vine_randomness",
