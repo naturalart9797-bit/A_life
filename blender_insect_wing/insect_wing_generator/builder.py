@@ -2,10 +2,12 @@
 
 import math
 
+import bmesh
 import bpy
-from mathutils import Vector
+from mathutils import Matrix, Vector
 from mathutils.geometry import delaunay_2d_cdt
 
+from . import diptera
 from . import venation
 
 
@@ -17,6 +19,14 @@ VEIN_WIDTH = {
     "intercalary": (0.75, 0.6),
     "margin": (0.8, 1.0),
     "cross": (0.42, 1.0),
+    # Diptera
+    "sc": (1.1, 0.6),
+    "r1": (1.45, 0.75),
+    "radial": (1.05, 0.7),
+    "main": (0.95, 0.7),
+    "weak": (0.35, 1.0),     # CuP, vena spuria: weak, fold-like veins
+    "weak2": (0.65, 0.4),    # R4 appendix
+    "rim": (0.3, 1.0),       # membrane rim where the costa is absent
 }
 
 
@@ -71,6 +81,44 @@ def membrane_material(color, alpha, iridescence):
     return mat
 
 
+def fly_membrane_material(color, pigment, alpha, iridescence):
+    """Membrane whose base and costal cells are pigmented.  The amount of
+    pigment comes from the 'WingTint' colour attribute of the mesh."""
+    name = "IW_FlyMembrane"
+    mat = bpy.data.materials.get(name)
+    if mat is not None:
+        bpy.data.materials.remove(mat)
+    mat = membrane_material(color, alpha, iridescence)
+    mat.name = name
+    nt = mat.node_tree
+    bsdf = _principled(mat)
+    # pigment must stay visible: less transmission than the clear wings
+    _set_input(bsdf, ["Transmission Weight", "Transmission"], 0.15)
+    attr = nt.nodes.new("ShaderNodeAttribute")
+    attr.attribute_name = "WingTint"
+    attr.location = (-600, 200)
+    try:
+        mix = nt.nodes.new("ShaderNodeMix")
+        mix.data_type = "RGBA"
+        fac, a, b, out = mix.inputs[0], mix.inputs[6], mix.inputs[7], mix.outputs[2]
+    except RuntimeError:
+        mix = nt.nodes.new("ShaderNodeMixRGB")
+        fac, a, b, out = mix.inputs[0], mix.inputs[1], mix.inputs[2], mix.outputs[0]
+    mix.location = (-350, 200)
+    a.default_value = (color[0], color[1], color[2], 1.0)
+    b.default_value = (pigment[0], pigment[1], pigment[2], 1.0)
+    nt.links.new(attr.outputs["Fac"], fac)
+    nt.links.new(out, bsdf.inputs["Base Color"])
+    # pigmented parts are also less transparent
+    mapr = nt.nodes.new("ShaderNodeMapRange")
+    mapr.location = (-350, -50)
+    mapr.inputs[3].default_value = alpha
+    mapr.inputs[4].default_value = min(1.0, alpha + 0.65)
+    nt.links.new(attr.outputs["Fac"], mapr.inputs[0])
+    nt.links.new(mapr.outputs[0], bsdf.inputs["Alpha"])
+    return mat
+
+
 def solid_material(name, color, roughness=0.45):
     mat = bpy.data.materials.get(name) or bpy.data.materials.new(name)
     bsdf = _principled(mat)
@@ -118,7 +166,7 @@ def build_membrane(name, res, surf, mirror, mat, collection, parent):
     # interior sample points so the camber is visible on the membrane
     xs = [q[0] for q in outline]
     ys = [q[1] for q in outline]
-    step = (max(ys) - min(ys)) / 10.0
+    step = (max(ys) - min(ys)) / (24.0 if getattr(res, "tint", None) else 10.0)
     pts = list(outline)
     nb = len(outline)
     x = min(xs) + step * 0.5
@@ -142,6 +190,11 @@ def build_membrane(name, res, surf, mirror, mat, collection, parent):
     mesh.update()
     for poly in mesh.polygons:
         poly.use_smooth = True
+    if getattr(res, "tint", None):
+        attr = mesh.color_attributes.new("WingTint", "FLOAT_COLOR", "POINT")
+        for i, v in enumerate(verts2d):
+            t = res.tint(v.x, v.y)
+            attr.data[i].color = (t, t, t, 1.0)
     mesh.materials.append(mat)
     obj = bpy.data.objects.new(name, mesh)
     _link(obj, collection, parent)
@@ -208,8 +261,72 @@ def build_pterostigma(name, res, surf, mirror, thickness, mat, collection, paren
     return obj
 
 
+def build_lobes(name, res, surf, mirror, mat, collection, parent):
+    """Calypters (squamae) behind the wing base."""
+    sx = -1.0 if mirror else 1.0
+    objs = []
+    for k, poly in enumerate(res.lobes):
+        z0 = surf.z(poly[0][0], poly[0][1]) - 0.004 * (k + 1)
+        verts = [(sx * q[0], q[1], z0) for q in poly]
+        face = list(range(len(poly)))
+        if mirror:
+            face.reverse()
+        mesh = bpy.data.meshes.new("%s_%d" % (name, k))
+        mesh.from_pydata(verts, [], [face])
+        mesh.update()
+        mesh.materials.append(mat)
+        obj = bpy.data.objects.new("%s_%d" % (name, k), mesh)
+        _link(obj, collection, parent)
+        objs.append(obj)
+    return objs
+
+
+def build_haltere(name, length, mirror, mat, collection, parent):
+    """Haltere: the club-shaped balancing organ that replaces the hind wing
+    of Diptera.  Stalk (pedicel) + knob (capitellum)."""
+    sx = -1.0 if mirror else 1.0
+    stalk = length * 0.13
+    start = Vector((0.0, -0.10 * length, -0.01 * length))
+    d = Vector((sx * 0.75, -0.62, -0.2)).normalized()
+    end = start + d * stalk
+    curve = bpy.data.curves.new(name + "_Stalk", "CURVE")
+    curve.dimensions = "3D"
+    curve.bevel_depth = length * 0.006
+    curve.bevel_resolution = 2
+    sp = curve.splines.new("POLY")
+    sp.points.add(1)
+    sp.points[0].co = (start.x, start.y, start.z, 1.0)
+    sp.points[1].co = (end.x, end.y, end.z, 1.0)
+    sp.points[0].radius = 1.3
+    sp.points[1].radius = 0.8
+    curve.materials.append(mat)
+    st = bpy.data.objects.new(name + "_Stalk", curve)
+    _link(st, collection, parent)
+
+    me = bpy.data.meshes.new(name + "_Knob")
+    bm = bmesh.new()
+    r = length * 0.028
+    try:
+        bmesh.ops.create_uvsphere(bm, u_segments=16, v_segments=10, radius=r)
+    except TypeError:
+        bmesh.ops.create_uvsphere(bm, u_segments=16, v_segments=10, diameter=r)
+    # slightly flattened, egg-shaped knob
+    bmesh.ops.scale(bm, vec=(1.0, 1.25, 0.8), verts=bm.verts)
+    bm.to_mesh(me)
+    bm.free()
+    for poly in me.polygons:
+        poly.use_smooth = True
+    me.materials.append(mat)
+    kn = bpy.data.objects.new(name + "_Knob", me)
+    _link(kn, collection, parent)
+    kn.location = end + d * r * 0.9
+    kn.rotation_euler = d.to_track_quat("Y", "Z").to_euler()
+    return st, kn
+
+
 def build_wing(label, params, settings, collection, parent, offset, mirror, mats):
-    res = venation.generate(params)
+    is_fly = isinstance(params, diptera.FlyParams)
+    res = diptera.generate(params) if is_fly else venation.generate(params)
     surf = Surface(res.shape, settings.camber, settings.twist)
     root = bpy.data.objects.new(label, None)
     root.empty_display_size = params.length * 0.1
@@ -220,7 +337,10 @@ def build_wing(label, params, settings, collection, parent, offset, mirror, mats
                    collection, root)
     build_veins(label + "_Veins", res, surf, mirror, th, mats["vein"],
                 collection, root, settings.vein_bevel_resolution)
-    if params.pterostigma:
+    if getattr(res, "lobes", None):
+        build_lobes(label + "_Calypter", res, surf, mirror, mats["calypter"],
+                    collection, root)
+    if res.pterostigma:
         build_pterostigma(label + "_Pterostigma", res, surf, mirror, th,
                           mats["stigma"], collection, root)
     return root, res

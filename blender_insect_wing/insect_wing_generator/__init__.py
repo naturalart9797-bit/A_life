@@ -1,11 +1,12 @@
 bl_info = {
     "name": "Insect Wing Generator",
     "author": "A_life",
-    "version": (1, 0, 0),
+    "version": (1, 1, 0),
     "blender": (3, 0, 0),
     "location": "View3D > Sidebar (N) > Insect Wing",
-    "description": "Generate insect wings with venation grown by the "
-                   "inhibition / Voronoi model of Hoffmann et al. (PNAS 2018)",
+    "description": "Generate insect wings: Diptera (fly) wings from the "
+                   "homologous vein plan, Odonata wings with the inhibition / "
+                   "Voronoi model of Hoffmann et al. (PNAS 2018)",
     "category": "Add Mesh",
 }
 
@@ -15,9 +16,11 @@ import time
 if "bpy" in locals():
     import importlib
     importlib.reload(venation)  # noqa: F821
+    importlib.reload(diptera)   # noqa: F821
     importlib.reload(builder)   # noqa: F821
 else:
     from . import venation
+    from . import diptera
     from . import builder
 
 import bpy
@@ -64,6 +67,31 @@ WING_KEYS = [
 ]
 
 
+FLY_KEYS = ["chord", "base_power", "tip_power", "tip_drop", "le_bulge",
+            "alula", "alula_pos", "calypter", "r4_appendix"]
+
+COLORS = {
+    "DIPTERA": dict(membrane_color=(0.86, 0.86, 0.82), vein_color=(0.20, 0.09, 0.02),
+                    membrane_alpha=0.22, iridescence=0.7),
+    "ODONATA": dict(membrane_color=(0.75, 0.85, 0.9), vein_color=(0.05, 0.035, 0.02),
+                    membrane_alpha=0.25, iridescence=1.0),
+}
+
+
+def _apply_family(self, _context):
+    pr = diptera.PRESETS.get(self.fly_family)
+    if pr is None:
+        return
+    defaults = diptera.FlyParams()
+    for k in FLY_KEYS:
+        setattr(self, "fly_" + k, pr.get(k, getattr(defaults, k)))
+
+
+def _apply_model(self, _context):
+    for k, v in COLORS[self.model].items():
+        setattr(self, k, v)
+
+
 def _apply_preset(self, _context):
     pr = UI_PRESETS.get(self.preset)
     if pr is None:
@@ -80,6 +108,56 @@ def _apply_preset(self, _context):
 # ---------------------------------------------------------------------------
 
 class IW_Settings(bpy.types.PropertyGroup):
+    model: EnumProperty(
+        name="Insect",
+        items=[("DIPTERA", "Diptera (flies)",
+                "One pair of wings with the conserved dipteran vein plan; "
+                "hind wings reduced to halteres"),
+               ("ODONATA", "Odonata / net-veined",
+                "Dense venation grown by the inhibition / Voronoi model "
+                "(Hoffmann et al., PNAS 2018)")],
+        default="DIPTERA", update=_apply_model)
+
+    # --- Diptera ---
+    fly_family: EnumProperty(
+        name="Family",
+        items=[("TABANIDAE", "Horse fly (Tabanidae)",
+                "Circumambient costa, R4/R5 fork with R4 appendix, closed "
+                "discal cell, three M branches, cup closed at the margin"),
+               ("MUSCIDAE", "House fly (Muscidae)",
+                "Costa ends at M1, M1 bent forward toward R4+5, short cup"),
+               ("SYRPHIDAE", "Hover fly (Syrphidae)",
+                "Vena spuria, outer cross veins parallel to the margin")],
+        default="TABANIDAE", update=_apply_family)
+    fly_chord: FloatProperty(name="Chord", default=0.38, min=0.15, max=0.7)
+    fly_base_power: FloatProperty(name="Base Taper", default=0.32, min=0.05, max=2.0)
+    fly_tip_power: FloatProperty(name="Tip Taper", default=0.75, min=0.1, max=2.0)
+    fly_tip_drop: FloatProperty(name="Apex Position", default=0.20, min=-0.2, max=0.8,
+                                description="How far the apex lies behind the "
+                                            "leading edge (x chord)")
+    fly_le_bulge: FloatProperty(name="Leading Edge Bulge", default=0.0, min=-0.2, max=0.3)
+    fly_alula: FloatProperty(name="Alula", default=0.08, min=0.0, max=0.4,
+                             description="Size of the alula lobe at the posterior base")
+    fly_alula_pos: FloatProperty(name="Alula Position", default=0.06, min=0.02, max=0.3)
+    fly_calypter: FloatProperty(name="Calypters", default=0.08, min=0.0, max=0.4,
+                                description="Size of the calypters (squamae)")
+    fly_r4_appendix: BoolProperty(name="R4 Appendix", default=True,
+                                  description="Short spur on R4 (Tabanidae)")
+    fly_variation: FloatProperty(name="Individual Variation", default=0.3,
+                                 min=0.0, max=2.0,
+                                 description="Random displacement of vein junctions")
+    fly_pigment: FloatProperty(name="Pigmentation", default=0.8, min=0.0, max=1.0,
+                               description="Tint of the costal and basal cells")
+    pigment_color: FloatVectorProperty(name="Pigment", subtype="COLOR",
+                                       default=(0.72, 0.42, 0.10), min=0.0, max=1.0)
+    halteres: BoolProperty(name="Halteres", default=True,
+                           description="Add halteres (reduced hind wings)")
+    haltere_color: FloatVectorProperty(name="Haltere", subtype="COLOR",
+                                       default=(0.55, 0.38, 0.15), min=0.0, max=1.0)
+    calypter_color: FloatVectorProperty(name="Calypter", subtype="COLOR",
+                                        default=(0.85, 0.78, 0.62), min=0.0, max=1.0)
+    show_fly: BoolProperty(default=True)
+
     preset: EnumProperty(
         name="Preset",
         items=[("DRAGONFLY", "Dragonfly", "Anisoptera: dense polygonal cells"),
@@ -91,9 +169,10 @@ class IW_Settings(bpy.types.PropertyGroup):
 
     layout_mode: EnumProperty(
         name="Wings",
-        items=[("ONE", "Single", "One fore wing"),
-               ("PAIR", "Fore + Hind", "Fore and hind wing on one side"),
-               ("FOUR", "Four Wings", "Both pairs, mirrored left/right")],
+        items=[("ONE", "Single Wing", "One wing only"),
+               ("PAIR", "One Side", "Fore + hind wing (Odonata) or wing + "
+                                    "haltere (Diptera) on the right side"),
+               ("FOUR", "Both Sides", "Mirrored left and right")],
         default="FOUR")
     seed: IntProperty(name="Seed", default=1, min=0)
     span: FloatProperty(name="Wing Length", default=0.05, min=0.001,
@@ -163,11 +242,11 @@ class IW_Settings(bpy.types.PropertyGroup):
     vein_bevel_resolution: IntProperty(name="Vein Smoothness", default=1, min=0, max=6)
     veins_to_mesh: BoolProperty(name="Convert Veins to Mesh", default=False)
     membrane_color: FloatVectorProperty(name="Membrane", subtype="COLOR",
-                                        default=(0.75, 0.85, 0.9), min=0.0, max=1.0)
-    membrane_alpha: FloatProperty(name="Opacity", default=0.25, min=0.0, max=1.0)
-    iridescence: FloatProperty(name="Iridescence", default=1.0, min=0.0, max=2.0)
+                                        default=(0.86, 0.86, 0.82), min=0.0, max=1.0)
+    membrane_alpha: FloatProperty(name="Opacity", default=0.22, min=0.0, max=1.0)
+    iridescence: FloatProperty(name="Iridescence", default=0.7, min=0.0, max=2.0)
     vein_color: FloatVectorProperty(name="Veins", subtype="COLOR",
-                                    default=(0.05, 0.035, 0.02), min=0.0, max=1.0)
+                                    default=(0.20, 0.09, 0.02), min=0.0, max=1.0)
     stigma_color: FloatVectorProperty(name="Pterostigma", subtype="COLOR",
                                       default=(0.12, 0.05, 0.02), min=0.0, max=1.0)
 
@@ -201,6 +280,12 @@ def _hind_params(s, seed):
     return p
 
 
+def _fly_params(s, seed):
+    kw = {k: getattr(s, "fly_" + k) for k in FLY_KEYS}
+    return diptera.FlyParams(family=s.fly_family, variation=s.fly_variation,
+                             pigment=s.fly_pigment, seed=seed, **kw)
+
+
 def _to_mesh(obj, context):
     dg = context.evaluated_depsgraph_get()
     me = bpy.data.meshes.new_from_object(obj.evaluated_get(dg))
@@ -229,9 +314,17 @@ class IW_OT_generate(bpy.types.Operator):
             coll = bpy.data.collections.new("InsectWings")
             context.scene.collection.children.link(coll)
 
+        fly = s.model == "DIPTERA"
+        if fly:
+            membrane = builder.fly_membrane_material(
+                s.membrane_color, s.pigment_color, s.membrane_alpha, s.iridescence)
+        else:
+            membrane = builder.membrane_material(s.membrane_color, s.membrane_alpha,
+                                                 s.iridescence)
         mats = {
-            "membrane": builder.membrane_material(s.membrane_color, s.membrane_alpha,
-                                                  s.iridescence),
+            "membrane": membrane,
+            "calypter": builder.solid_material("IW_Calypter", s.calypter_color, 0.6),
+            "haltere": builder.solid_material("IW_Haltere", s.haltere_color, 0.5),
             "vein": builder.solid_material("IW_Vein", s.vein_color, 0.35),
             "stigma": builder.solid_material("IW_Pterostigma", s.stigma_color, 0.3),
         }
@@ -245,8 +338,11 @@ class IW_OT_generate(bpy.types.Operator):
         rng = random.Random(s.seed)
         fore_seed = rng.randrange(1 << 30)
         hind_seed = rng.randrange(1 << 30)
-        jobs = [("Fore", _fore_params(s, fore_seed), 0.0)]
-        if s.layout_mode in {"PAIR", "FOUR"}:
+        if fly:
+            jobs = [("Fly", _fly_params(s, fore_seed), 0.0)]
+        else:
+            jobs = [("Fore", _fore_params(s, fore_seed), 0.0)]
+        if s.layout_mode in {"PAIR", "FOUR"} and not fly:
             jobs.append(("Hind", _hind_params(s, hind_seed), -s.chord * 1.25 - 0.02))
         sides = [("R", False)]
         if s.layout_mode == "FOUR":
@@ -260,6 +356,9 @@ class IW_OT_generate(bpy.types.Operator):
                     "%sWing_%s" % (label, side), params, s, coll, root,
                     (x, yoff, 0.0), mirror, mats)
                 built.append((wing_root, res))
+                if fly and s.halteres and s.layout_mode != "ONE":
+                    builder.build_haltere("Haltere_%s" % side, params.length, mirror,
+                                          mats["haltere"], coll, wing_root)
 
         if s.veins_to_mesh:
             context.view_layer.update()
@@ -268,9 +367,14 @@ class IW_OT_generate(bpy.types.Operator):
                     if ch.type == "CURVE":
                         _to_mesh(ch, context)
 
-        n_cross = sum(1 for v in built[0][1].veins if v.kind == "cross")
-        self.report({"INFO"}, "Insect wings generated: %d cross veins per fore wing "
-                              "(%.1fs)" % (n_cross, time.time() - t0))
+        res = built[0][1]
+        if fly:
+            msg = "%s wing: %d named veins" % (s.fly_family.title(), len(res.labels))
+        else:
+            msg = "%d cross veins per fore wing" % sum(
+                1 for v in res.veins if v.kind == "cross")
+        self.report({"INFO"}, "Insect wings generated: %s (%.1fs)"
+                    % (msg, time.time() - t0))
         return {"FINISHED"}
 
 
@@ -308,13 +412,37 @@ class IW_PT_panel(bpy.types.Panel):
     def draw(self, context):
         s = context.scene.insect_wing
         lay = self.layout
-        lay.prop(s, "preset")
+        lay.prop(s, "model")
+        fly = s.model == "DIPTERA"
+        if fly:
+            lay.prop(s, "fly_family")
+        else:
+            lay.prop(s, "preset")
         lay.prop(s, "layout_mode")
         row = lay.row(align=True)
         row.prop(s, "seed")
         row.operator("mesh.insect_wing_randomize", text="", icon="FILE_REFRESH")
         lay.prop(s, "span")
         lay.prop(s, "body_gap")
+
+        if fly:
+            b = _fold(lay, s, "show_fly", "Fly Wing")
+            if b:
+                for k in ("fly_chord", "fly_base_power", "fly_tip_power",
+                          "fly_tip_drop", "fly_le_bulge", "fly_alula",
+                          "fly_alula_pos", "fly_calypter", "fly_r4_appendix",
+                          "fly_variation", "fly_pigment", "halteres"):
+                    b.prop(s, k)
+            b = _fold(lay, s, "show_look", "Shape & Material")
+            if b:
+                for k in ("camber", "twist", "vein_thickness", "vein_bevel_resolution",
+                          "veins_to_mesh", "membrane_color", "pigment_color",
+                          "membrane_alpha", "iridescence", "vein_color",
+                          "calypter_color", "haltere_color"):
+                    b.prop(s, k)
+            lay.separator()
+            lay.operator("mesh.insect_wing_generate", icon="MOD_WIREFRAME")
+            return
 
         b = _fold(lay, s, "show_outline", "Outline")
         if b:
