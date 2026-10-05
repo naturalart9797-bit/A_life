@@ -1,9 +1,9 @@
 schema_version = "1.0.0"
 
 id = "water_flower"
-version = "2.2.0"
+version = "3.0.0"
 name = "Water Flower"
-tagline = "Flowers whose central cup holds water, with playful petals and bud animation"
+tagline = "Grow petals from veins and a two-layer growing sheet (prototype)"
 maintainer = "A_life"
 type = "add-on"
 tags = ["Add Mesh", "Animation"]
