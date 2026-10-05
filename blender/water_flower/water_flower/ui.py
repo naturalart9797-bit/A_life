@@ -25,6 +25,7 @@ class WATERFLOWER_PT_main(_Base, bpy.types.Panel):
     def draw(self, context):
         layout = self.layout
         layout.operator("water_flower.add", icon='OUTLINER_OB_MESH')
+        layout.operator("water_flower.grow_prototype", icon='EXPERIMENTAL')
         obj = active_flower(context)
         if obj is None:
             layout.label(text="花を選ぶと設定が出ます", icon='INFO')

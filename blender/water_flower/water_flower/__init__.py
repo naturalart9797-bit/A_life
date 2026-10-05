@@ -2,7 +2,7 @@
 bl_info = {
     "name": "Water Flower (水をためる花)",
     "author": "A_life",
-    "version": (2, 1, 0),
+    "version": (2, 2, 0),
     "blender": (3, 6, 0),
     "location": "3Dビューポート > 追加 > メッシュ > 水をためる花 / サイドバー(N) > WaterFlower",
     "description": "中央の器に水がたまる花を生成する。外側の花びらはねじれ・うねり、つぼみに閉じるアニメーションも作れる",
