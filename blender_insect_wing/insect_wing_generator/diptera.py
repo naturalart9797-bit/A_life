@@ -362,6 +362,13 @@ def generate(p):
         res.veins.append(vein)
         res.labels[name] = vein
 
+    add_basal_parts(res, shape, p)
+    return res
+
+
+def add_basal_parts(res, shape, p):
+    """Calypters and membrane pigmentation (shared by both fly models)."""
+    L = p.length
     # --- calypters (squamae): two stacked flaps at the posterior wing
     # base, next to the body.  The lower one is larger and shields the
     # haltere (well developed in the Calyptratae, e.g. Muscidae).
@@ -385,4 +392,3 @@ def generate(p):
         basal = math.exp(-u / 0.18)
         return p.pigment * min(1.0, 0.8 * costal + 0.6 * basal)
     res.tint = tint
-    return res

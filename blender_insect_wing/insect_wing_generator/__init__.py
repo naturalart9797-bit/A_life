@@ -1,7 +1,7 @@
 bl_info = {
     "name": "Insect Wing Generator",
     "author": "A_life",
-    "version": (1, 1, 0),
+    "version": (1, 2, 0),
     "blender": (3, 0, 0),
     "location": "View3D > Sidebar (N) > Insect Wing",
     "description": "Generate insect wings: Diptera (fly) wings from the "
@@ -17,10 +17,12 @@ if "bpy" in locals():
     import importlib
     importlib.reload(venation)  # noqa: F821
     importlib.reload(diptera)   # noqa: F821
+    importlib.reload(fly_dev)   # noqa: F821
     importlib.reload(builder)   # noqa: F821
 else:
     from . import venation
     from . import diptera
+    from . import fly_dev
     from . import builder
 
 import bpy
@@ -78,6 +80,12 @@ COLORS = {
 }
 
 
+DEV_KEYS = ["ap_boundary", "dpp_anterior", "dpp_posterior", "posterior_weight",
+            "posterior_growth", "branch_gap", "join_gap", "branch_levels",
+            "min_branch", "crossvein_gap", "crossvein_dpp", "crossvein_max",
+            "cup_fusion", "anal_reach", "costa_end", "circumambient", "resolution"]
+
+
 def _apply_family(self, _context):
     pr = diptera.PRESETS.get(self.fly_family)
     if pr is None:
@@ -85,6 +93,10 @@ def _apply_family(self, _context):
     defaults = diptera.FlyParams()
     for k in FLY_KEYS:
         setattr(self, "fly_" + k, pr.get(k, getattr(defaults, k)))
+    dpr = fly_dev.PRESETS.get(self.fly_family, {})
+    ddef = fly_dev.DevParams()
+    for k in DEV_KEYS:
+        setattr(self, "dev_" + k, dpr.get(k, getattr(ddef, k)))
 
 
 def _apply_model(self, _context):
@@ -129,6 +141,62 @@ class IW_Settings(bpy.types.PropertyGroup):
                ("SYRPHIDAE", "Hover fly (Syrphidae)",
                 "Vena spuria, outer cross veins parallel to the margin")],
         default="TABANIDAE", update=_apply_family)
+    fly_method: EnumProperty(
+        name="Method",
+        items=[("DEVELOPMENTAL", "Developmental",
+                "Grow the venation from a positional field, morphogen "
+                "thresholds, intercalation/fusion and BMP-like cross veins"),
+               ("ATLAS", "Atlas",
+                "Place the named veins of the family at measured positions")],
+        default="DEVELOPMENTAL")
+    # --- developmental model ---
+    dev_ap_boundary: FloatProperty(
+        name="A/P Boundary", default=0.50, min=0.2, max=0.8,
+        description="Position of the A/P compartment boundary (Dpp source) "
+                    "on the margin coordinate")
+    dev_dpp_anterior: FloatProperty(name="Dpp Range Anterior", default=0.10,
+                                    min=0.02, max=0.4)
+    dev_dpp_posterior: FloatProperty(name="Dpp Range Posterior", default=0.10,
+                                     min=0.02, max=0.4)
+    dev_posterior_weight: FloatProperty(
+        name="Posterior Margin Growth", default=1.2, min=0.3, max=4.0,
+        description="Positional range per length of hind margin (higher: "
+                    "veins meet the hind margin more steeply)")
+    dev_posterior_growth: FloatProperty(
+        name="Posterior Tissue Growth", default=0.8, min=-2.0, max=5.0,
+        description="Extra expansion of the posterior blade (higher: veins "
+                    "crowd anteriorly, wide posterior cells)")
+    dev_branch_gap: FloatProperty(
+        name="Branching Gap", default=0.34, min=0.1, max=1.5,
+        description="A new vein is induced where the margin is farther than "
+                    "half this from every vein (x chord)")
+    dev_join_gap: FloatProperty(
+        name="Fusion Gap", default=0.17, min=0.03, max=0.6,
+        description="A branch fuses with its neighbour when the gap narrows "
+                    "below this (x chord)")
+    dev_branch_levels: IntProperty(name="Branching Rounds", default=3, min=0, max=6)
+    dev_min_branch: FloatProperty(name="Min Branch Length", default=0.10,
+                                  min=0.0, max=0.5)
+    dev_crossvein_gap: FloatProperty(
+        name="Cross Vein Range", default=0.20, min=0.02, max=0.8,
+        description="Neighbouring veins closer than this get a cross vein (x chord)")
+    dev_crossvein_dpp: FloatProperty(
+        name="Cross Vein Competence", default=0.30, min=0.0, max=1.0,
+        description="Minimum Dpp/BMP level for cross veins (only near the A/P "
+                    "boundary when high)")
+    dev_crossvein_max: IntProperty(name="Cross Veins per Pair", default=1, min=0, max=4)
+    dev_cup_fusion: FloatProperty(
+        name="Distal Fusion", default=0.12, min=0.0, max=0.6,
+        description="Neighbouring veins whose margin ends are closer than "
+                    "this fuse into a stalk and close the cell between them")
+    dev_anal_reach: FloatProperty(name="Anal Vein Reach", default=1.0, min=0.1, max=1.0)
+    dev_costa_end: FloatProperty(name="Costa End", default=0.0, min=-0.3, max=0.6,
+                                 description="Where the thick costa ends "
+                                             "(arc offset from the apex, x L)")
+    dev_circumambient: BoolProperty(name="Circumambient Costa", default=True)
+    dev_resolution: IntProperty(name="Resolution", default=200, min=80, max=600)
+    show_dev: BoolProperty(default=True)
+
     fly_chord: FloatProperty(name="Chord", default=0.38, min=0.15, max=0.7)
     fly_base_power: FloatProperty(name="Base Taper", default=0.32, min=0.05, max=2.0)
     fly_tip_power: FloatProperty(name="Tip Taper", default=0.75, min=0.1, max=2.0)
@@ -282,6 +350,11 @@ def _hind_params(s, seed):
 
 def _fly_params(s, seed):
     kw = {k: getattr(s, "fly_" + k) for k in FLY_KEYS}
+    if s.fly_method == "DEVELOPMENTAL":
+        kw.pop("r4_appendix")
+        kw.update({k: getattr(s, "dev_" + k) for k in DEV_KEYS})
+        return fly_dev.DevParams(family=s.fly_family, variation=s.fly_variation,
+                                 pigment=s.fly_pigment, seed=seed, **kw)
     return diptera.FlyParams(family=s.fly_family, variation=s.fly_variation,
                              pigment=s.fly_pigment, seed=seed, **kw)
 
@@ -369,7 +442,8 @@ class IW_OT_generate(bpy.types.Operator):
 
         res = built[0][1]
         if fly:
-            msg = "%s wing: %d named veins" % (s.fly_family.title(), len(res.labels))
+            msg = "%s wing (%s): %d veins" % (s.fly_family.title(),
+                                              s.fly_method.lower(), len(res.labels))
         else:
             msg = "%d cross veins per fore wing" % sum(
                 1 for v in res.veins if v.kind == "cross")
@@ -416,6 +490,7 @@ class IW_PT_panel(bpy.types.Panel):
         fly = s.model == "DIPTERA"
         if fly:
             lay.prop(s, "fly_family")
+            lay.prop(s, "fly_method")
         else:
             lay.prop(s, "preset")
         lay.prop(s, "layout_mode")
@@ -425,6 +500,22 @@ class IW_PT_panel(bpy.types.Panel):
         lay.prop(s, "span")
         lay.prop(s, "body_gap")
 
+        if fly and s.fly_method == "DEVELOPMENTAL":
+            b = _fold(lay, s, "show_dev", "Development")
+            if b:
+                b.label(text="Positional field / morphogen:")
+                for k in ("dev_ap_boundary", "dev_dpp_anterior", "dev_dpp_posterior",
+                          "dev_posterior_weight", "dev_posterior_growth"):
+                    b.prop(s, k)
+                b.label(text="Branching and fusion:")
+                for k in ("dev_branch_gap", "dev_join_gap", "dev_branch_levels",
+                          "dev_min_branch", "dev_cup_fusion", "dev_anal_reach"):
+                    b.prop(s, k)
+                b.label(text="Cross veins (BMP):")
+                for k in ("dev_crossvein_gap", "dev_crossvein_dpp", "dev_crossvein_max"):
+                    b.prop(s, k)
+                for k in ("dev_costa_end", "dev_circumambient", "dev_resolution"):
+                    b.prop(s, k)
         if fly:
             b = _fold(lay, s, "show_fly", "Fly Wing")
             if b:

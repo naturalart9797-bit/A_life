@@ -1,13 +1,79 @@
 # Insect Wing Generator（Blender アドオン）
 
-昆虫の翅（はね）を手続き的に生成する Blender アドオンです。2 つのモデルを持っています。
+昆虫の翅（はね）を手続き的に生成する Blender アドオンです。
 
 | モデル | 対象 | 仕組み |
 |---|---|---|
-| **Diptera（双翅目）** ※既定 | アブ・イエバエ・ハナアブ | 科ごとに決まった相同な翅脈と翅室の配置（脈相）から組み立てる |
-| **Odonata / 網目状の翅脈** | トンボ・イトトンボ・クサカゲロウ・カゲロウ | 抑制シグナルとボロノイ分割で翅脈を「成長」させる（PNAS 2018） |
+| **Diptera / Developmental** ※既定 | アブ・イエバエ・ハナアブ | 位置情報場・モルフォゲンの閾値・脈の挿入と融合・BMP 型の横脈という発生の仕組みから翅脈を**育てる** |
+| Diptera / Atlas | 同上 | 科ごとに決まった脈を、測った位置に**置く**（比較用） |
+| Odonata / 網目状の翅脈 | トンボ・イトトンボ・クサカゲロウ・カゲロウ | 抑制シグナルとボロノイ分割で翅脈を育てる（PNAS 2018） |
 
-## Diptera（双翅目）モデル
+## 双翅目の翅脈はどう決まっているのか
+
+「何本の脈があって部屋がいくつ」という**設計図**なのか、脈の**自然な流れ**なのか、という問いに対しては「両方。ただし役割が違う」が答えになります。ショウジョウバエなどの発生研究で分かっていることを整理します。
+
+1. **脈の数と順番は遺伝的な前パターンで決まる（設計図の側面）**
+   翅原基は前後（A/P）の区画境界を持っています。後区画からの Hedgehog と、境界から出る Dpp（BMP）の濃度勾配に対して、*spalt*・*optomotor-blind*・*knot* などの遺伝子が**閾値**で応答します。L2〜L5 の縦脈は、それらの発現境界に現れます。脈の数・順番・相同性（R・M・Cu…）がほぼ一定で、分類に使えるのはこのためです。
+2. **脈の形そのものは組織の変形と流れで決まる（流れの側面）**
+   蛹期に翅の付け根（ヒンジ）が収縮し、翅身は基部から先端へ引き伸ばされます。原基の中ではまっすぐだった A/P の位置の線が、この組織の流れによって**基部で収束し、先端で扇状に開く曲線**になります。脈は血リンパや気管の通り道でもあり、流れの線に沿って伸びます。
+3. **分岐・融合・横脈は局所的な自己組織化で決まる**
+   脈の幅は EGFR と Notch の側方抑制で細く保たれます。脈どうしの間が広すぎると新しい脈が挿入され（Hoffmann ら 2018 が示したトンボの介在脈と同じ規則）、狭くなると隣と融合します（R2+3、R4+5 という名前は「融合した脈」という意味です）。横脈（r-m、dm-cu）は、両側の脈から運ばれた BMP が重なる場所にだけできます。
+
+つまり**「どの系統の脈が何本あるか」は少数の閾値で離散的に決まり、「どこをどう走って、どこで分かれ、どこがつながり、部屋がどんな形になるか」は連続的な場と局所規則から自然に生じます。**後者はアルゴリズムで近似できます。それが Developmental モデルです。
+
+## Diptera / Developmental モデル
+
+![dev tabanidae](images/dev_tabanidae_render.jpg)
+
+脈の名前も位置も一切指定しません。次の 6 つの仕組みだけで翅脈が生じます（`fly_dev.py`）。
+
+| # | 仕組み | 実装 |
+|---|---|---|
+| 1 | **位置情報場 ψ** | 翅縁（元の D/V 境界）が A/P の位置の値を持ちます（前縁基部 0 → 後縁基部 1）。翅身の内部では ∇·(σ∇ψ)=0 を解きます。σ は後部組織の余分な成長で、σ が大きい所では値が薄く引き伸ばされ、脈の間隔が広がります。ヒンジでは ψ が 0→1 に圧縮されるので、全系統が細い付け根に順番どおり収束します。 |
+| 2 | **モルフォゲン閾値** | A/P 境界に峰を持つ Dpp 型の勾配を、5 つの固定閾値で読み取って Sc・R・M・Cu・A の 5 系統を決めます。各脈は「ψ = 閾値」の等値線として、翅縁からヒンジへ伸びます。等値線なので**脈は交差せず**、前縁脈には浅い角度で寄り添います。 |
+| 3 | **挿入と融合** | 翅縁上で、どの脈からも一定距離以上離れた点に新しい脈が生じます（PNAS 2018 の規則）。新しい脈は等値線に沿って基部へ伸び、両隣との隙間が閾値より狭くなった所で近いほうに融合します。これで Rs→R2+3／R4+5、M の分岐などの**枝分かれ**が生じます。Sc と A は分岐しません。すぐに融合してしまう短い原基は脈になりません。 |
+| 4 | **横脈（BMP）** | 隣り合う脈が十分近く、かつ Dpp/BMP が高い（A/P 境界に近い）所にだけ、側方抑制つきで横脈ができます。これが r-m・dm-cu・bm-cu にあたり、**盤室などの閉じた部屋**ができます。 |
+| 5 | **末端融合** | 翅縁での終点が近い隣どうしは共通の柄になって融合し、間の部屋を閉じます（CuA2 + A1 による**肘室 cup**）。 |
+| 6 | **脈の太さ（マレーの法則）** | 各区間は、そこより先のすべての枝の「流量」を運び、半径は流量^(1/3) に比例します。基部の太い幹から細い枝へ、自然な太さの階層ができます。 |
+
+位置情報場 ψ の等値帯（脈はこの線のどれかの上にできます）:
+
+![psi](images/dev_psi_field.png)
+
+### 科の違い＝パラメータの違い
+
+3 つの科は**同じ仕組み**で作り、勾配と閾値のパラメータだけを変えています。
+
+| 科 | 結果 | 主な違い |
+|---|---|---|
+| アブ科 | ![](images/dev_tabanidae.png) | 挿入の閾値が低いので枝が多い。末端融合で cup が閉じる。前縁脈が翅を一周する |
+| イエバエ科 | ![](images/dev_muscidae.png) | 挿入の閾値が高いので枝が少ない。A1 が途中で消える。横脈は r-m と dm-cu の 2 本だけ |
+| ハナアブ科 | ![](images/dev_syrphidae.png) | 中間 |
+
+![dev muscidae](images/dev_muscidae_render.jpg)
+
+### Development パラメータ
+
+| パラメータ | 意味 |
+|---|---|
+| A/P Boundary, Dpp Range Anterior/Posterior | Dpp 勾配の峰の位置と広がり。各系統の脈がどこに来るかを決める |
+| Posterior Margin Growth | 後縁が持つ位置の値の密度。上げると脈が後縁に急な角度で当たる |
+| Posterior Tissue Growth | 後部組織の膨張。上げると脈が前方に集まり、後方の部屋が広くなる |
+| Branching Gap / Fusion Gap / Branching Rounds / Min Branch Length | 脈の挿入と融合の閾値。枝の数と分岐の位置が決まる |
+| Cross Vein Range / Competence / per Pair | 横脈ができる距離、BMP の必要量、1 組あたりの本数 |
+| Distal Fusion | 翅縁での融合距離（cup を閉じるか） |
+| Anal Vein Reach | A1 のうち硬化する長さ |
+| Costa End, Circumambient Costa | 前縁脈の範囲 |
+
+### 限界
+
+- 前パターンは 1 本の勾配と固定閾値だけなので、イエバエ科・ハナアブ科の Sc は実物より基部寄りで終わります。
+- イエバエ科の M1 の屈曲、ハナアブ科の偽脈（vena spuria）、アブ科の R4 付属脈は、今の規則では出てきません（Atlas モデルにはあります）。
+- 翅の輪郭そのものは育てておらず、パラメトリックな形を使っています。
+
+## Diptera / Atlas モデル
+
+科ごとの標準的な脈相を、実物の位置に置くモデルです。Developmental モデルとの比較用に残しています。
 
 ![tabanidae](images/tabanidae_render.jpg)
 
@@ -103,7 +169,7 @@ Blender 3.0 以降が対象で、Blender 5.0 で動作を確認しています�
 ## 使い方
 
 - 3D ビューポートで `N` キーを押し、サイドバーの **Insect Wing** タブを開きます。
-- `Insect` で **Diptera (flies)** を選ぶ場合は `Family` を、**Odonata / net-veined** を選ぶ場合は `Preset`（Dragonfly / Damselfly / Lacewing / Mayfly）を選び、**Generate Insect Wings** を押します。
+- `Insect` で **Diptera (flies)** を選ぶ場合は `Family` と `Method`（Developmental / Atlas）を、**Odonata / net-veined** を選ぶ場合は `Preset`（Dragonfly / Damselfly / Lacewing / Mayfly）を選び、**Generate Insect Wings** を押します。
 - `Wings` は Single Wing（1 枚）/ One Side（片側。トンボは前翅＋後翅、ハエは翅＋平均棍）/ Both Sides（左右対称）から選びます。
 - `Shift+A > Mesh > Insect Wings` からも生成できます。
 - 生成物は `InsectWings` コレクションに入ります。オブジェクト構成は Empty（全体）→ Empty（各翅）→ 翅膜メッシュ / 翅脈カーブ / 縁紋メッシュ（トンボ）・胸弁と平均棍（ハエ）です。
@@ -134,7 +200,8 @@ Blender 3.0 以降が対象で、Blender 5.0 で動作を確認しています�
 blender_insect_wing/
 ├── insect_wing_generator/      アドオン本体
 │   ├── __init__.py             UI・オペレーター・プロパティ
-│   ├── diptera.py              双翅目の脈相テンプレートと生成（bpy 非依存）
+│   ├── fly_dev.py              双翅目の発生モデル（numpy。Blender に同梱）
+│   ├── diptera.py              双翅目の Atlas モデル（脈相テンプレート、bpy 非依存）
 │   ├── venation.py             トンボ型の翅脈成長アルゴリズム（bpy 非依存の純 Python）
 │   └── builder.py              Blender のメッシュ・カーブ・マテリアル生成
 ├── insect_wing_generator.zip   インストール用 zip
@@ -142,4 +209,4 @@ blender_insect_wing/
 └── images/                     サンプル画像
 ```
 
-`venation.py` と `diptera.py` は Blender に依存しないので、`python3 tools/preview_svg.py --labels TABANIDAE` や `python3 tools/preview_svg.py DRAGONFLY_FORE` のように実行してパターンだけを確認できます（`--labels` を付けると脈の名前が入ります）。
+`venation.py`・`diptera.py`・`fly_dev.py` は Blender に依存しないので（`fly_dev.py` には numpy が必要。`python3 tools/preview_svg.py --labels DEV_TABANIDAE`）、`python3 tools/preview_svg.py --labels TABANIDAE` や `python3 tools/preview_svg.py DRAGONFLY_FORE` のように実行してパターンだけを確認できます（`--labels` を付けると脈の名前が入ります）。

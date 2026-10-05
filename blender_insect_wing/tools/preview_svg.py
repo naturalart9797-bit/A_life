@@ -1,7 +1,8 @@
 """Render venation patterns to SVG without Blender (for quick checks).
 
 usage: python3 preview_svg.py [NAME ...]   -> writes wing_<name>.svg
-NAME is a key of venation.PRESETS (Odonata model) or diptera.PRESETS.
+NAME is a key of venation.PRESETS (Odonata model), diptera.PRESETS (atlas
+fly model) or DEV_<family> for the developmental fly model (needs numpy).
 Pass --labels to annotate Diptera veins.
 """
 import os
@@ -11,6 +12,10 @@ import time
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "insect_wing_generator"))
 import venation  # noqa: E402
 import diptera  # noqa: E402
+try:
+    import fly_dev  # noqa: E402  (needs numpy)
+except ImportError:
+    fly_dev = None
 
 WIDTH = {"costa": 3.0, "subcosta": 2.2, "primary": 2.0, "intercalary": 1.3,
          "margin": 1.6, "cross": 0.8,
@@ -57,9 +62,18 @@ def to_svg(res, path, scale=900, labels=False):
     for v in res.veins:
         col = "#8a5a1c" if v.kind in ("sc", "r1", "costa", "radial") else "#2b2118"
         dash = ' stroke-dasharray="4,3"' if v.kind == "weak" else ""
-        out.append('<polyline points="%s" fill="none" stroke="%s" stroke-width="%.2f" '
-                   'stroke-linecap="round" stroke-linejoin="round"%s/>'
-                   % (" ".join(tr(p) for p in v.pts), col, WIDTH.get(v.kind, 1), dash))
+        radii = getattr(v, "radii", None)
+        if radii:
+            # variable calibre: draw segment by segment
+            for k in range(len(v.pts) - 1):
+                out.append('<line x1="%s" y1="%s" x2="%s" y2="%s" stroke="%s" '
+                           'stroke-width="%.2f" stroke-linecap="round"/>'
+                           % tuple(tr(v.pts[k]).split(",") + tr(v.pts[k + 1]).split(",")
+                                   + [col, 1.3 * radii[k]]))
+        else:
+            out.append('<polyline points="%s" fill="none" stroke="%s" stroke-width="%.2f" '
+                       'stroke-linecap="round" stroke-linejoin="round"%s/>'
+                       % (" ".join(tr(p) for p in v.pts), col, WIDTH.get(v.kind, 1), dash))
         name = getattr(v, "name", None)
         if labels and name and v.kind not in ("cross",):
             q = v.pts[len(v.pts) * 2 // 3]
@@ -80,7 +94,10 @@ if __name__ == "__main__":
         list(venation.PRESETS) + list(diptera.PRESETS)
     for name in names:
         t = time.time()
-        if name in diptera.PRESETS:
+        if name.startswith("DEV_"):
+            fam = name[4:]
+            res = fly_dev.generate(fly_dev.DevParams(family=fam, **fly_dev.PRESETS[fam]))
+        elif name in diptera.PRESETS:
             res = diptera.generate(diptera.FlyParams(family=name, **diptera.PRESETS[name]))
         else:
             res = venation.generate(venation.WingParams(**venation.PRESETS[name]))

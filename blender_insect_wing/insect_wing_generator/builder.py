@@ -8,6 +8,7 @@ from mathutils import Matrix, Vector
 from mathutils.geometry import delaunay_2d_cdt
 
 from . import diptera
+from . import fly_dev
 from . import venation
 
 
@@ -213,7 +214,12 @@ def build_veins(name, res, surf, mirror, thickness, mat, collection, parent,
     for v in res.veins:
         mult, taper = VEIN_WIDTH.get(v.kind, (0.5, 1.0))
         pts = v.pts
-        if v.kind != "cross":
+        radii = getattr(v, "radii", None)
+        if radii is not None:
+            # calibre from the developmental model (Murray's law)
+            if len(radii) != len(pts):
+                radii = None
+        elif v.kind != "cross":
             pts = venation._resample_polyline(pts, step)
         if len(pts) < 2:
             continue
@@ -222,7 +228,9 @@ def build_veins(name, res, surf, mirror, thickness, mat, collection, parent,
         n = len(pts)
         for i, q in enumerate(pts):
             t = i / (n - 1)
-            if v.kind == "margin" or v.kind == "cross":
+            if radii is not None:
+                r = 0.85 * radii[i] * (1.15 if v.kind in ("r1", "sc") else 1.0)
+            elif v.kind == "margin" or v.kind == "cross":
                 r = mult
             else:
                 r = mult * (1.0 - (1.0 - taper) * t)
@@ -325,8 +333,12 @@ def build_haltere(name, length, mirror, mat, collection, parent):
 
 
 def build_wing(label, params, settings, collection, parent, offset, mirror, mats):
-    is_fly = isinstance(params, diptera.FlyParams)
-    res = diptera.generate(params) if is_fly else venation.generate(params)
+    if isinstance(params, fly_dev.DevParams):
+        res = fly_dev.generate(params)
+    elif isinstance(params, diptera.FlyParams):
+        res = diptera.generate(params)
+    else:
+        res = venation.generate(params)
     surf = Surface(res.shape, settings.camber, settings.twist)
     root = bpy.data.objects.new(label, None)
     root.empty_display_size = params.length * 0.1
