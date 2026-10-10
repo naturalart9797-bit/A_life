@@ -1,0 +1,793 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Voxel Drip</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+JP:wght@300;400;500&display=swap');
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#07080c;--surface:#0e1018;--border:#1d2030;
+  --accent:#56c8e0;--accent2:#2f8aa0;--accent3:#9be4f2;
+  --red:#e05252;--warm:#e0a050;
+  --text:#d4e4ee;--text2:#6a8496;--text3:#2e3a4a;
+  --font-mono:'IBM Plex Mono',monospace;--font-ui:'IBM Plex Sans JP',sans-serif;
+}
+body{background:var(--bg);color:var(--text);font-family:var(--font-ui);height:100vh;display:flex;flex-direction:column;overflow:hidden;user-select:none;}
+header{display:flex;align-items:center;gap:12px;padding:8px 16px;border-bottom:1px solid var(--border);background:var(--surface);flex-shrink:0;}
+.back{font-family:var(--font-mono);font-size:11px;color:var(--text2);text-decoration:none;}
+.back:hover{color:var(--accent);}
+.logo{font-family:var(--font-mono);font-size:12px;font-weight:500;color:var(--accent);letter-spacing:.08em;text-transform:uppercase;}
+.logo span{color:var(--text3);}
+.stats{margin-left:auto;display:flex;gap:18px;}
+.stat{display:flex;flex-direction:column;align-items:flex-end;}
+.stat-label{font-family:var(--font-mono);font-size:8px;color:var(--text3);letter-spacing:.1em;text-transform:uppercase;}
+.stat-val{font-family:var(--font-mono);font-size:13px;font-weight:500;color:var(--text);line-height:1.2;}
+.rec-dot{width:8px;height:8px;border-radius:50%;background:var(--red);display:none;animation:blink 1s infinite;}
+.rec-dot.on{display:inline-block;}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.2}}
+.main{display:flex;flex:1;overflow:hidden;}
+.sidebar{width:248px;flex-shrink:0;background:var(--surface);border-right:1px solid var(--border);display:flex;flex-direction:column;overflow-y:auto;}
+.sidebar::-webkit-scrollbar{width:3px;}
+.sidebar::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px;}
+.sec{padding:11px 13px;border-bottom:1px solid var(--border);}
+.sec-title{font-family:var(--font-mono);font-size:8px;color:var(--text3);letter-spacing:.12em;text-transform:uppercase;margin-bottom:9px;}
+button,select{font-family:var(--font-mono);font-size:11px;font-weight:500;background:transparent;border:1px solid var(--border);color:var(--text2);padding:5px 8px;border-radius:3px;cursor:pointer;letter-spacing:.03em;transition:all .15s;white-space:nowrap;}
+select{width:100%;background:var(--surface);}
+button:hover{border-color:var(--accent2);color:var(--accent);background:rgba(86,200,224,.07);}
+button.on{border-color:var(--accent)!important;color:var(--accent)!important;background:rgba(86,200,224,.14)!important;}
+button.rec-btn{border-color:var(--red);color:var(--red);}
+button.rec-btn.recording{background:rgba(224,82,82,.15);}
+button:disabled{opacity:.35;cursor:default;}
+.row{display:flex;gap:5px;}
+.row>*{flex:1;}
+.sl-row{margin-bottom:8px;}
+.sl-head{display:flex;justify-content:space-between;margin-bottom:3px;}
+.sl-name{font-family:var(--font-mono);font-size:10px;color:var(--text2);}
+.sl-val{font-family:var(--font-mono);font-size:10px;color:var(--accent);}
+input[type=range]{-webkit-appearance:none;appearance:none;width:100%;height:2px;background:var(--border);border-radius:1px;outline:none;}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:11px;height:11px;background:var(--accent);border-radius:50%;cursor:pointer;}
+input[type=range]::-moz-range-thumb{width:11px;height:11px;background:var(--accent);border:none;border-radius:50%;cursor:pointer;}
+.chk{display:flex;align-items:center;gap:7px;font-family:var(--font-mono);font-size:10px;color:var(--text2);margin-bottom:6px;cursor:pointer;}
+.chk input{accent-color:var(--accent);}
+.hint{font-family:var(--font-mono);font-size:9px;color:var(--text3);line-height:1.7;margin-top:6px;}
+.view{flex:1;position:relative;overflow:hidden;background:#000;}
+#gl{display:block;width:100%;height:100%;cursor:grab;touch-action:none;}
+#gl:active{cursor:grabbing;}
+#fileInput{display:none;}
+.thumb{margin-top:7px;border-radius:3px;overflow:hidden;border:1px solid var(--border);}
+#thumb{width:100%;display:block;image-rendering:pixelated;}
+.drop-over{position:absolute;inset:0;border:2px dashed var(--accent);background:rgba(86,200,224,.06);display:none;align-items:center;justify-content:center;font-family:var(--font-mono);font-size:13px;color:var(--accent);pointer-events:none;z-index:5;}
+.drop-over.on{display:flex;}
+.toast{position:absolute;left:50%;bottom:18px;transform:translateX(-50%);font-family:var(--font-mono);font-size:11px;color:var(--text2);background:rgba(14,16,24,.85);border:1px solid var(--border);padding:6px 12px;border-radius:4px;pointer-events:none;opacity:0;transition:opacity .4s;}
+.toast.on{opacity:1;}
+@media (max-width:720px){
+  .main{flex-direction:column-reverse;}
+  .sidebar{width:100%;height:42vh;border-right:none;border-top:1px solid var(--border);}
+  .stats{gap:10px;}
+}
+</style>
+</head>
+<body>
+<header>
+  <a class="back" href="index.html">← 一覧</a>
+  <div class="logo">Voxel <span>·</span> Drip</div>
+  <span class="rec-dot" id="recDot"></span>
+  <div class="stats">
+    <div class="stat"><span class="stat-label">ボクセル</span><span class="stat-val" id="stRes">—</span></div>
+    <div class="stat"><span class="stat-label">しずく</span><span class="stat-val" id="stDrops">0</span></div>
+    <div class="stat"><span class="stat-label">fps</span><span class="stat-val" id="stFps">—</span></div>
+  </div>
+</header>
+
+<div class="main">
+  <div class="sidebar">
+    <div class="sec">
+      <div class="sec-title">ソース</div>
+      <div class="row" style="margin-bottom:5px;">
+        <button onclick="document.getElementById('fileInput').click()">動画/画像…</button>
+        <button id="btnCam" onclick="useCamera()">カメラ</button>
+        <button id="btnDemo" class="on" onclick="useDemo()">デモ</button>
+      </div>
+      <input type="file" id="fileInput" accept="video/*,image/*" onchange="loadFile(this.files[0]);this.value=''">
+      <div class="row">
+        <button id="btnPlay" onclick="togglePlay()">❚❚ 一時停止</button>
+        <button onclick="resetView()">視点リセット</button>
+      </div>
+      <div class="thumb"><canvas id="thumb"></canvas></div>
+      <div class="hint">動画・画像はドラッグ&ドロップでも読み込めます。処理はすべてブラウザ内で完結します。</div>
+    </div>
+
+    <div class="sec">
+      <div class="sec-title">ボクセル化</div>
+      <div class="sl-row"><div class="sl-head"><span class="sl-name">解像度（横）</span><span class="sl-val" id="vCols">80</span></div>
+        <input type="range" id="sCols" min="24" max="160" step="4" value="80"></div>
+      <div class="sl-row"><div class="sl-head"><span class="sl-name">奥行き（明るさ→厚み）</span><span class="sl-val" id="vDepth">3.0</span></div>
+        <input type="range" id="sDepth" min="0" max="12" step="0.5" value="3"></div>
+      <div class="sl-row"><div class="sl-head"><span class="sl-name">隙間</span><span class="sl-val" id="vGap">0.08</span></div>
+        <input type="range" id="sGap" min="0" max="0.5" step="0.02" value="0.08"></div>
+      <div class="sl-row"><div class="sl-head"><span class="sl-name">黒を抜く</span><span class="sl-val" id="vKey">0.05</span></div>
+        <input type="range" id="sKey" min="0" max="0.6" step="0.01" value="0.05"></div>
+      <label class="chk"><input type="checkbox" id="cInvert"> 暗い所を手前に出す</label>
+      <label class="chk"><input type="checkbox" id="cScreen" checked> 映像面を表示</label>
+    </div>
+
+    <div class="sec">
+      <div class="sec-title">しずく（落下）</div>
+      <div class="sl-row" style="margin-bottom:9px;">
+        <div class="sl-head"><span class="sl-name">どこから落ちるか</span></div>
+        <select id="selTrigger">
+          <option value="bright">明るい所</option>
+          <option value="dark">暗い所</option>
+          <option value="motion" selected>動いた所</option>
+          <option value="sat">鮮やかな色</option>
+          <option value="random">どこでも</option>
+        </select>
+      </div>
+      <div class="sl-row"><div class="sl-head"><span class="sl-name">量（個/秒）</span><span class="sl-val" id="vRate">240</span></div>
+        <input type="range" id="sRate" min="0" max="2000" step="10" value="240"></div>
+      <div class="sl-row"><div class="sl-head"><span class="sl-name">しきい値</span><span class="sl-val" id="vThr">0.20</span></div>
+        <input type="range" id="sThr" min="0" max="0.95" step="0.01" value="0.2"></div>
+      <div class="sl-row"><div class="sl-head"><span class="sl-name">重力</span><span class="sl-val" id="vGrav">70</span></div>
+        <input type="range" id="sGrav" min="5" max="250" step="5" value="70"></div>
+      <div class="sl-row"><div class="sl-head"><span class="sl-name">前への飛び出し</span><span class="sl-val" id="vSpread">5</span></div>
+        <input type="range" id="sSpread" min="0" max="30" step="1" value="5"></div>
+      <div class="sl-row"><div class="sl-head"><span class="sl-name">しずくの大きさ</span><span class="sl-val" id="vSize">0.90</span></div>
+        <input type="range" id="sSize" min="0.3" max="1.5" step="0.05" value="0.9"></div>
+      <label class="chk"><input type="checkbox" id="cHole" checked> 落ちた跡に穴をあける</label>
+      <label class="chk"><input type="checkbox" id="cWobble" checked> ぷるっと着地</label>
+    </div>
+
+    <div class="sec">
+      <div class="sec-title">床・積もり方</div>
+      <div class="sl-row"><div class="sl-head"><span class="sl-name">床までの高さ</span><span class="sl-val" id="vFloor">14</span></div>
+        <input type="range" id="sFloor" min="0" max="80" step="1" value="14"></div>
+      <div class="sl-row"><div class="sl-head"><span class="sl-name">寿命（秒, 0=ずっと）</span><span class="sl-val" id="vLife">25</span></div>
+        <input type="range" id="sLife" min="0" max="120" step="1" value="25"></div>
+      <div class="sl-row"><div class="sl-head"><span class="sl-name">崩れやすさ</span><span class="sl-val" id="vSlope">2</span></div>
+        <input type="range" id="sSlope" min="1" max="8" step="1" value="2"></div>
+      <div class="row">
+        <button onclick="drainFloor()">床を抜く</button>
+        <button onclick="clearDrops()">クリア</button>
+      </div>
+      <div class="hint">積もったボクセルは段差が「崩れやすさ」を超えると隣へ転がり落ちます。床の端からはこぼれ落ちます。</div>
+    </div>
+
+    <div class="sec">
+      <div class="sec-title">表示</div>
+      <label class="chk"><input type="checkbox" id="cShadow" checked> 影</label>
+      <label class="chk"><input type="checkbox" id="cAuto"> 自動で回り込む</label>
+      <div class="row">
+        <button onclick="setView('front')">正面</button>
+        <button onclick="setView('diag')">斜め</button>
+        <button onclick="setView('side')">横</button>
+      </div>
+    </div>
+
+    <div class="sec">
+      <div class="sec-title">録画</div>
+      <div class="row">
+        <button class="rec-btn" id="btnRec" onclick="toggleRecord()">● REC</button>
+        <button id="btnDl" onclick="downloadRec()" disabled>↓ DL</button>
+      </div>
+      <div class="hint">出力: WebM。 操作: ドラッグ=回転 / 右ドラッグ・Shift+ドラッグ=移動 / ホイール=ズーム / Space=一時停止</div>
+    </div>
+  </div>
+
+  <div class="view" id="view">
+    <canvas id="gl"></canvas>
+    <div class="drop-over" id="dropOver">ここにドロップ</div>
+    <div class="toast" id="toast"></div>
+  </div>
+</div>
+
+<video id="video" loop muted playsinline style="display:none"></video>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+// ─────────────────────────────────────────────
+//  PARAMS
+// ─────────────────────────────────────────────
+const P={
+  cols:80, depth:3, gap:0.08, key:0, invert:false, showScreen:true,
+  trigger:'motion', rate:240, thr:0.2, grav:70, spread:5, size:0.9, hole:true, wobble:true,
+  floor:14, life:25, slope:2, shadow:true, auto:false,
+};
+const MAX_DROPS=40000;
+
+function bindRange(id,key,outId,fmt,onChange){
+  const el=document.getElementById(id), out=document.getElementById(outId);
+  const f=fmt||(v=>v);
+  const apply=()=>{P[key]=parseFloat(el.value);out.textContent=f(P[key]);onChange&&onChange();};
+  el.addEventListener('input',apply); apply();
+}
+function bindCheck(id,key,onChange){
+  const el=document.getElementById(id);
+  const apply=()=>{P[key]=el.checked;onChange&&onChange();};
+  el.addEventListener('change',apply); apply();
+}
+const f2=v=>v.toFixed(2), f1=v=>v.toFixed(1);
+
+// ─────────────────────────────────────────────
+//  THREE SETUP
+// ─────────────────────────────────────────────
+const canvas=document.getElementById('gl');
+const view=document.getElementById('view');
+const renderer=new THREE.WebGLRenderer({canvas,antialias:true,preserveDrawingBuffer:true});
+renderer.setPixelRatio(Math.min(2,window.devicePixelRatio||1));
+renderer.shadowMap.enabled=true;
+renderer.shadowMap.type=THREE.PCFSoftShadowMap;
+renderer.setClearColor(0x05060a);
+
+const scene=new THREE.Scene();
+scene.fog=new THREE.Fog(0x05060a,160,420);
+const camera=new THREE.PerspectiveCamera(42,1,0.5,2000);
+
+scene.add(new THREE.HemisphereLight(0xdfeaff,0x202028,0.85));
+const sun=new THREE.DirectionalLight(0xffffff,0.75);
+sun.castShadow=true;
+sun.shadow.mapSize.set(2048,2048);
+sun.shadow.bias=-0.0008;
+scene.add(sun); scene.add(sun.target);
+
+const boxGeo=new THREE.BoxGeometry(1,1,1);
+const screenMat=new THREE.MeshStandardMaterial({roughness:0.55,metalness:0.0});
+const dropMat=new THREE.MeshStandardMaterial({roughness:0.45,metalness:0.0});
+
+let screenMesh=null, floorMesh=null, rimMesh=null;
+const dropMesh=new THREE.InstancedMesh(boxGeo,dropMat,MAX_DROPS);
+dropMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+dropMesh.setColorAt(0,new THREE.Color());
+dropMesh.instanceColor.setUsage(THREE.DynamicDrawUsage);
+dropMesh.castShadow=true; dropMesh.receiveShadow=true;
+dropMesh.frustumCulled=false;
+dropMesh.count=0;
+scene.add(dropMesh);
+
+// ─────────────────────────────────────────────
+//  SOURCE (video / camera / image / demo)
+// ─────────────────────────────────────────────
+const video=document.getElementById('video');
+const demoCv=document.createElement('canvas'); demoCv.width=320; demoCv.height=180;
+const demoCtx=demoCv.getContext('2d');
+let srcKind='demo', srcEl=demoCv, srcImage=null, camStream=null;
+let paused=false;
+
+function srcSize(){
+  if(srcKind==='video'||srcKind==='camera') return [video.videoWidth||16,video.videoHeight||9];
+  if(srcKind==='image') return [srcImage.naturalWidth,srcImage.naturalHeight];
+  return [demoCv.width,demoCv.height];
+}
+function setSourceButtons(){
+  document.getElementById('btnDemo').classList.toggle('on',srcKind==='demo');
+  document.getElementById('btnCam').classList.toggle('on',srcKind==='camera');
+}
+function stopCamera(){ if(camStream){camStream.getTracks().forEach(t=>t.stop());camStream=null;} }
+
+function useDemo(){
+  stopCamera(); video.pause();
+  srcKind='demo'; srcEl=demoCv; setSourceButtons(); rebuild();
+  toast('デモ映像');
+}
+async function useCamera(){
+  try{
+    stopCamera();
+    camStream=await navigator.mediaDevices.getUserMedia({video:{width:640,height:360},audio:false});
+    video.srcObject=camStream;
+    await video.play();
+    srcKind='camera'; srcEl=video; setSourceButtons(); rebuild();
+    toast('カメラ');
+  }catch(e){ toast('カメラを使えませんでした'); }
+}
+function loadFile(file){
+  if(!file) return;
+  const url=URL.createObjectURL(file);
+  if(file.type.startsWith('image/')){
+    const img=new Image();
+    img.onload=()=>{stopCamera();video.pause();srcImage=img;srcKind='image';srcEl=img;setSourceButtons();rebuild();toast(file.name);};
+    img.src=url; return;
+  }
+  stopCamera();
+  video.srcObject=null; video.src=url; video.load();
+  video.onloadeddata=()=>{
+    srcKind='video'; srcEl=video; setSourceButtons();
+    if(!paused) video.play().catch(()=>{});
+    rebuild(); toast(file.name);
+  };
+}
+function togglePlay(){
+  paused=!paused;
+  document.getElementById('btnPlay').textContent=paused?'▶ 再生':'❚❚ 一時停止';
+  if(srcKind==='video'){ paused?video.pause():video.play().catch(()=>{}); }
+}
+
+// drag & drop
+['dragenter','dragover'].forEach(ev=>view.addEventListener(ev,e=>{e.preventDefault();document.getElementById('dropOver').classList.add('on');}));
+['dragleave','drop'].forEach(ev=>view.addEventListener(ev,e=>{e.preventDefault();document.getElementById('dropOver').classList.remove('on');}));
+view.addEventListener('drop',e=>{const f=e.dataTransfer.files[0]; if(f) loadFile(f);});
+
+// procedural demo: drifting colour blobs + a bouncing word
+let demoT=0;
+function drawDemo(dt){
+  demoT+=dt;
+  const t=demoT, w=demoCv.width, h=demoCv.height, c=demoCtx;
+  c.fillStyle='#06070c'; c.fillRect(0,0,w,h);
+  c.globalCompositeOperation='lighter';
+  const blobs=[[0xff5a7a,0.7,0.0],[0x56c8e0,0.9,1.7],[0xe0c050,0.5,3.1],[0x7c8aff,1.1,4.4],[0x5fd99a,0.8,5.6]];
+  blobs.forEach(([col,sp,ph],i)=>{
+    const x=w*(0.5+0.38*Math.sin(t*sp*0.6+ph)), y=h*(0.5+0.34*Math.sin(t*sp*0.83+ph*1.7));
+    const r=h*(0.22+0.07*Math.sin(t*1.3+i));
+    const g=c.createRadialGradient(x,y,0,x,y,r);
+    const rr=(col>>16)&255, gg=(col>>8)&255, bb=col&255;
+    g.addColorStop(0,`rgba(${rr},${gg},${bb},1)`); g.addColorStop(1,`rgba(${rr},${gg},${bb},0)`);
+    c.fillStyle=g; c.beginPath(); c.arc(x,y,r,0,Math.PI*2); c.fill();
+  });
+  c.globalCompositeOperation='source-over';
+  c.font='bold 54px "IBM Plex Mono",monospace'; c.textAlign='center'; c.textBaseline='middle';
+  c.fillStyle='#ffffff';
+  c.fillText('DRIP',w/2+Math.sin(t*0.9)*60,h/2+Math.abs(Math.sin(t*1.8))*-40+20);
+}
+
+// ─────────────────────────────────────────────
+//  GRID / SCENE BUILD
+// ─────────────────────────────────────────────
+let COLS=80, ROWS=45, N=0;
+let sampleCv=document.createElement('canvas'), sampleCtx=sampleCv.getContext('2d',{willReadFrequently:true});
+let L=null, prevL=null, R=null, G=null, B=null, hole=null, weight=null;
+// pile height-field
+const MARGIN=6;
+let GX=0, GZ=0, Z0=0, H=null, stacks=null;
+
+function rebuild(){
+  const [sw,sh]=srcSize();
+  COLS=P.cols;
+  ROWS=Math.max(4,Math.min(140,Math.round(COLS*sh/Math.max(1,sw))));
+  N=COLS*ROWS;
+  sampleCv.width=COLS; sampleCv.height=ROWS;
+  L=new Float32Array(N); prevL=new Float32Array(N); R=new Float32Array(N); G=new Float32Array(N); B=new Float32Array(N);
+  hole=new Float32Array(N); weight=new Float32Array(N);
+
+  if(screenMesh){scene.remove(screenMesh);if(screenMesh.dispose)screenMesh.dispose();}
+  screenMesh=new THREE.InstancedMesh(boxGeo,screenMat,N);
+  screenMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+  screenMesh.setColorAt(0,new THREE.Color());
+  screenMesh.instanceColor.setUsage(THREE.DynamicDrawUsage);
+  screenMesh.castShadow=true; screenMesh.receiveShadow=true;
+  screenMesh.frustumCulled=false;
+  screenMesh.visible=P.showScreen;
+  scene.add(screenMesh);
+
+  // pile area: a bit wider than the screen, extending forward
+  GX=COLS+MARGIN*2;
+  GZ=Math.max(24,Math.round(Math.max(COLS,ROWS)*0.55));
+  Z0=-4;
+  H=new Int16Array(GX*GZ);
+  stacks=new Array(GX*GZ); for(let i=0;i<stacks.length;i++) stacks[i]=[];
+  clearDrops();
+
+  if(floorMesh){scene.remove(floorMesh);floorMesh.geometry.dispose();}
+  floorMesh=new THREE.Mesh(new THREE.BoxGeometry(GX,1,GZ),new THREE.MeshStandardMaterial({color:0x14161f,roughness:0.9}));
+  floorMesh.position.set(0,-0.5,Z0+GZ/2);
+  floorMesh.receiveShadow=true;
+  scene.add(floorMesh);
+  if(rimMesh){scene.remove(rimMesh);rimMesh.geometry.dispose();}
+  rimMesh=new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry(GX,1,GZ)),new THREE.LineBasicMaterial({color:0x2a3346}));
+  rimMesh.position.copy(floorMesh.position);
+  scene.add(rimMesh);
+
+  updateShadowCam();
+  document.getElementById('stRes').textContent=COLS+'×'+ROWS;
+  const tc=document.getElementById('thumb'); tc.width=COLS; tc.height=ROWS;
+  resetView();
+}
+
+function updateShadowCam(){
+  const top=P.floor+ROWS;
+  const ext=Math.max(GX,GZ,top)*0.75+10;
+  sun.position.set(-GX*0.6,top+60,GZ+60);
+  sun.target.position.set(0,top*0.35,Z0+GZ*0.4);
+  const sc=sun.shadow.camera;
+  sc.left=-ext; sc.right=ext; sc.top=ext; sc.bottom=-ext; sc.near=1; sc.far=top+GZ+300;
+  sc.updateProjectionMatrix();
+}
+
+// ─────────────────────────────────────────────
+//  DROPS (pooled)
+// ─────────────────────────────────────────────
+const px=new Float32Array(MAX_DROPS), py=new Float32Array(MAX_DROPS), pz=new Float32Array(MAX_DROPS);
+const vx=new Float32Array(MAX_DROPS), vy=new Float32Array(MAX_DROPS), vz=new Float32Array(MAX_DROPS);
+const cr=new Float32Array(MAX_DROPS), cg=new Float32Array(MAX_DROPS), cb=new Float32Array(MAX_DROPS);
+const sz=new Float32Array(MAX_DROPS);
+const st=new Uint8Array(MAX_DROPS);          // 0 dead, 1 falling, 2 landed, 3 melting
+const landT=new Float64Array(MAX_DROPS);
+const cell=new Int32Array(MAX_DROPS);
+let freeList=[], landQ=[], landQHead=0, liveCount=0;
+let simT=0, drainUntil=0;
+
+function clearDrops(){
+  st.fill(0); freeList=[]; for(let i=MAX_DROPS-1;i>=0;i--) freeList.push(i);
+  landQ=[]; landQHead=0; liveCount=0;
+  if(H){H.fill(0); for(const s of stacks) s.length=0;}
+}
+
+function cellOf(x,z){
+  const cx=Math.floor(x+GX/2), cz=Math.floor(z-Z0);
+  if(cx<0||cx>=GX||cz<0||cz>=GZ) return -1;
+  return cz*GX+cx;
+}
+function cellCenter(c){ return [ (c%GX)-GX/2+0.5, Math.floor(c/GX)+Z0+0.5 ]; }
+
+// take a voxel out of its stack; everything resting on it starts falling again
+function unstack(id){
+  const c=cell[id]; if(c<0) return;
+  const s=stacks[c], k=s.indexOf(id);
+  if(k>=0){
+    for(let j=k+1;j<s.length;j++){ const o=s[j]; st[o]=1; vy[o]=0; vx[o]=0; vz[o]=0; cell[o]=-1; }
+    s.length=k; H[c]=k;
+  }
+  cell[id]=-1;
+}
+function kill(id){
+  if(st[id]===0) return;
+  if(st[id]>=2) unstack(id);
+  st[id]=0; freeList.push(id); liveCount--;
+}
+function allocDrop(){
+  if(freeList.length) return freeList.pop();
+  // pool full: recycle the oldest resting voxel
+  while(landQHead<landQ.length){
+    const e=landQ[landQHead++];
+    if(st[e.id]>=2 && landT[e.id]===e.t){ kill(e.id); return freeList.pop(); }
+  }
+  return -1;
+}
+function spawn(x,y,z,r,g,b){
+  const id=allocDrop(); if(id<0) return;
+  px[id]=x; py[id]=y; pz[id]=z;
+  vx[id]=(Math.random()-0.5)*0.8;
+  vy[id]=-Math.random()*1.5;
+  vz[id]=P.spread*(0.25+Math.random()*0.75)+0.3;
+  cr[id]=r; cg[id]=g; cb[id]=b;
+  sz[id]=P.size*(0.85+Math.random()*0.3);
+  st[id]=1; cell[id]=-1; liveCount++;
+}
+
+function stepDrops(dt){
+  const g=P.grav, slope=P.slope, draining=simT<drainUntil;
+  const melt=0.5;
+  for(let id=0;id<MAX_DROPS;id++){
+    const s=st[id]; if(s===0) continue;
+    if(s>=2){
+      if(draining){ unstack(id); st[id]=1; vy[id]=0; continue; }
+      if(s===2 && P.life>0 && simT-landT[id]>P.life){ st[id]=3; landT[id]=simT; continue; }
+      if(s===3 && simT-landT[id]>melt) kill(id);
+      continue;
+    }
+    // falling
+    const ox=px[id], oy=py[id], oz=pz[id];
+    vy[id]-=g*dt;
+    const drag=Math.exp(-1.2*dt);
+    vx[id]*=drag; vz[id]*=drag;
+    px[id]+=vx[id]*dt; py[id]+=vy[id]*dt; pz[id]+=vz[id]*dt;
+    if(draining){ if(py[id]<-120) kill(id); continue; }
+
+    let c=cellOf(px[id],pz[id]);
+    if(c<0){ if(py[id]<-120) kill(id); continue; }
+    let top=H[c]+0.5;
+    if(py[id]>top) continue;
+    // came in sideways below the top of a column → bump off the wall
+    if(oy<top-0.6){
+      px[id]=ox; pz[id]=oz; vx[id]*=-0.3; vz[id]*=-0.3;
+      continue;
+    }
+    // landed: roll downhill while a neighbour is lower by more than `slope`
+    for(let guard=0;guard<64;guard++){
+      const cx=c%GX, cz=(c/GX)|0, h=H[c];
+      let best=-1, bh=h;
+      const nb=[[1,0],[-1,0],[0,1],[0,-1]];
+      for(let k=0;k<4;k++){
+        const j=(k+((Math.random()*4)|0))%4;
+        const nx=cx+nb[j][0], nz=cz+nb[j][1];
+        const nh=(nx<0||nx>=GX||nz<0||nz>=GZ)?-1:H[nz*GX+nx];
+        if(nh<=h-slope && nh<bh){ bh=nh; best=j; }
+      }
+      if(best<0) break;
+      const nx=cx+nb[best][0], nz=cz+nb[best][1];
+      if(nx<0||nx>=GX||nz<0||nz>=GZ){
+        // tipped over the edge: fall into the void
+        px[id]=nx-GX/2+0.5; pz[id]=nz+Z0+0.5;
+        vx[id]=nb[best][0]*3; vz[id]=nb[best][1]*3; vy[id]=0; c=-1; break;
+      }
+      c=nz*GX+nx;
+    }
+    if(c<0) continue;
+    const [ccx,ccz]=cellCenter(c);
+    px[id]=ccx; pz[id]=ccz; py[id]=H[c]+0.5;
+    vx[id]=vy[id]=vz[id]=0;
+    stacks[c].push(id); H[c]++;
+    cell[id]=c; st[id]=2; landT[id]=simT;
+    landQ.push({id,t:simT});
+  }
+  if(landQHead>20000){ landQ=landQ.slice(landQHead); landQHead=0; }
+}
+
+function drainFloor(){ drainUntil=simT+2.5; toast('床が抜けた！'); }
+
+// ─────────────────────────────────────────────
+//  SAMPLE + SCREEN + SPAWN
+// ─────────────────────────────────────────────
+const thumbCtx=document.getElementById('thumb').getContext('2d');
+
+function sampleSource(){
+  if(srcKind==='video'||srcKind==='camera'){ if(video.readyState<2) return false; }
+  sampleCtx.save();
+  if(srcKind==='camera'){ sampleCtx.translate(COLS,0); sampleCtx.scale(-1,1); }
+  sampleCtx.drawImage(srcEl,0,0,COLS,ROWS);
+  sampleCtx.restore();
+  const d=sampleCtx.getImageData(0,0,COLS,ROWS).data;
+  thumbCtx.drawImage(sampleCv,0,0);
+  const tmp=prevL; prevL=L; L=tmp;
+  for(let i=0,j=0;i<N;i++,j+=4){
+    const r=d[j]/255, g=d[j+1]/255, b=d[j+2]/255;
+    R[i]=r; G[i]=g; B[i]=b;
+    L[i]=0.299*r+0.587*g+0.114*b;
+  }
+  return true;
+}
+
+function updateScreen(dt,spawnBudget){
+  const m=screenMesh.instanceMatrix.array, ca=screenMesh.instanceColor.array;
+  const s=1-P.gap, base=P.floor, key=P.key, depth=P.depth;
+  const trig=P.trigger, thr=P.thr;
+  let wsum=0;
+  for(let i=0;i<N;i++){
+    const col=i%COLS, row=(i/COLS)|0;
+    const lum=L[i];
+    const vis=lum>=key;
+    if(hole[i]>0) hole[i]=Math.max(0,hole[i]-dt*1.2);
+    const k=vis?(1-hole[i]*0.92):0;
+    const dv=P.invert?1-lum:lum;
+    const d=(0.25+dv*depth)*k;
+    const sxy=s*k;
+    const o=i*16;
+    m[o]=sxy; m[o+1]=0; m[o+2]=0; m[o+3]=0;
+    m[o+4]=0; m[o+5]=sxy; m[o+6]=0; m[o+7]=0;
+    m[o+8]=0; m[o+9]=0; m[o+10]=Math.max(0.0001,d); m[o+11]=0;
+    m[o+12]=col-COLS/2+0.5; m[o+13]=base+(ROWS-row-0.5); m[o+14]=d*0.5; m[o+15]=1;
+    ca[i*3]=R[i]; ca[i*3+1]=G[i]; ca[i*3+2]=B[i];
+
+    // spawn weight
+    let w=0;
+    if(vis && hole[i]<0.3){
+      let v;
+      if(trig==='bright') v=lum;
+      else if(trig==='dark') v=1-lum;
+      else if(trig==='motion') v=Math.min(1,Math.abs(lum-prevL[i])*6);
+      else if(trig==='sat'){ const mx=Math.max(R[i],G[i],B[i]), mn=Math.min(R[i],G[i],B[i]); v=mx>0?(mx-mn)/mx*mx:0; }
+      else v=1;
+      w=v>thr?(v-thr)/(1-thr+1e-6):0;
+    }
+    weight[i]=w; wsum+=w;
+  }
+  screenMesh.instanceMatrix.needsUpdate=true;
+  screenMesh.instanceColor.needsUpdate=true;
+
+  if(spawnBudget<=0||wsum<=0) return;
+  const scale=spawnBudget/wsum;
+  for(let i=0;i<N;i++){
+    const w=weight[i]; if(w<=0) continue;
+    if(Math.random()<w*scale){
+      const col=i%COLS, row=(i/COLS)|0;
+      const dv=P.invert?1-L[i]:L[i];
+      const d=0.25+dv*P.depth;
+      spawn(col-COLS/2+0.5, P.floor+(ROWS-row-0.5)-0.3, d*0.5+0.2, R[i],G[i],B[i]);
+      if(P.hole) hole[i]=1;
+    }
+  }
+}
+
+function renderDrops(){
+  const m=dropMesh.instanceMatrix.array, ca=dropMesh.instanceColor.array;
+  let n=0;
+  for(let id=0;id<MAX_DROPS;id++){
+    const s=st[id]; if(s===0) continue;
+    let size=sz[id], sx=size, sy=size, szz=size, yoff=0;
+    if(s===1){
+      // stretch along the fall direction like a drip
+      const st2=Math.min(0.7,Math.abs(vy[id])*0.012);
+      sy=size*(1+st2); sx=szz=size*(1-st2*0.35);
+    }else{
+      // landing wobble / melting
+      const t=simT-landT[id];
+      if(s===2 && P.wobble && t<0.6){
+        const q=Math.exp(-t*9)*Math.cos(t*28)*0.45;
+        sy=size*(1-q); sx=szz=size*(1+q*0.5);
+      }else if(s===3){
+        const k=Math.max(0,1-t/0.5);
+        sy=size*k; sx=szz=size*(0.6+0.4*k);
+      }
+      yoff=(sy-1)*0.5; // keep the bottom on the stack
+    }
+    const o=n*16;
+    m[o]=sx; m[o+1]=0; m[o+2]=0; m[o+3]=0;
+    m[o+4]=0; m[o+5]=sy; m[o+6]=0; m[o+7]=0;
+    m[o+8]=0; m[o+9]=0; m[o+10]=szz; m[o+11]=0;
+    m[o+12]=px[id]; m[o+13]=py[id]+yoff; m[o+14]=pz[id]; m[o+15]=1;
+    ca[n*3]=cr[id]; ca[n*3+1]=cg[id]; ca[n*3+2]=cb[id];
+    n++;
+  }
+  dropMesh.count=n;
+  dropMesh.instanceMatrix.needsUpdate=true;
+  dropMesh.instanceColor.needsUpdate=true;
+}
+
+// ─────────────────────────────────────────────
+//  CAMERA (orbit)
+// ─────────────────────────────────────────────
+const sph={theta:0.5,phi:1.2,radius:120};
+const target=new THREE.Vector3();
+let autoT=0;
+function updateCamera(){
+  let th=sph.theta;
+  if(P.auto) th+=Math.sin(autoT*0.25)*0.7;
+  camera.position.set(
+    target.x+sph.radius*Math.sin(sph.phi)*Math.sin(th),
+    target.y+sph.radius*Math.cos(sph.phi),
+    target.z+sph.radius*Math.sin(sph.phi)*Math.cos(th));
+  camera.lookAt(target);
+}
+function fitRadius(){
+  const span=Math.max(COLS*0.62,(P.floor+ROWS)*1.05);
+  return span/Math.tan(THREE.MathUtils.degToRad(camera.fov*0.5))*0.62+GZ*0.3;
+}
+function resetView(){ setView('diag'); }
+function setView(kind){
+  target.set(0,(P.floor+ROWS)*0.45,Z0+GZ*0.3);
+  sph.radius=fitRadius();
+  if(kind==='front'){sph.theta=0;sph.phi=1.5;}
+  else if(kind==='side'){sph.theta=1.45;sph.phi=1.42;}
+  else {sph.theta=0.55;sph.phi=1.22;}
+  updateCamera();
+}
+
+let drag=null;
+canvas.addEventListener('contextmenu',e=>e.preventDefault());
+canvas.addEventListener('pointerdown',e=>{
+  canvas.setPointerCapture(e.pointerId);
+  drag={x:e.clientX,y:e.clientY,pan:e.button===2||e.shiftKey,id:e.pointerId};
+});
+canvas.addEventListener('pointerup',()=>drag=null);
+canvas.addEventListener('pointercancel',()=>drag=null);
+canvas.addEventListener('pointermove',e=>{
+  if(!drag||pinch) return;
+  const dx=e.clientX-drag.x, dy=e.clientY-drag.y;
+  drag.x=e.clientX; drag.y=e.clientY;
+  if(drag.pan){
+    const k=sph.radius*0.0016;
+    const right=new THREE.Vector3().setFromMatrixColumn(camera.matrix,0);
+    const up=new THREE.Vector3().setFromMatrixColumn(camera.matrix,1);
+    target.addScaledVector(right,-dx*k).addScaledVector(up,dy*k);
+  }else{
+    sph.theta-=dx*0.007;
+    sph.phi=Math.max(0.12,Math.min(Math.PI-0.12,sph.phi-dy*0.007));
+  }
+  updateCamera();
+});
+canvas.addEventListener('wheel',e=>{
+  e.preventDefault();
+  sph.radius=Math.max(10,Math.min(900,sph.radius*Math.exp(e.deltaY*0.001)));
+  updateCamera();
+},{passive:false});
+let pinch=null;
+canvas.addEventListener('touchstart',e=>{
+  if(e.touches.length===2) pinch=Math.hypot(e.touches[0].clientX-e.touches[1].clientX,e.touches[0].clientY-e.touches[1].clientY);
+},{passive:true});
+canvas.addEventListener('touchmove',e=>{
+  if(e.touches.length===2&&pinch){
+    const d=Math.hypot(e.touches[0].clientX-e.touches[1].clientX,e.touches[0].clientY-e.touches[1].clientY);
+    sph.radius=Math.max(10,Math.min(900,sph.radius*pinch/d)); pinch=d; updateCamera();
+  }
+},{passive:true});
+canvas.addEventListener('touchend',e=>{ if(e.touches.length<2) pinch=null; },{passive:true});
+
+function resize(){
+  const w=view.clientWidth, h=view.clientHeight;
+  renderer.setSize(w,h,false);
+  camera.aspect=w/Math.max(1,h); camera.updateProjectionMatrix();
+}
+window.addEventListener('resize',resize);
+
+// ─────────────────────────────────────────────
+//  RECORDING
+// ─────────────────────────────────────────────
+let recorder=null, recChunks=[], recBlob=null;
+function toggleRecord(){
+  const btn=document.getElementById('btnRec');
+  if(recorder){ recorder.stop(); return; }
+  if(!canvas.captureStream||!window.MediaRecorder){ toast('このブラウザは録画に未対応です'); return; }
+  const stream=canvas.captureStream(30);
+  let opts={mimeType:'video/webm;codecs=vp9',videoBitsPerSecond:10e6};
+  if(!MediaRecorder.isTypeSupported(opts.mimeType)) opts={mimeType:'video/webm',videoBitsPerSecond:10e6};
+  recChunks=[];
+  try{ recorder=new MediaRecorder(stream,opts); }catch(e){ toast('録画を開始できませんでした'); return; }
+  recorder.ondataavailable=e=>{ if(e.data.size) recChunks.push(e.data); };
+  recorder.onstop=()=>{
+    recBlob=new Blob(recChunks,{type:'video/webm'}); recorder=null;
+    btn.textContent='● REC'; btn.classList.remove('recording');
+    document.getElementById('recDot').classList.remove('on');
+    document.getElementById('btnDl').disabled=false;
+    toast('録画完了 — ↓ DL で保存');
+  };
+  recorder.start(200);
+  btn.textContent='■ STOP'; btn.classList.add('recording');
+  document.getElementById('recDot').classList.add('on');
+}
+function downloadRec(){
+  if(!recBlob) return;
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(recBlob); a.download='voxel_drip_'+Date.now()+'.webm'; a.click();
+}
+
+// ─────────────────────────────────────────────
+//  UI WIRING
+// ─────────────────────────────────────────────
+let toastTimer=0;
+function toast(msg){
+  const t=document.getElementById('toast'); t.textContent=msg; t.classList.add('on');
+  clearTimeout(toastTimer); toastTimer=setTimeout(()=>t.classList.remove('on'),1800);
+}
+let colsTimer=0;
+bindRange('sCols','cols','vCols',null,()=>{ clearTimeout(colsTimer); if(L) colsTimer=setTimeout(rebuild,180); });
+bindRange('sDepth','depth','vDepth',f1);
+bindRange('sGap','gap','vGap',f2);
+bindRange('sKey','key','vKey',f2);
+bindCheck('cInvert','invert');
+bindCheck('cScreen','showScreen',()=>{ if(screenMesh) screenMesh.visible=P.showScreen; });
+document.getElementById('selTrigger').addEventListener('change',e=>P.trigger=e.target.value);
+P.trigger=document.getElementById('selTrigger').value;
+bindRange('sRate','rate','vRate');
+bindRange('sThr','thr','vThr',f2);
+bindRange('sGrav','grav','vGrav');
+bindRange('sSpread','spread','vSpread');
+bindRange('sSize','size','vSize',f2);
+bindCheck('cHole','hole');
+bindCheck('cWobble','wobble');
+bindRange('sFloor','floor','vFloor',null,()=>{ if(L){ clearDrops(); updateShadowCam(); } });
+bindRange('sLife','life','vLife');
+bindRange('sSlope','slope','vSlope');
+bindCheck('cShadow','shadow',()=>{ sun.castShadow=P.shadow; });
+bindCheck('cAuto','auto');
+
+document.addEventListener('keydown',e=>{
+  if(e.code==='Space' && e.target.tagName!=='INPUT' && e.target.tagName!=='SELECT'){ e.preventDefault(); togglePlay(); }
+});
+
+// ─────────────────────────────────────────────
+//  LOOP
+// ─────────────────────────────────────────────
+let last=performance.now(), fpsAcc=0, fpsN=0;
+function frame(now){
+  requestAnimationFrame(frame);
+  const dt=Math.min(1/30,(now-last)/1000); last=now;
+  fpsAcc+=dt; fpsN++;
+  if(fpsAcc>0.5){ document.getElementById('stFps').textContent=Math.round(fpsN/fpsAcc); document.getElementById('stDrops').textContent=liveCount.toLocaleString(); fpsAcc=0; fpsN=0; }
+
+  if(!paused){
+    simT+=dt;
+    if(srcKind==='demo') drawDemo(dt);
+    const fresh=sampleSource();
+    if(fresh||srcKind==='image') updateScreen(dt,P.rate*dt);
+    stepDrops(dt);
+  }
+  if(P.auto){ autoT+=dt; updateCamera(); }
+  renderDrops();
+  renderer.render(scene,camera);
+}
+
+resize();
+rebuild();
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
