@@ -100,6 +100,36 @@ input[type=range]::-moz-range-thumb{width:11px;height:11px;background:var(--acce
     </div>
 
     <div class="sec">
+      <div class="sec-title">形・素材</div>
+      <div class="sl-row" style="margin-bottom:9px;">
+        <div class="sl-head"><span class="sl-name">形</span></div>
+        <select id="selShape">
+          <option value="box">キューブ</option>
+          <option value="round">角丸キューブ</option>
+          <option value="lego">おもちゃブロック</option>
+          <option value="tsumiki">積み木セット</option>
+          <option value="toybox">おもちゃ箱（いろいろ）</option>
+          <option value="ball">ボール</option>
+          <option value="cyl">円柱</option>
+          <option value="star">星</option>
+          <option value="heart">ハート</option>
+        </select>
+      </div>
+      <div class="sl-row" style="margin-bottom:9px;">
+        <div class="sl-head"><span class="sl-name">色</span></div>
+        <select id="selColor">
+          <option value="video">映像の色そのまま</option>
+          <option value="toy">おもちゃの原色</option>
+          <option value="wood">木の積み木（木目＋塗り）</option>
+        </select>
+      </div>
+      <div class="sl-row"><div class="sl-head"><span class="sl-name">落下中の回転</span><span class="sl-val" id="vTumble">1.0</span></div>
+        <input type="range" id="sTumble" min="0" max="3" step="0.1" value="1"></div>
+      <label class="chk"><input type="checkbox" id="cScreenSame" checked> 映像面も同じ形で組む</label>
+      <div class="hint">形を選ぶと色もおすすめに切り替わります（あとから変更可）。</div>
+    </div>
+
+    <div class="sec">
       <div class="sec-title">ボクセル化</div>
       <div class="sl-row"><div class="sl-head"><span class="sl-name">解像度（横）</span><span class="sl-val" id="vCols">80</span></div>
         <input type="range" id="sCols" min="24" max="160" step="4" value="80"></div>
@@ -193,6 +223,7 @@ const P={
   cols:80, depth:3, gap:0.08, key:0, invert:false, showScreen:true,
   trigger:'motion', rate:240, thr:0.2, grav:70, spread:5, size:0.9, hole:true, wobble:true,
   floor:14, life:25, slope:2, shadow:true, auto:false,
+  shape:'box', colorMode:'video', tumble:1, screenSame:true,
 };
 const MAX_DROPS=40000;
 
@@ -231,19 +262,171 @@ sun.shadow.mapSize.set(2048,2048);
 sun.shadow.bias=-0.0008;
 scene.add(sun); scene.add(sun.target);
 
-const boxGeo=new THREE.BoxGeometry(1,1,1);
 const screenMat=new THREE.MeshStandardMaterial({roughness:0.55,metalness:0.0});
 const dropMat=new THREE.MeshStandardMaterial({roughness:0.45,metalness:0.0});
+let floorMesh=null, rimMesh=null;
 
-let screenMesh=null, floorMesh=null, rimMesh=null;
-const dropMesh=new THREE.InstancedMesh(boxGeo,dropMat,MAX_DROPS);
-dropMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-dropMesh.setColorAt(0,new THREE.Color());
-dropMesh.instanceColor.setUsage(THREE.DynamicDrawUsage);
-dropMesh.castShadow=true; dropMesh.receiveShadow=true;
-dropMesh.frustumCulled=false;
-dropMesh.count=0;
-scene.add(dropMesh);
+// ─────────────────────────────────────────────
+//  SHAPES — every piece fits in a unit cell; "up" shapes have a top (+y)
+//  that is turned toward the camera when used on the video wall
+// ─────────────────────────────────────────────
+function mergeGeos(list){
+  const pos=[], nor=[];
+  for(let g of list){
+    if(g.index) g=g.toNonIndexed();
+    pos.push(...g.attributes.position.array); nor.push(...g.attributes.normal.array);
+  }
+  const out=new THREE.BufferGeometry();
+  out.setAttribute('position',new THREE.Float32BufferAttribute(pos,3));
+  out.setAttribute('normal',new THREE.Float32BufferAttribute(nor,3));
+  return out;
+}
+// box whose edges are rounded with radius r (grid clustered toward the edges)
+function roundedBox(r,seg){
+  const g=new THREE.BoxGeometry(1,1,1,seg,seg,seg);
+  const p=g.attributes.position, n=g.attributes.normal, h=0.5-r;
+  const remap=c=>{ const a=Math.abs(c)/0.5, sg=Math.sign(c); return sg*(a<=0.5?a*2*h:h+(a-0.5)*2*r); };
+  for(let i=0;i<p.count;i++){
+    const x=remap(p.getX(i)), y=remap(p.getY(i)), z=remap(p.getZ(i));
+    const cx=Math.max(-h,Math.min(h,x)), cy=Math.max(-h,Math.min(h,y)), cz=Math.max(-h,Math.min(h,z));
+    let dx=x-cx, dy=y-cy, dz=z-cz; const l=Math.hypot(dx,dy,dz)||1; dx/=l; dy/=l; dz/=l;
+    p.setXYZ(i,cx+dx*r,cy+dy*r,cz+dz*r); n.setXYZ(i,dx,dy,dz);
+  }
+  return g;
+}
+// extrude a 2D shape and fit it into the unit cell (uniform scale, centred)
+function extrudeFit(shape,depth,bevel,fit){
+  const g=new THREE.ExtrudeGeometry(shape,{depth,bevelEnabled:bevel>0,bevelThickness:bevel,bevelSize:bevel*0.8,bevelSegments:2,curveSegments:12});
+  g.computeBoundingBox();
+  const bb=g.boundingBox, c=new THREE.Vector3(), sz=new THREE.Vector3();
+  bb.getCenter(c); bb.getSize(sz);
+  g.translate(-c.x,-c.y,-c.z);
+  const k=(fit||1)/Math.max(sz.x,sz.y,sz.z);
+  g.scale(k,k,k);
+  return g;
+}
+const SHAPE_MAKERS={
+  box:{up:false, make:()=>new THREE.BoxGeometry(1,1,1)},
+  round:{up:false, make:()=>roundedBox(0.2,4)},
+  bevel:{up:false, make:()=>roundedBox(0.07,4)},
+  lego:{up:true, make:()=>{
+    const body=roundedBox(0.04,4); body.scale(1,0.78,1); body.translate(0,-0.11,0);
+    const stud=new THREE.CylinderGeometry(0.3,0.3,0.22,16); stud.translate(0,0.39,0);
+    return mergeGeos([body,stud]);
+  }},
+  ball:{up:false, make:()=>new THREE.IcosahedronGeometry(0.5,1)},
+  cyl:{up:true, make:()=>new THREE.CylinderGeometry(0.48,0.48,1,18)},
+  roof:{up:true, make:()=>{ // triangular prism (屋根)
+    const sh=new THREE.Shape(); sh.moveTo(-0.5,-0.5); sh.lineTo(0.5,-0.5); sh.lineTo(0,0.5); sh.lineTo(-0.5,-0.5);
+    const g=new THREE.ExtrudeGeometry(sh,{depth:1,bevelEnabled:false}); g.translate(0,0,-0.5); return g;
+  }},
+  arch:{up:true, make:()=>{ // アーチ
+    const sh=new THREE.Shape(); sh.moveTo(-0.5,-0.5); sh.lineTo(-0.27,-0.5);
+    sh.absarc(0,-0.5,0.27,Math.PI,0,true); sh.lineTo(0.5,-0.5); sh.lineTo(0.5,0.5); sh.lineTo(-0.5,0.5); sh.lineTo(-0.5,-0.5);
+    const g=new THREE.ExtrudeGeometry(sh,{depth:1,bevelEnabled:false,curveSegments:12}); g.translate(0,0,-0.5); return g;
+  }},
+  half:{up:true, make:()=>{ // かまぼこ
+    const sh=new THREE.Shape(); sh.moveTo(-0.5,-0.5); sh.lineTo(0.5,-0.5); sh.lineTo(0.5,0);
+    sh.absarc(0,0,0.5,0,Math.PI,false); sh.lineTo(-0.5,-0.5);
+    const g=new THREE.ExtrudeGeometry(sh,{depth:1,bevelEnabled:false,curveSegments:12}); g.translate(0,0,-0.5); return g;
+  }},
+  star:{up:false, make:()=>{
+    const sh=new THREE.Shape();
+    for(let i=0;i<10;i++){ const r=i%2?4.2:10, a=Math.PI/2+i*Math.PI/5; const x=Math.cos(a)*r, y=Math.sin(a)*r; i?sh.lineTo(x,y):sh.moveTo(x,y); }
+    sh.closePath();
+    return extrudeFit(sh,6,1.2,1.05);
+  }},
+  heart:{up:false, make:()=>{
+    const sh=new THREE.Shape();
+    sh.moveTo(5,5); sh.bezierCurveTo(5,5,4,0,0,0); sh.bezierCurveTo(-6,0,-6,7,-6,7);
+    sh.bezierCurveTo(-6,11,-3,15.4,5,19); sh.bezierCurveTo(12,15.4,16,11,16,7);
+    sh.bezierCurveTo(16,7,16,0,10,0); sh.bezierCurveTo(7,0,5,5,5,5);
+    const g=extrudeFit(sh,7,1.5,1.0); g.rotateZ(Math.PI); return g;
+  }},
+};
+const SHAPE_PRESETS={
+  box:['box'], round:['round'], lego:['lego'],
+  tsumiki:['bevel','cyl','roof','arch','half'],
+  toybox:['lego','ball','star','heart','cyl','roof'],
+  ball:['ball'], cyl:['cyl'], star:['star'], heart:['heart'],
+};
+const SHAPE_COLOR={lego:'toy',tsumiki:'wood',toybox:'toy'};
+const geoCache={};
+function shapeGeo(key,forScreen){
+  const ck=key+(forScreen?':s':'');
+  if(!geoCache[ck]){
+    const def=SHAPE_MAKERS[key];
+    let g=forScreen?shapeGeo(key,false).clone():def.make();
+    if(forScreen&&def.up) g.rotateX(Math.PI/2);   // top faces the viewer, like a brick mosaic
+    geoCache[ck]=g;
+  }
+  return geoCache[ck];
+}
+function makeInst(geo,mat,cap){
+  const m=new THREE.InstancedMesh(geo,mat,cap);
+  m.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+  m.instanceColor=new THREE.InstancedBufferAttribute(new Float32Array(cap*3),3);
+  m.instanceColor.setUsage(THREE.DynamicDrawUsage);
+  m.castShadow=true; m.receiveShadow=true; m.frustumCulled=false; m.count=0;
+  scene.add(m);
+  return m;
+}
+function dropMeshList(list){ for(const m of list){ scene.remove(m); if(m.dispose) m.dispose(); } }
+
+let kinds=['box'];          // shape keys used by drops
+let dropMeshes=[], screenMeshes=[], screenKinds=['box'];
+let pixKind=null;           // per pixel: index into screenKinds
+
+function setupShapes(){
+  const prev=kinds.length;
+  kinds=SHAPE_PRESETS[P.shape]||['box'];
+  screenKinds=P.screenSame?kinds:['box'];
+  dropMeshList(dropMeshes); dropMeshList(screenMeshes);
+  dropMeshes=kinds.map(k=>makeInst(shapeGeo(k,false),dropMat,MAX_DROPS));
+  screenMeshes=screenKinds.map(k=>makeInst(shapeGeo(k,true),screenMat,Math.max(1,N)));
+  screenMeshes.forEach(m=>m.visible=P.showScreen);
+  pixKind=new Uint8Array(Math.max(1,N));
+  const nk=screenKinds.length;
+  for(let i=0;i<N;i++) pixKind[i]=nk>1?(Math.imul(i+1,2654435761)>>>0)%nk:0;
+  if(prev!==kinds.length) for(let id=0;id<MAX_DROPS;id++) kind[id]%=kinds.length;
+  applyMaterial();
+}
+function applyMaterial(){
+  const rough={video:0.5,toy:0.28,wood:0.72}[P.colorMode];
+  screenMat.roughness=rough+0.05; dropMat.roughness=rough;
+}
+
+// ─────────────────────────────────────────────
+//  COLOUR MODES
+// ─────────────────────────────────────────────
+const TOY_PAL=[[0.86,0.08,0.1],[0.98,0.76,0.04],[0.04,0.32,0.78],[0.08,0.58,0.24],[0.96,0.95,0.92],
+  [0.96,0.42,0.04],[0.1,0.1,0.12],[0.96,0.5,0.7],[0.45,0.72,0.95],[0.45,0.26,0.12],[0.55,0.85,0.3],[0.55,0.3,0.75]];
+const WOOD_PAL=[[0.95,0.84,0.64],[0.88,0.71,0.48],[0.76,0.56,0.35],[0.6,0.41,0.23],[0.42,0.27,0.14]];
+function nearestToy(r,g,b){
+  let best=0, bd=1e9;
+  for(let k=0;k<TOY_PAL.length;k++){
+    const q=TOY_PAL[k], dr=r-q[0], dg=g-q[1], db=b-q[2];
+    const d=dr*dr*0.3+dg*dg*0.59+db*db*0.11;
+    if(d<bd){bd=d;best=k;}
+  }
+  return TOY_PAL[best];
+}
+// writes the converted colour of pixel i into out[o..o+2]
+function colorize(i,r,g,b,out,o){
+  const mode=P.colorMode;
+  if(mode==='toy'){ const q=nearestToy(r,g,b); out[o]=q[0]; out[o+1]=q[1]; out[o+2]=q[2]; return; }
+  if(mode==='wood'){
+    const mx=Math.max(r,g,b), mn=Math.min(r,g,b), sat=mx>0?(mx-mn)/mx:0;
+    const jit=((Math.imul(i+7,40503)>>>0)%1000)/1000;
+    if(sat>0.42&&mx>0.25){ // painted block: soft primary colour
+      const q=nearestToy(r,g,b); out[o]=q[0]*0.82+0.12; out[o+1]=q[1]*0.82+0.1; out[o+2]=q[2]*0.82+0.06; return;
+    }
+    const lum=0.299*r+0.587*g+0.114*b;
+    const w=WOOD_PAL[Math.max(0,Math.min(4,Math.floor((1-lum)*5)))], v=0.92+jit*0.16;
+    out[o]=w[0]*v; out[o+1]=w[1]*v; out[o+2]=w[2]*v; return;
+  }
+  out[o]=r; out[o+1]=g; out[o+2]=b;
+}
 
 // ─────────────────────────────────────────────
 //  SOURCE (video / camera / image / demo)
@@ -334,7 +517,7 @@ function drawDemo(dt){
 // ─────────────────────────────────────────────
 let COLS=80, ROWS=45, N=0;
 let sampleCv=document.createElement('canvas'), sampleCtx=sampleCv.getContext('2d',{willReadFrequently:true});
-let L=null, prevL=null, R=null, G=null, B=null, hole=null, weight=null;
+let L=null, prevL=null, R=null, G=null, B=null, hole=null, weight=null, CR=null; // CR: converted colours
 // pile height-field
 const MARGIN=6;
 let GX=0, GZ=0, Z0=0, H=null, stacks=null;
@@ -348,15 +531,8 @@ function rebuild(){
   L=new Float32Array(N); prevL=new Float32Array(N); R=new Float32Array(N); G=new Float32Array(N); B=new Float32Array(N);
   hole=new Float32Array(N); weight=new Float32Array(N);
 
-  if(screenMesh){scene.remove(screenMesh);if(screenMesh.dispose)screenMesh.dispose();}
-  screenMesh=new THREE.InstancedMesh(boxGeo,screenMat,N);
-  screenMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-  screenMesh.setColorAt(0,new THREE.Color());
-  screenMesh.instanceColor.setUsage(THREE.DynamicDrawUsage);
-  screenMesh.castShadow=true; screenMesh.receiveShadow=true;
-  screenMesh.frustumCulled=false;
-  screenMesh.visible=P.showScreen;
-  scene.add(screenMesh);
+  CR=new Float32Array(N*3);
+  setupShapes();
 
   // pile area: a bit wider than the screen, extending forward
   GX=COLS+MARGIN*2;
@@ -402,6 +578,9 @@ const sz=new Float32Array(MAX_DROPS);
 const st=new Uint8Array(MAX_DROPS);          // 0 dead, 1 falling, 2 landed, 3 melting
 const landT=new Float64Array(MAX_DROPS);
 const cell=new Int32Array(MAX_DROPS);
+const kind=new Uint8Array(MAX_DROPS);        // index into kinds
+const ax=new Float32Array(MAX_DROPS), ay=new Float32Array(MAX_DROPS), az=new Float32Array(MAX_DROPS); // tumble axis
+const ang=new Float32Array(MAX_DROPS), spin=new Float32Array(MAX_DROPS), yaw=new Float32Array(MAX_DROPS);
 let freeList=[], landQ=[], landQHead=0, liveCount=0;
 let simT=0, drainUntil=0;
 
@@ -442,8 +621,17 @@ function allocDrop(){
   }
   return -1;
 }
-function spawn(x,y,z,r,g,b){
+function spawn(x,y,z,r,g,b,k){
   const id=allocDrop(); if(id<0) return;
+  kind[id]=k;
+  // tumble axis mostly sideways; "up" pieces leave the wall facing the viewer and flip upright as they fall
+  let a1=1, a2=(Math.random()-0.5)*0.8, a3=(Math.random()-0.5)*0.8;
+  if(Math.random()<0.5) a1=-1;
+  const al=Math.hypot(a1,a2,a3); ax[id]=a1/al; ay[id]=a2/al; az[id]=a3/al;
+  const fromWall=P.screenSame&&SHAPE_MAKERS[kinds[k]].up;
+  ang[id]=fromWall?Math.PI/2*Math.sign(a1):0;
+  spin[id]=(3+Math.random()*6)*P.tumble*(Math.random()<0.5?-1:1);
+  yaw[id]=P.screenSame?0:((Math.random()*4)|0)*Math.PI/2;
   px[id]=x; py[id]=y; pz[id]=z;
   vx[id]=(Math.random()-0.5)*0.8;
   vy[id]=-Math.random()*1.5;
@@ -467,6 +655,7 @@ function stepDrops(dt){
     // falling
     const ox=px[id], oy=py[id], oz=pz[id];
     vy[id]-=g*dt;
+    ang[id]+=spin[id]*dt;
     const drag=Math.exp(-1.2*dt);
     vx[id]*=drag; vz[id]*=drag;
     px[id]+=vx[id]*dt; py[id]+=vy[id]*dt; pz[id]+=vz[id]*dt;
@@ -507,6 +696,7 @@ function stepDrops(dt){
     vx[id]=vy[id]=vz[id]=0;
     stacks[c].push(id); H[c]++;
     cell[id]=c; st[id]=2; landT[id]=simT;
+    let a=ang[id]%(Math.PI*2); if(a>Math.PI) a-=Math.PI*2; if(a<-Math.PI) a+=Math.PI*2; ang[id]=a;
     landQ.push({id,t:simT});
   }
   if(landQHead>20000){ landQ=landQ.slice(landQHead); landQHead=0; }
@@ -537,25 +727,29 @@ function sampleSource(){
 }
 
 function updateScreen(dt,spawnBudget){
-  const m=screenMesh.instanceMatrix.array, ca=screenMesh.instanceColor.array;
   const s=1-P.gap, base=P.floor, key=P.key, depth=P.depth;
   const trig=P.trigger, thr=P.thr;
+  const nk=screenKinds.length, cnt=new Int32Array(nk);
+  const mats=screenMeshes.map(m=>m.instanceMatrix.array), cols=screenMeshes.map(m=>m.instanceColor.array);
   let wsum=0;
   for(let i=0;i<N;i++){
     const col=i%COLS, row=(i/COLS)|0;
     const lum=L[i];
     const vis=lum>=key;
+    colorize(i,R[i],G[i],B[i],CR,i*3);
     if(hole[i]>0) hole[i]=Math.max(0,hole[i]-dt*1.2);
     const k=vis?(1-hole[i]*0.92):0;
-    const dv=P.invert?1-lum:lum;
-    const d=(0.25+dv*depth)*k;
-    const sxy=s*k;
-    const o=i*16;
-    m[o]=sxy; m[o+1]=0; m[o+2]=0; m[o+3]=0;
-    m[o+4]=0; m[o+5]=sxy; m[o+6]=0; m[o+7]=0;
-    m[o+8]=0; m[o+9]=0; m[o+10]=Math.max(0.0001,d); m[o+11]=0;
-    m[o+12]=col-COLS/2+0.5; m[o+13]=base+(ROWS-row-0.5); m[o+14]=d*0.5; m[o+15]=1;
-    ca[i*3]=R[i]; ca[i*3+1]=G[i]; ca[i*3+2]=B[i];
+    if(k>0.01){
+      const dv=P.invert?1-lum:lum;
+      const d=(0.25+dv*depth)*k;
+      const sxy=s*k;
+      const sk=pixKind[i], m=mats[sk], ca=cols[sk], n=cnt[sk]++, o=n*16;
+      m[o]=sxy; m[o+1]=0; m[o+2]=0; m[o+3]=0;
+      m[o+4]=0; m[o+5]=sxy; m[o+6]=0; m[o+7]=0;
+      m[o+8]=0; m[o+9]=0; m[o+10]=d; m[o+11]=0;
+      m[o+12]=col-COLS/2+0.5; m[o+13]=base+(ROWS-row-0.5); m[o+14]=d*0.5; m[o+15]=1;
+      ca[n*3]=CR[i*3]; ca[n*3+1]=CR[i*3+1]; ca[n*3+2]=CR[i*3+2];
+    }
 
     // spawn weight
     let w=0;
@@ -570,8 +764,7 @@ function updateScreen(dt,spawnBudget){
     }
     weight[i]=w; wsum+=w;
   }
-  screenMesh.instanceMatrix.needsUpdate=true;
-  screenMesh.instanceColor.needsUpdate=true;
+  screenMeshes.forEach((m,k)=>{ m.count=cnt[k]; m.instanceMatrix.needsUpdate=true; m.instanceColor.needsUpdate=true; });
 
   if(spawnBudget<=0||wsum<=0) return;
   const scale=spawnBudget/wsum;
@@ -581,25 +774,27 @@ function updateScreen(dt,spawnBudget){
       const col=i%COLS, row=(i/COLS)|0;
       const dv=P.invert?1-L[i]:L[i];
       const d=0.25+dv*P.depth;
-      spawn(col-COLS/2+0.5, P.floor+(ROWS-row-0.5)-0.3, d*0.5+0.2, R[i],G[i],B[i]);
+      const k=P.screenSame?pixKind[i]:(Math.random()*kinds.length)|0;
+      spawn(col-COLS/2+0.5, P.floor+(ROWS-row-0.5)-0.3, d*0.5+0.2, CR[i*3],CR[i*3+1],CR[i*3+2], k);
       if(P.hole) hole[i]=1;
     }
   }
 }
 
 function renderDrops(){
-  const m=dropMesh.instanceMatrix.array, ca=dropMesh.instanceColor.array;
-  let n=0;
+  const nk=kinds.length, cnt=new Int32Array(nk);
+  const mats=dropMeshes.map(m=>m.instanceMatrix.array), cols=dropMeshes.map(m=>m.instanceColor.array);
   for(let id=0;id<MAX_DROPS;id++){
     const s=st[id]; if(s===0) continue;
-    let size=sz[id], sx=size, sy=size, szz=size, yoff=0;
+    let size=sz[id], sx=size, sy=size, szz=size, yoff=0, a=ang[id];
     if(s===1){
       // stretch along the fall direction like a drip
-      const st2=Math.min(0.7,Math.abs(vy[id])*0.012);
+      const st2=Math.min(0.7,Math.abs(vy[id])*0.012)*(P.tumble>0?0.4:1);
       sy=size*(1+st2); sx=szz=size*(1-st2*0.35);
     }else{
-      // landing wobble / melting
+      // landing: settle upright, wobble, then melt
       const t=simT-landT[id];
+      a*=Math.exp(-t*16);
       if(s===2 && P.wobble && t<0.6){
         const q=Math.exp(-t*9)*Math.cos(t*28)*0.45;
         sy=size*(1-q); sx=szz=size*(1+q*0.5);
@@ -609,17 +804,24 @@ function renderDrops(){
       }
       yoff=(sy-1)*0.5; // keep the bottom on the stack
     }
-    const o=n*16;
-    m[o]=sx; m[o+1]=0; m[o+2]=0; m[o+3]=0;
-    m[o+4]=0; m[o+5]=sy; m[o+6]=0; m[o+7]=0;
-    m[o+8]=0; m[o+9]=0; m[o+10]=szz; m[o+11]=0;
+    // rotation R = Raxis(a) * Ry(yaw)
+    const c=Math.cos(a), sn=Math.sin(a), t1=1-c, x=ax[id], y=ay[id], z=az[id];
+    const a00=c+x*x*t1, a01=x*y*t1-z*sn, a02=x*z*t1+y*sn;
+    const a10=y*x*t1+z*sn, a11=c+y*y*t1, a12=y*z*t1-x*sn;
+    const a20=z*x*t1-y*sn, a21=z*y*t1+x*sn, a22=c+z*z*t1;
+    const cy=Math.cos(yaw[id]), sy2=Math.sin(yaw[id]);
+    // Ry = [[cy,0,sy],[0,1,0],[-sy,0,cy]]
+    const r00=a00*cy-a02*sy2, r01=a01, r02=a00*sy2+a02*cy;
+    const r10=a10*cy-a12*sy2, r11=a11, r12=a10*sy2+a12*cy;
+    const r20=a20*cy-a22*sy2, r21=a21, r22=a20*sy2+a22*cy;
+    const k=kind[id], m=mats[k], ca=cols[k], n=cnt[k]++, o=n*16;
+    m[o]=r00*sx; m[o+1]=r10*sx; m[o+2]=r20*sx; m[o+3]=0;
+    m[o+4]=r01*sy; m[o+5]=r11*sy; m[o+6]=r21*sy; m[o+7]=0;
+    m[o+8]=r02*szz; m[o+9]=r12*szz; m[o+10]=r22*szz; m[o+11]=0;
     m[o+12]=px[id]; m[o+13]=py[id]+yoff; m[o+14]=pz[id]; m[o+15]=1;
     ca[n*3]=cr[id]; ca[n*3+1]=cg[id]; ca[n*3+2]=cb[id];
-    n++;
   }
-  dropMesh.count=n;
-  dropMesh.instanceMatrix.needsUpdate=true;
-  dropMesh.instanceColor.needsUpdate=true;
+  dropMeshes.forEach((m,k)=>{ m.count=cnt[k]; m.instanceMatrix.needsUpdate=true; m.instanceColor.needsUpdate=true; });
 }
 
 // ─────────────────────────────────────────────
@@ -743,7 +945,16 @@ bindRange('sDepth','depth','vDepth',f1);
 bindRange('sGap','gap','vGap',f2);
 bindRange('sKey','key','vKey',f2);
 bindCheck('cInvert','invert');
-bindCheck('cScreen','showScreen',()=>{ if(screenMesh) screenMesh.visible=P.showScreen; });
+bindCheck('cScreen','showScreen',()=>{ screenMeshes.forEach(m=>m.visible=P.showScreen); });
+document.getElementById('selShape').addEventListener('change',e=>{
+  P.shape=e.target.value;
+  const cm=SHAPE_COLOR[P.shape]||'video';
+  document.getElementById('selColor').value=cm; P.colorMode=cm;
+  applyMaterial(); if(L) setupShapes();
+});
+document.getElementById('selColor').addEventListener('change',e=>{ P.colorMode=e.target.value; applyMaterial(); });
+bindRange('sTumble','tumble','vTumble',f1);
+bindCheck('cScreenSame','screenSame',()=>{ if(L) setupShapes(); });
 document.getElementById('selTrigger').addEventListener('change',e=>P.trigger=e.target.value);
 P.trigger=document.getElementById('selTrigger').value;
 bindRange('sRate','rate','vRate');
