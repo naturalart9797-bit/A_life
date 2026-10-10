@@ -128,8 +128,20 @@ input[type=range]::-moz-range-thumb{width:11px;height:11px;background:var(--acce
           <option value="jelly">ゼリー</option>
         </select>
       </div>
-      <div class="sl-row"><div class="sl-head"><span class="sl-name">粘り気（液体）</span><span class="sl-val" id="vVisc">0.85</span></div>
-        <input type="range" id="sVisc" min="0" max="1" step="0.01" value="0.85"></div>
+      <div class="sl-row"><div class="sl-head"><span class="sl-name">粘り気（液体）</span><span class="sl-val" id="vVisc">0.90</span></div>
+        <input type="range" id="sVisc" min="0" max="1" step="0.01" value="0.9"></div>
+      <div class="sl-row"><div class="sl-head"><span class="sl-name">液体の粒子数（上限）</span><span class="sl-val" id="vMaxFluid">8,000</span></div>
+        <input type="range" id="sMaxFluid" min="1000" max="20000" step="500" value="8000"></div>
+      <div class="sl-row" style="margin-bottom:9px;">
+        <div class="sl-head"><span class="sl-name">液体の描画解像度</span></div>
+        <select id="selFQ">
+          <option value="0.4">軽い</option>
+          <option value="0.6" selected>標準</option>
+          <option value="0.85">きれい</option>
+          <option value="1">最高</option>
+        </select>
+      </div>
+      <label class="chk"><input type="checkbox" id="cTray" checked> 床に縁をつけて液体をためる</label>
       <div class="sl-row" style="margin-bottom:9px;">
         <div class="sl-head"><span class="sl-name">色</span></div>
         <select id="selColor">
@@ -140,8 +152,8 @@ input[type=range]::-moz-range-thumb{width:11px;height:11px;background:var(--acce
       </div>
       <div class="sl-row"><div class="sl-head"><span class="sl-name">落下中の回転</span><span class="sl-val" id="vTumble">1.0</span></div>
         <input type="range" id="sTumble" min="0" max="3" step="0.1" value="1"></div>
-      <label class="chk"><input type="checkbox" id="cScreenSame" checked> 映像面も同じ形・素材で組む</label>
-      <div class="hint">形を選ぶと色もおすすめに切り替わります（あとから変更可）。液体の素材では、しずくは形に関係なく垂れて糸を引き、床で水たまりになって広がります。</div>
+      <label class="chk"><input type="checkbox" id="cScreenSame" checked> 映像面も同じ形で組む</label>
+      <div class="hint">形を選ぶと色もおすすめに切り替わります（あとから変更可）。液体の素材では粒子法（SPH）で流体を物理計算します。映像の凹凸を伝って流れ落ち、床にたまって広がります。重いときは粒子数か描画解像度を下げてください。</div>
     </div>
 
     <div class="sec">
@@ -241,7 +253,7 @@ const P={
   trigger:'motion', rate:240, thr:0.2, grav:70, spread:5, size:0.9, hole:true, wobble:true,
   floor:14, life:25, slope:2, shadow:true, auto:false,
   shape:'box', colorMode:'video', tumble:1, screenSame:true,
-  mat:'solid', visc:0.85, mess:0.6,
+  mat:'solid', visc:0.9, mess:0.6, maxFluid:8000, tray:true,
 };
 const MAX_DROPS=40000;
 
@@ -301,32 +313,28 @@ scene.add(sun); scene.add(sun.target);
 
 const screenMat=new THREE.MeshStandardMaterial({roughness:0.55,metalness:0.0,envMapIntensity:0.35});
 const dropMat=new THREE.MeshStandardMaterial({roughness:0.45,metalness:0.0,envMapIntensity:0.35});
-const liquidMat=new THREE.MeshPhysicalMaterial({roughness:0.05,metalness:0,clearcoat:1,clearcoatRoughness:0.04,transparent:true,opacity:0.85,envMapIntensity:1.3});
-// liquid presets: tint colour mixed into the video colour, look, viscosity, layer thickness on the floor
+// liquid presets. tint/amt: colour mixed into the video colour. visc: 0 runny … 1 honey-thick.
+// look: absorb = how strongly thickness tints what is seen through it, opaque = 0 clear … 1 solid body,
+// metal = mirror-like (mercury), f0 = base reflectance, scatter = light glowing inside (honey)
 const MATERIALS={
   solid:{liquid:false},
-  honey:{liquid:true, tint:[1.0,0.56,0.04], amt:0.82, opacity:0.8, rough:0.05, metal:0, visc:0.85, th:0.42},
-  water:{liquid:true, tint:[0.6,0.85,1.0], amt:0.35, opacity:0.42, rough:0.02, metal:0, visc:0.05, th:0.26},
-  slime:{liquid:true, tint:[0.4,0.95,0.25], amt:0.6, opacity:0.78, rough:0.12, metal:0, visc:0.6, th:0.5},
-  choco:{liquid:true, tint:[0.36,0.18,0.08], amt:0.82, opacity:1, rough:0.22, metal:0, visc:0.78, th:0.45},
-  mercury:{liquid:true, tint:[0.88,0.9,0.94], amt:0.9, opacity:1, rough:0.05, metal:1, visc:0.25, th:0.36},
-  paint:{liquid:true, tint:null, amt:0, opacity:1, rough:0.3, metal:0, visc:0.5, th:0.4},
-  jelly:{liquid:true, tint:null, amt:0, opacity:0.68, rough:0.06, metal:0, visc:0.95, th:0.65},
+  honey:{liquid:true, tint:[1.0,0.55,0.05], amt:0.85, visc:0.9, absorb:0.55, opaque:0.0, metal:0, f0:0.045, scatter:0.85, coh:0.25},
+  water:{liquid:true, tint:[0.8,0.92,1.0], amt:0.2, visc:0.04, absorb:0.12, opaque:0.0, metal:0, f0:0.02, scatter:0.0, coh:0.02},
+  slime:{liquid:true, tint:[0.4,0.95,0.22], amt:0.6, visc:0.7, absorb:0.45, opaque:0.15, metal:0, f0:0.04, scatter:0.55, coh:0.35},
+  choco:{liquid:true, tint:[0.33,0.17,0.07], amt:0.85, visc:0.8, absorb:1.0, opaque:1.0, metal:0, f0:0.035, scatter:0, coh:0.2},
+  mercury:{liquid:true, tint:[0.9,0.92,0.95], amt:0.9, visc:0.12, absorb:1.0, opaque:1.0, metal:1, f0:0.8, scatter:0, coh:0.4},
+  paint:{liquid:true, tint:null, amt:0, visc:0.55, absorb:1.0, opaque:1.0, metal:0, f0:0.03, scatter:0, coh:0.15},
+  jelly:{liquid:true, tint:null, amt:0, visc:0.97, absorb:0.3, opaque:0.0, metal:0, f0:0.04, scatter:0.45, coh:0.6},
 };
 const MAT=()=>MATERIALS[P.mat];
-function applyLiquidMat(){
-  const m=MAT(); if(!m.liquid) return;
-  liquidMat.roughness=m.rough; liquidMat.metalness=m.metal; liquidMat.opacity=m.opacity;
-  liquidMat.transparent=m.opacity<1; liquidMat.needsUpdate=true;
-}
 // mixes the material tint into a video colour (keeps some of the picture's light and shade)
 function tintInto(src,so,dst,dO){
   const m=MAT(), r=src[so], g=src[so+1], b=src[so+2];
   if(!m.liquid||!m.tint){ dst[dO]=r; dst[dO+1]=g; dst[dO+2]=b; return; }
-  const lum=0.299*r+0.587*g+0.114*b, k=Math.min(0.95,0.4+0.7*lum), a=m.amt, t=m.tint;
+  const lum=0.299*r+0.587*g+0.114*b, k=Math.min(1.0,0.65+0.4*lum), a=m.amt, t=m.tint;
   dst[dO]=r*(1-a)+t[0]*k*a; dst[dO+1]=g*(1-a)+t[1]*k*a; dst[dO+2]=b*(1-a)+t[2]*k*a;
 }
-let floorMesh=null, rimMesh=null;
+let floorMesh=null, rimMesh=null, trayMesh=null;
 
 // ─────────────────────────────────────────────
 //  SHAPES — every piece fits in a unit cell; "up" shapes have a top (+y)
@@ -439,27 +447,13 @@ let kinds=['box'];          // shape keys used by drops
 let dropMeshes=[], screenMeshes=[], screenKinds=['box'];
 let pixKind=null;           // per pixel: index into screenKinds
 
-// liquid pieces: a teardrop while hanging/falling, a squashed blob on the floor, and a thin thread (honey string)
-function tearGeo(){
-  const pts=[];
-  for(let i=0;i<=10;i++){
-    const t=i/10*Math.PI;
-    pts.push(new THREE.Vector2(0.5*Math.sin(t)*Math.pow((1+Math.cos(t))/2,0.75)+1e-4,-Math.cos(t)*0.55-0.05));
-  }
-  return new THREE.LatheGeometry(pts,12);
-}
-const tearMesh=makeInst(tearGeo(),liquidMat,MAX_DROPS);
-const blobMesh=makeInst(new THREE.SphereGeometry(0.5,12,8),liquidMat,MAX_DROPS);
-const threadMesh=makeInst(new THREE.CylinderGeometry(1,1,1,7,1,true),liquidMat,8000);
-
 function setupShapes(){
   const prev=kinds.length;
   kinds=SHAPE_PRESETS[P.shape]||['box'];
   screenKinds=P.screenSame?kinds:['box'];
   dropMeshList(dropMeshes); dropMeshList(screenMeshes);
   dropMeshes=kinds.map(k=>makeInst(shapeGeo(k,false),dropMat,MAX_DROPS));
-  const wallMat=(MAT().liquid&&P.screenSame)?liquidMat:screenMat;
-  screenMeshes=screenKinds.map(k=>makeInst(shapeGeo(k,true),wallMat,Math.max(1,N)));
+  screenMeshes=screenKinds.map(k=>makeInst(shapeGeo(k,true),screenMat,Math.max(1,N)));
   screenMeshes.forEach(m=>m.visible=P.showScreen);
   pixKind=new Uint8Array(Math.max(1,N));
   const nk=screenKinds.length;
@@ -594,6 +588,7 @@ function drawDemo(dt){
 let COLS=80, ROWS=45, N=0;
 let sampleCv=document.createElement('canvas'), sampleCtx=sampleCv.getContext('2d',{willReadFrequently:true});
 let L=null, prevL=null, R=null, G=null, B=null, hole=null, weight=null, CR=null; // CR: converted colours
+let WDEP=null;   // per pixel: front face z of the wall voxel (-1 = no voxel), used by the fluid
 // pile height-field
 const MARGIN=6;
 let GX=0, GZ=0, Z0=0, H=null, stacks=null;
@@ -607,7 +602,7 @@ function rebuild(){
   L=new Float32Array(N); prevL=new Float32Array(N); R=new Float32Array(N); G=new Float32Array(N); B=new Float32Array(N);
   hole=new Float32Array(N); weight=new Float32Array(N);
 
-  CR=new Float32Array(N*3);
+  CR=new Float32Array(N*3); WDEP=new Float32Array(N).fill(-1);
   setupShapes();
 
   // pile area: a bit wider than the screen, extending forward
@@ -627,6 +622,15 @@ function rebuild(){
   rimMesh=new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry(GX,1,GZ)),new THREE.LineBasicMaterial({color:0x2a3346}));
   rimMesh.position.copy(floorMesh.position);
   scene.add(rimMesh);
+  if(trayMesh){ scene.remove(trayMesh); trayMesh.children.forEach(c=>c.geometry.dispose()); }
+  trayMesh=new THREE.Group();
+  const trayMat=new THREE.MeshStandardMaterial({color:0x9fb4c8,transparent:true,opacity:0.18,roughness:0.1,envMapIntensity:1,depthWrite:false});
+  const tw=0.25;
+  [[GX+tw*2,tw,0,Z0-tw/2],[GX+tw*2,tw,0,Z0+GZ+tw/2],[tw,GZ,-GX/2-tw/2,Z0+GZ/2],[tw,GZ,GX/2+tw/2,Z0+GZ/2]].forEach(([w,d,x,z])=>{
+    const m=new THREE.Mesh(new THREE.BoxGeometry(w,TRAY_H,d),trayMat); m.position.set(x,TRAY_H/2,z); trayMesh.add(m);
+  });
+  trayMesh.visible=P.tray;
+  scene.add(trayMesh);
 
   updateShadowCam();
   document.getElementById('stRes').textContent=COLS+'×'+ROWS;
@@ -651,24 +655,22 @@ const px=new Float32Array(MAX_DROPS), py=new Float32Array(MAX_DROPS), pz=new Flo
 const vx=new Float32Array(MAX_DROPS), vy=new Float32Array(MAX_DROPS), vz=new Float32Array(MAX_DROPS);
 const cr=new Float32Array(MAX_DROPS), cg=new Float32Array(MAX_DROPS), cb=new Float32Array(MAX_DROPS);
 const sz=new Float32Array(MAX_DROPS);
-const st=new Uint8Array(MAX_DROPS);          // 0 dead, 1 falling, 2 landed, 3 melting, 4 hanging (liquid)
+const st=new Uint8Array(MAX_DROPS);          // 0 dead, 1 falling, 2 landed, 3 melting
 const landT=new Float64Array(MAX_DROPS);
 const cell=new Int32Array(MAX_DROPS);
 const kind=new Uint8Array(MAX_DROPS);        // index into kinds
 const ax=new Float32Array(MAX_DROPS), ay=new Float32Array(MAX_DROPS), az=new Float32Array(MAX_DROPS); // tumble axis
 const ang=new Float32Array(MAX_DROPS), spin=new Float32Array(MAX_DROPS), yaw=new Float32Array(MAX_DROPS);
 const th=new Float32Array(MAX_DROPS);        // layer thickness in the pile (solids 1)
-const liq=new Uint8Array(MAX_DROPS);         // spawned as liquid
 const bnc=new Uint8Array(MAX_DROPS);         // bounces so far
 const jx=new Float32Array(MAX_DROPS), jy=new Float32Array(MAX_DROPS), jz=new Float32Array(MAX_DROPS), tilt=new Float32Array(MAX_DROPS); // messy resting offsets
-const rx=new Float32Array(MAX_DROPS), ry=new Float32Array(MAX_DROPS), rz=new Float32Array(MAX_DROPS); // smoothed liquid position
-const hx=new Float32Array(MAX_DROPS), hy=new Float32Array(MAX_DROPS), hz=new Float32Array(MAX_DROPS), relT=new Float32Array(MAX_DROPS); // drip origin / release time
 let freeList=[], landQ=[], landQHead=0, liveCount=0;
 let simT=0, drainUntil=0;
 
 function clearDrops(){
   st.fill(0); freeList=[]; for(let i=MAX_DROPS-1;i>=0;i--) freeList.push(i);
   landQ=[]; landQHead=0; liveCount=0;
+  if(typeof flClear==='function') flClear();
   if(H){H.fill(0); for(const s of stacks) s.length=0;}
 }
 
@@ -685,7 +687,7 @@ function unstack(id){
   const s=stacks[c], k=s.indexOf(id);
   if(k>=0){
     let h=0; for(let j=0;j<k;j++) h+=th[s[j]];
-    for(let j=k+1;j<s.length;j++){ const o=s[j]; st[o]=1; vy[o]=0; vx[o]=0; vz[o]=0; cell[o]=-1; if(liq[o]){px[o]=rx[o];pz[o]=rz[o];} }
+    for(let j=k+1;j<s.length;j++){ const o=s[j]; st[o]=1; vy[o]=0; vx[o]=0; vz[o]=0; cell[o]=-1; }
     s.length=k; H[c]=h;
   }
   cell[id]=-1;
@@ -722,68 +724,22 @@ function spawn(x,y,z,r,g,b,k){
   cr[id]=r; cg[id]=g; cb[id]=b;
   sz[id]=P.size*(0.85+Math.random()*0.3);
   st[id]=1; cell[id]=-1; liveCount++; bnc[id]=0;
-  const m=MAT();
-  liq[id]=m.liquid?1:0;
-  th[id]=m.liquid?m.th*(0.8+Math.random()*0.4):1;
-  if(m.liquid){
-    // hang from the wall, stretch, then let go (longer for thick liquids)
-    st[id]=4; landT[id]=simT; spin[id]=(0.12+P.visc*0.95)*(0.6+Math.random()*0.8);
-    hx[id]=x; hy[id]=y+0.3; hz[id]=z; vx[id]*=0.3; vz[id]*=0.5+0.5*(1-P.visc);
-    ang[id]=0;
-  }
+  th[id]=1;
 }
 function settleOffsets(id){
   const m=P.mess;
   jx[id]=(Math.random()-0.5)*0.76*m; jz[id]=(Math.random()-0.5)*0.76*m;
-  jy[id]=liq[id]?0:-Math.random()*0.18*m;
-  tilt[id]=liq[id]?0:(Math.random()-0.5)*0.95*m;
-  if(!liq[id]) yaw[id]+=(Math.random()-0.5)*1.6*m;
+  jy[id]=-Math.random()*0.18*m;
+  tilt[id]=(Math.random()-0.5)*0.95*m;
+  yaw[id]+=(Math.random()-0.5)*1.6*m;
 }
-// thick liquids creep: the top blob of a stack slides onto a lower neighbour
-function tryFlow(id){
-  const c=cell[id], s=stacks[c];
-  if(s[s.length-1]!==id) return;
-  const base=H[c]-th[id], cx=c%GX, cz=(c/GX)|0;
-  const need=0.02+P.visc*th[id]*0.75;
-  let best=-1, bh=base-need, bx=0, bz=0;
-  for(let k=0;k<8;k++){
-    const a=(k+((Math.random()*8)|0))%8;
-    const dx=[1,-1,0,0,1,1,-1,-1][a], dz=[0,0,1,-1,1,-1,1,-1][a];
-    const nx=cx+dx, nz=cz+dz;
-    const nh=(nx<0||nx>=GX||nz<0||nz>=GZ)?-1:H[nz*GX+nx];
-    if(nh<bh){ bh=nh; best=a; bx=nx; bz=nz; }
-  }
-  if(best<0) return;
-  s.pop(); H[c]=base;
-  if(bx<0||bx>=GX||bz<0||bz>=GZ){
-    // spills over the edge
-    st[id]=1; cell[id]=-1; px[id]=rx[id]; pz[id]=rz[id];
-    vx[id]=(bx-cx)*2; vz[id]=(bz-cz)*2; vy[id]=0; return;
-  }
-  const n=bz*GX+bx, [ccx,ccz]=cellCenter(n);
-  px[id]=ccx+jx[id]; pz[id]=ccz+jz[id]; py[id]=H[n]+th[id]*0.5;
-  stacks[n].push(id); H[n]+=th[id]; cell[id]=n;
-}
-
 function stepDrops(dt){
   const g=P.grav, slope=P.slope, draining=simT<drainUntil;
   const melt=0.5;
   for(let id=0;id<MAX_DROPS;id++){
     const s=st[id]; if(s===0) continue;
-    if(s===4){
-      if(simT-landT[id]>spin[id]){
-        st[id]=1; relT[id]=simT; vy[id]=-1.5;
-        py[id]=hy[id]-0.3-0.6*(1+P.visc);
-      }
-      continue;
-    }
     if(s===2||s===3){
-      if(draining){ unstack(id); st[id]=1; vy[id]=0; if(liq[id]){px[id]=rx[id];pz[id]=rz[id];} continue; }
-      if(liq[id]){
-        const k=Math.min(1,dt*(2+(1-P.visc)*18));
-        rx[id]+=(px[id]-rx[id])*k; ry[id]+=(py[id]-ry[id])*k; rz[id]+=(pz[id]-rz[id])*k;
-        if(s===2 && Math.random()<dt*(0.6+(1-P.visc)*25)) tryFlow(id);
-      }
+      if(draining){ unstack(id); st[id]=1; vy[id]=0; continue; }
       if(s===2 && P.life>0 && simT-landT[id]>P.life){ st[id]=3; landT[id]=simT; continue; }
       if(s===3 && simT-landT[id]>melt) kill(id);
       continue;
@@ -808,23 +764,11 @@ function stepDrops(dt){
       continue;
     }
     // messy mode: solids bounce once and skid off in a random direction
-    if(!liq[id] && P.mess>0 && bnc[id]<1 && vy[id]<-6 && Math.random()<P.mess*0.85){
+    if(P.mess>0 && bnc[id]<1 && vy[id]<-6 && Math.random()<P.mess*0.85){
       bnc[id]++; py[id]=top;
       vy[id]=-vy[id]*(0.18+Math.random()*0.22);
       vx[id]+=(Math.random()-0.5)*7*P.mess; vz[id]+=(Math.random()-0.5)*7*P.mess;
       spin[id]=spin[id]*0.5+(Math.random()-0.5)*14*P.mess;
-      continue;
-    }
-    if(liq[id]){
-      // liquids just splat where they hit; spreading happens by creeping later
-      settleOffsets(id);
-      const [lx,lz]=cellCenter(c);
-      px[id]=lx+jx[id]; pz[id]=lz+jz[id]; py[id]=H[c]+half;
-      rx[id]=px[id]; ry[id]=py[id]; rz[id]=pz[id];
-      vx[id]=vy[id]=vz[id]=0;
-      stacks[c].push(id); H[c]+=th[id];
-      cell[id]=c; st[id]=2; landT[id]=simT;
-      landQ.push({id,t:simT});
       continue;
     }
     // landed: roll downhill while a neighbour is lower by more than `slope`
@@ -860,6 +804,447 @@ function stepDrops(dt){
   if(landQHead>20000){ landQ=landQ.slice(landQHead); landQHead=0; }
 }
 
+// ─────────────────────────────────────────────
+//  FLUID — viscoelastic SPH (Clavet et al. 2005, double density relaxation)
+//  Units: interaction radius h = 1 voxel. Prediction–relaxation integration:
+//  velocities come from the corrected positions, which keeps very viscous
+//  liquids (honey) stable at a 1/60 s step.
+//  Neighbour search: particles are re-sorted into a dense grid every step and
+//  one pair list (r < 1.2h) is shared by the viscosity and pressure passes.
+// ─────────────────────────────────────────────
+const FL_MAX=20000, FL_RAD=0.3, FL_CS=1.2, FL_MAXPAIRS=FL_MAX*40;
+const FL_FIELDS=['x','y','z','ox','oy','oz','vx','vy','vz','r','g','b','age'];
+const fl={n:0, pairI:new Int32Array(FL_MAXPAIRS), pairJ:new Int32Array(FL_MAXPAIRS), np:0,
+  rho:new Float32Array(FL_MAX), rhoN:new Float32Array(FL_MAX), key:new Int32Array(FL_MAX),
+  start:new Int32Array(1), alt:{}};
+for(const f of FL_FIELDS){ fl[f]=new Float32Array(FL_MAX); fl.alt[f]=new Float32Array(FL_MAX); }
+// material parameters
+const FP={rho0:4.0, k:0.08, kNear:0.16, sigma:0, beta:0.08, cohesion:0, xsph:0.02, xsphIter:1, fric:0, cluster:3, maxN:8000};
+const flT={ax:new Float32Array(FL_MAX), ay:new Float32Array(FL_MAX), az:new Float32Array(FL_MAX), aw:new Float32Array(FL_MAX)};
+
+function flSpawn(x,y,z,vx,vy,vz,r,g,b){
+  if(fl.n>=FP.maxN){
+    // pool full: retire a slow (resting) particle so falling streams stay intact
+    let pick=-1;
+    for(let t=0;t<12;t++){
+      const c=(Math.random()*fl.n)|0;
+      if(fl.vx[c]*fl.vx[c]+fl.vy[c]*fl.vy[c]+fl.vz[c]*fl.vz[c]<9){ pick=c; break; }
+    }
+    if(pick<0) return;
+    flRemove(pick);
+  }
+  const i=fl.n++;
+  fl.x[i]=x; fl.y[i]=y; fl.z[i]=z; fl.vx[i]=vx; fl.vy[i]=vy; fl.vz[i]=vz;
+  fl.r[i]=r; fl.g[i]=g; fl.b[i]=b; fl.age[i]=0;
+}
+function flRemove(i){
+  const l=--fl.n;
+  if(i!==l) for(const f of FL_FIELDS) fl[f][i]=fl[f][l];
+}
+function flClear(){ fl.n=0; fl.np=0; }
+
+// sort particles into a dense grid (cell size FL_CS) and build the pair list
+function flNeighbours(){
+  const n=fl.n; let x=fl.x, y=fl.y, z=fl.z;
+  let x0=1e9,y0=1e9,z0=1e9,x1=-1e9,y1=-1e9,z1=-1e9;
+  for(let i=0;i<n;i++){
+    if(x[i]<x0)x0=x[i]; if(x[i]>x1)x1=x[i];
+    if(y[i]<y0)y0=y[i]; if(y[i]>y1)y1=y[i];
+    if(z[i]<z0)z0=z[i]; if(z[i]>z1)z1=z[i];
+  }
+  const inv=1/FL_CS;
+  const NX=Math.floor((x1-x0)*inv)+1, NY=Math.floor((y1-y0)*inv)+1, NZ=Math.floor((z1-z0)*inv)+1;
+  const NC=NX*NY*NZ;
+  if(fl.start.length<NC+1) fl.start=new Int32Array(Math.ceil((NC+1)*1.5));
+  const start=fl.start, key=fl.key;
+  start.fill(0,0,NC+1);
+  for(let i=0;i<n;i++){
+    const k=(Math.floor((x[i]-x0)*inv)*NY+Math.floor((y[i]-y0)*inv))*NZ+Math.floor((z[i]-z0)*inv);
+    key[i]=k; start[k+1]++;
+  }
+  for(let c=0;c<NC;c++) start[c+1]+=start[c];
+  // physically reorder all particle data by cell (cache friendly, ranges contiguous)
+  const cur=flNeighbours.cur&&flNeighbours.cur.length>=NC?flNeighbours.cur:(flNeighbours.cur=new Int32Array(Math.ceil(NC*1.5)));
+  cur.set(start.subarray(0,NC));
+  const dest=flNeighbours.dest||(flNeighbours.dest=new Int32Array(FL_MAX));
+  for(let i=0;i<n;i++) dest[i]=cur[key[i]]++;
+  for(const f of FL_FIELDS){
+    const src=fl[f], dst=fl.alt[f];
+    for(let i=0;i<n;i++) dst[dest[i]]=src[i];
+    fl.alt[f]=src; fl[f]=dst;
+  }
+  x=fl.x; y=fl.y; z=fl.z;
+  // pairs i<j with r < FL_CS
+  const pI=fl.pairI, pJ=fl.pairJ, R2=FL_CS*FL_CS;
+  let np=0;
+  for(let i=0;i<n;i++){
+    const xi=x[i], yi=y[i], zi=z[i];
+    const ix=Math.floor((xi-x0)*inv), iy=Math.floor((yi-y0)*inv), iz=Math.floor((zi-z0)*inv);
+    const zl=iz>0?iz-1:0, zh=iz<NZ-1?iz+1:NZ-1;
+    for(let a=ix-1;a<=ix+1;a++){
+      if(a<0||a>=NX) continue;
+      for(let b=iy-1;b<=iy+1;b++){
+        if(b<0||b>=NY) continue;
+        const base=(a*NY+b)*NZ;
+        let p=start[base+zl]; const e=start[base+zh+1];
+        if(p<=i) p=i+1;
+        for(;p<e;p++){
+          const dx=x[p]-xi, dy=y[p]-yi, dz=z[p]-zi;
+          if(dx*dx+dy*dy+dz*dz<R2 && np<FL_MAXPAIRS){ pI[np]=i; pJ[np]=p; np++; }
+        }
+      }
+    }
+  }
+  fl.np=np;
+}
+
+let flCollide=null;   // boundary handler supplied by the host
+
+function flStep(dt,grav){
+  const n=fl.n; if(!n) return;
+  flNeighbours();
+  const x=fl.x, y=fl.y, z=fl.z, vx=fl.vx, vy=fl.vy, vz=fl.vz, ox=fl.ox, oy=fl.oy, oz=fl.oz;
+  const pI=fl.pairI, pJ=fl.pairJ, np=fl.np, rho=fl.rho, rhoN=fl.rhoN;
+  const vmax=0.5/dt;
+  // 1. gravity
+  for(let i=0;i<n;i++){
+    vy[i]-=grav*dt;
+    const s2=vx[i]*vx[i]+vy[i]*vy[i]+vz[i]*vz[i];
+    if(s2>vmax*vmax){ const k=vmax/Math.sqrt(s2); vx[i]*=k; vy[i]*=k; vz[i]*=k; }
+  }
+  // 2. viscosity impulses (radial, applied pair by pair)
+  const sig=FP.sigma, beta=FP.beta;
+  if(sig>0||beta>0){
+    for(let p=0;p<np;p++){
+      const i=pI[p], j=pJ[p];
+      const dx=x[j]-x[i], dy=y[j]-y[i], dz=z[j]-z[i];
+      const r2=dx*dx+dy*dy+dz*dz; if(r2>=1||r2<1e-10) continue;
+      const r=Math.sqrt(r2), q=1-r, ux=dx/r, uy=dy/r, uz=dz/r;
+      const u=(vx[i]-vx[j])*ux+(vy[i]-vy[j])*uy+(vz[i]-vz[j])*uz;
+      if(u<=0) continue;
+      let I=q*(sig*u+beta*u*u); if(I>u) I=u; I*=0.5;
+      vx[i]-=I*ux; vy[i]-=I*uy; vz[i]-=I*uz;
+      vx[j]+=I*ux; vy[j]+=I*uy; vz[j]+=I*uz;
+    }
+  }
+  // 3. predict
+  for(let i=0;i<n;i++){
+    ox[i]=x[i]; oy[i]=y[i]; oz[i]=z[i];
+    x[i]+=vx[i]*dt; y[i]+=vy[i]*dt; z[i]+=vz[i]*dt;
+  }
+  // 4. double density relaxation
+  rho.fill(0,0,n); rhoN.fill(0,0,n);
+  for(let p=0;p<np;p++){
+    const i=pI[p], j=pJ[p];
+    const dx=x[j]-x[i], dy=y[j]-y[i], dz=z[j]-z[i];
+    const r2=dx*dx+dy*dy+dz*dz; if(r2>=1) continue;
+    const q=1-Math.sqrt(r2), q2=q*q, q3=q2*q;
+    rho[i]+=q2; rho[j]+=q2; rhoN[i]+=q3; rhoN[j]+=q3;
+  }
+  const rho0=FP.rho0, k=FP.k, kn=FP.kNear, coh=FP.cohesion;
+  for(let i=0;i<n;i++){
+    let P=k*(rho[i]-rho0); if(P<0) P*=coh;   // negative pressure = cohesion (sticky liquids)
+    rho[i]=P; rhoN[i]=kn*rhoN[i];            // reuse arrays: pressure / near pressure
+  }
+  for(let p=0;p<np;p++){
+    const i=pI[p], j=pJ[p];
+    const dx=x[j]-x[i], dy=y[j]-y[i], dz=z[j]-z[i];
+    const r2=dx*dx+dy*dy+dz*dz; if(r2>=1||r2<1e-10) continue;
+    const r=Math.sqrt(r2), q=1-r;
+    let D=((rho[i]+rho[j])*q+(rhoN[i]+rhoN[j])*q*q)*0.25;
+    if(D>0.2) D=0.2; else if(D<-0.2) D=-0.2;
+    const ux=dx/r*D, uy=dy/r*D, uz=dz/r*D;
+    x[j]+=ux; y[j]+=uy; z[j]+=uz;
+    x[i]-=ux; y[i]-=uy; z[i]-=uz;
+  }
+  // 5. boundaries
+  if(flCollide) flCollide();
+  // 6. velocities from corrected positions
+  const iv=1/dt;
+  for(let i=0;i<n;i++){ vx[i]=(x[i]-ox[i])*iv; vy[i]=(y[i]-oy[i])*iv; vz[i]=(z[i]-oz[i])*iv; }
+  // 7. XSPH velocity smoothing = shear viscosity (honey moves as a slow coherent mass)
+  const c=FP.xsph;
+  if(c>0){
+    const ax=flT.ax, ay=flT.ay, az=flT.az, aw=flT.aw;
+    for(let it=0;it<FP.xsphIter;it++){
+      ax.fill(0,0,n); ay.fill(0,0,n); az.fill(0,0,n); aw.fill(0,0,n);
+      for(let p=0;p<np;p++){
+        const i=pI[p], j=pJ[p];
+        const dx=x[j]-x[i], dy=y[j]-y[i], dz=z[j]-z[i];
+        const r2=dx*dx+dy*dy+dz*dz; if(r2>=1) continue;
+        const q=1-Math.sqrt(r2), w=q*q;
+        const ddx=(vx[j]-vx[i])*w, ddy=(vy[j]-vy[i])*w, ddz=(vz[j]-vz[i])*w;
+        ax[i]+=ddx; ay[i]+=ddy; az[i]+=ddz; aw[i]+=w;
+        ax[j]-=ddx; ay[j]-=ddy; az[j]-=ddz; aw[j]+=w;
+      }
+      for(let i=0;i<n;i++){
+        if(aw[i]<=0) continue;
+        const f=c/Math.max(aw[i],1);   // normalised: c=1 → take the neighbourhood's velocity
+        vx[i]+=ax[i]*f; vy[i]+=ay[i]*f; vz[i]+=az[i]*f;
+      }
+    }
+  }
+  for(let i=n-1;i>=0;i--){
+    fl.age[i]+=dt;
+    if(y[i]<-25) flRemove(i);
+  }
+}
+
+// map the material + viscosity slider onto solver parameters
+function applyFluidParams(){
+  const m=MAT(); if(!m.liquid) return;
+  const v=P.visc;
+  FP.sigma=v*0.8; FP.beta=0.08;
+  FP.xsph=0.03+Math.pow(v,1.5)*0.9; FP.xsphIter=v>0.6?2:1;
+  FP.cohesion=m.coh; FP.fric=Math.min(0.97,v*1.05);
+  FP.cluster=Math.round(3+v*7); FP.maxN=P.maxFluid;   // thick liquids leave in bigger blobs
+  updateFluidLook();
+}
+
+// boundaries: video-wall relief, floor / voxel pile, tray rim
+const TRAY_H=3;
+function fluidCollide(){
+  const n=fl.n, x=fl.x, y=fl.y, z=fl.z, ox=fl.ox, oy=fl.oy, oz=fl.oz, R=FL_RAD;
+  const fr=FP.fric, keep=1-fr, draining=simT<drainUntil;
+  const xmin=-GX/2, xmax=GX/2, zmin=Z0, zmax=Z0+GZ;
+  const wb=P.floor, wt=P.floor+ROWS, wl=-COLS/2;
+  const tray=P.tray&&!draining;
+  for(let i=0;i<n;i++){
+    // relief of the video wall: push out to the front face of the voxel behind it
+    if(y[i]>=wb && y[i]<wt && z[i]>-1 && x[i]>=wl && x[i]<-wl){
+      const col=Math.floor(x[i]-wl), row=ROWS-1-Math.floor(y[i]-wb);
+      const f=WDEP[row*COLS+col];
+      if(f>=0 && z[i]<f+R){
+        z[i]=f+R;
+        // sticky liquids creep down the picture instead of sliding off it
+        x[i]=ox[i]+(x[i]-ox[i])*keep; y[i]=oy[i]+(y[i]-oy[i])*(0.15+0.85*keep);
+      }
+    }
+    if(draining) continue;
+    const inside=x[i]>xmin && x[i]<xmax && z[i]>zmin && z[i]<zmax;
+    if(inside){
+      const c=cellOf(x[i],z[i]);
+      const g=c>=0?H[c]:0;
+      if(y[i]<g+R){
+        if(oy[i]>=g-0.3){ y[i]=g+R; x[i]=ox[i]+(x[i]-ox[i])*(0.35+0.65*keep); z[i]=oz[i]+(z[i]-oz[i])*(0.35+0.65*keep); }
+        else { x[i]=ox[i]; z[i]=oz[i]; }   // ran into the side of a voxel column
+      }
+    }
+    // tray rim keeps the pool on the floor
+    if(tray && y[i]<TRAY_H){
+      const wasIn=ox[i]>xmin && ox[i]<xmax && oz[i]>zmin && oz[i]<zmax;
+      if(wasIn){
+        if(x[i]<xmin+R) x[i]=xmin+R; else if(x[i]>xmax-R) x[i]=xmax-R;
+        if(z[i]<zmin+R) z[i]=zmin+R; else if(z[i]>zmax-R) z[i]=zmax-R;
+      }
+    }
+  }
+}
+flCollide=fluidCollide;
+let fluidAcc=0;
+function stepFluid(dt){
+  if(!fl.n) return;
+  fluidAcc+=dt;
+  let k=0;
+  while(fluidAcc>=1/60 && k<2){ flStep(1/60,P.grav); fluidAcc-=1/60; k++; }
+  if(fluidAcc>1/60) fluidAcc=0;
+}
+
+// ─────────────────────────────────────────────
+//  FLUID RENDERING — screen-space fluid surface
+//  1. particles → nearest sphere depth (MIN blend, stored as 1/depth)
+//  2. particles → thickness + colour (additive)
+//  3. bilateral blur of depth (smooth surface, keeps silhouettes)
+//  4. composite: normals from depth, refraction of the scene behind,
+//     absorption by thickness, Fresnel reflection, specular
+// ─────────────────────────────────────────────
+const FR={scale:0.6, rts:null};
+(function initFluidRender(){
+  FR.pos=new Float32Array(FL_MAX*3); FR.col=new Float32Array(FL_MAX*3);
+  const geo=new THREE.BufferGeometry();
+  geo.setAttribute('position',new THREE.BufferAttribute(FR.pos,3).setUsage(THREE.DynamicDrawUsage));
+  geo.setAttribute('color',new THREE.BufferAttribute(FR.col,3).setUsage(THREE.DynamicDrawUsage));
+  FR.geo=geo;
+  const U={uRad:{value:FL_RAD*2.3}, uScale:{value:500}};
+  const VS=`
+    uniform float uRad; uniform float uScale;
+    varying float vDepth; varying vec3 vCol;
+    void main(){
+      vec4 mv=modelViewMatrix*vec4(position,1.0);
+      vDepth=-mv.z; vCol=color;
+      gl_PointSize=2.0*uRad*uScale/max(vDepth,0.1);
+      gl_Position=projectionMatrix*mv;
+    }`;
+  FR.depthMat=new THREE.ShaderMaterial({uniforms:U,vertexShader:VS,vertexColors:true,
+    fragmentShader:`
+      uniform float uRad; varying float vDepth;
+      void main(){
+        vec2 c=gl_PointCoord*2.0-1.0; float r2=dot(c,c); if(r2>1.0) discard;
+        gl_FragColor=vec4(vDepth-sqrt(1.0-r2)*uRad,0.0,0.0,1.0);
+      }`,
+    depthTest:true,depthWrite:true,blending:THREE.NoBlending});
+  FR.thickMat=new THREE.ShaderMaterial({uniforms:U,vertexShader:VS,vertexColors:true,
+    fragmentShader:`
+      uniform float uRad; varying vec3 vCol;
+      void main(){
+        vec2 c=gl_PointCoord*2.0-1.0; float r2=dot(c,c); if(r2>1.0) discard;
+        float t=sqrt(1.0-r2)*uRad*0.9;
+        gl_FragColor=vec4(vCol*t,t);
+      }`,
+    depthTest:false,depthWrite:false,blending:THREE.CustomBlending,blendEquation:THREE.AddEquation,blendSrc:THREE.OneFactor,blendDst:THREE.OneFactor});
+  FR.points=new THREE.Points(geo,FR.depthMat); FR.points.frustumCulled=false;
+  FR.pScene=new THREE.Scene(); FR.pScene.add(FR.points);
+
+  const QVS=`varying vec2 vUv; void main(){ vUv=uv; gl_Position=vec4(position.xy,0.0,1.0); }`;
+  FR.blurMat=new THREE.ShaderMaterial({
+    uniforms:{tDepth:{value:null},tThick:{value:null},uDir:{value:new THREE.Vector2()},uRadPx:{value:30},uFalloff:{value:1.2}},
+    vertexShader:QVS,
+    fragmentShader:`
+      uniform sampler2D tDepth, tThick; uniform vec2 uDir; uniform float uRadPx; uniform float uFalloff;
+      varying vec2 vUv;
+      void main(){
+        float d0=texture2D(tDepth,vUv).r;
+        if(d0<=0.0){ gl_FragColor=vec4(0.0); return; }
+        // thin spots (single drops) get less smoothing so they stay round instead of turning into coins
+        float rad=clamp(uRadPx/d0,1.0,20.0)*mix(0.35,1.0,smoothstep(0.4,1.6,texture2D(tThick,vUv).a));
+        float sum=0.0, ws=0.0;
+        for(int k=-10;k<=10;k++){
+          float t=float(k)/10.0;
+          float d=texture2D(tDepth,vUv+uDir*t*rad).r;
+          if(d<=0.0) continue;
+          float dz=(d-d0)*uFalloff;
+          float w=exp(-t*t*2.5)*exp(-dz*dz);
+          sum+=d*w; ws+=w;
+        }
+        gl_FragColor=vec4(sum/ws,0.0,0.0,1.0);
+      }`,
+    depthTest:false,depthWrite:false});
+  FR.compMat=new THREE.ShaderMaterial({
+    uniforms:{tScene:{value:null},tSceneDepth:{value:null},tFluid:{value:null},tThick:{value:null},
+      uTexel:{value:new THREE.Vector2()},uNear:{value:0.5},uFar:{value:2000},uTanY:{value:0.4},uAspect:{value:1},
+      uCamRot:{value:new THREE.Matrix3()},uSun:{value:new THREE.Vector3(0.4,0.8,0.5).normalize()},
+      uTint:{value:new THREE.Color(1,0.6,0.1)},uAbsorb:{value:0.5},uOpaque:{value:0},uMetal:{value:0},uF0:{value:0.04},uScatter:{value:0}},
+    vertexShader:QVS,
+    fragmentShader:`
+      uniform sampler2D tScene, tSceneDepth, tFluid, tThick;
+      uniform vec2 uTexel; uniform float uNear, uFar, uTanY, uAspect;
+      uniform mat3 uCamRot; uniform vec3 uSun, uTint;
+      uniform float uAbsorb, uOpaque, uMetal, uF0, uScatter;
+      varying vec2 vUv;
+      vec3 viewPos(vec2 uv,float d){ vec2 n=uv*2.0-1.0; return vec3(n.x*uTanY*uAspect*d, n.y*uTanY*d, -d); }
+      float depthAt(vec2 uv){ float d=texture2D(tFluid,uv).r; return d>0.0?d:-1.0; }
+      vec3 env(vec3 r){
+        vec3 sky=mix(vec3(0.42,0.46,0.54),vec3(0.95,0.97,1.0),clamp(r.y,0.0,1.0));
+        vec3 gnd=mix(vec3(0.16,0.14,0.13),vec3(0.03),clamp(-r.y*2.0,0.0,1.0));
+        vec3 c=r.y>0.0?sky:gnd;
+        c+=vec3(5.0)*pow(max(dot(r,normalize(vec3(-0.5,0.8,0.6))),0.0),180.0);
+        c+=vec3(2.5)*pow(max(dot(r,normalize(vec3(0.7,0.45,-0.4))),0.0),60.0);
+        return c;
+      }
+      void main(){
+        vec4 sc=texture2D(tScene,vUv);
+        float d=depthAt(vUv);
+        if(d<0.0){ gl_FragColor=sc; return; }
+        float zb=texture2D(tSceneDepth,vUv).r;
+        float sd=(uNear*uFar)/(uFar-(uFar-uNear)*zb);
+        if(sd<d-0.2){ gl_FragColor=sc; return; }
+        vec3 P=viewPos(vUv,d);
+        // normal from the smoothed depth (pick the smaller one-sided difference)
+        float dr=depthAt(vUv+vec2(uTexel.x,0.0)), dl=depthAt(vUv-vec2(uTexel.x,0.0));
+        float du=depthAt(vUv+vec2(0.0,uTexel.y)), dd=depthAt(vUv-vec2(0.0,uTexel.y));
+        vec3 ddx=viewPos(vUv+vec2(uTexel.x,0.0),dr)-P, ddx2=P-viewPos(vUv-vec2(uTexel.x,0.0),dl);
+        if(dr<0.0||(dl>=0.0&&abs(ddx2.z)<abs(ddx.z))) ddx=ddx2;
+        vec3 ddy=viewPos(vUv+vec2(0.0,uTexel.y),du)-P, ddy2=P-viewPos(vUv-vec2(0.0,uTexel.y),dd);
+        if(du<0.0||(dd>=0.0&&abs(ddy2.z)<abs(ddy.z))) ddy=ddy2;
+        vec3 N=normalize(cross(ddx,ddy));
+        float a0=smoothstep(0.1,0.6,texture2D(tThick,vUv).a);   // no sparkles on the thin fringe
+        vec3 V=normalize(-P);
+        vec4 th=texture2D(tThick,vUv);
+        float T=th.a;
+        vec3 col=T>1e-4?th.rgb/T:uTint;
+        vec3 Nw=normalize(uCamRot*N), Vw=normalize(uCamRot*V);
+        vec3 Rw=reflect(-Vw,Nw);
+        float F=uF0+(1.0-uF0)*pow(1.0-clamp(dot(N,V),0.0,1.0),5.0);
+        vec3 refl=env(Rw);
+        // refraction: look through the liquid at the bent background, tinted by thickness
+        vec2 ruv=clamp(vUv+N.xy*min(T,3.0)*0.02,0.001,0.999);
+        vec3 bg=texture2D(tScene,ruv).rgb;
+        float lam=max(dot(Nw,uSun),0.0);
+        vec3 trans=bg*exp(-(1.0-col)*T*uAbsorb*2.0)*mix(vec3(1.0),col,0.3);
+        // light scattered inside the liquid: makes honey glow instead of going black over a dark floor
+        vec3 scat=col*(0.35+0.65*lam)*(1.0-exp(-T*uAbsorb*1.5))*uScatter;
+        vec3 body=mix(trans+scat,col*(0.3+0.8*lam),uOpaque);
+        vec3 Hh=normalize(uSun+Vw);
+        float spec=pow(max(dot(Nw,Hh),0.0),uMetal>0.5?60.0:120.0)*(uMetal>0.5?1.2:0.9)*a0;
+        vec3 c=uMetal>0.5 ? refl*mix(col,vec3(1.0),F)*0.95+spec : mix(body,refl,F)+spec;
+        float a=smoothstep(0.0,0.25,T);
+        gl_FragColor=vec4(mix(sc.rgb,c,a),1.0);
+      }`,
+    depthTest:false,depthWrite:false});
+  FR.quad=new THREE.Mesh(new THREE.PlaneGeometry(2,2),FR.blurMat); FR.quad.frustumCulled=false;
+  FR.qScene=new THREE.Scene(); FR.qScene.add(FR.quad);
+  FR.qCam=new THREE.OrthographicCamera(-1,1,1,-1,0,1);
+})();
+function updateFluidLook(){
+  const m=MAT(), u=FR.compMat.uniforms;
+  if(!m.liquid) return;
+  u.uAbsorb.value=m.absorb; u.uOpaque.value=m.opaque; u.uMetal.value=m.metal; u.uF0.value=m.f0; u.uScatter.value=m.scatter;
+  if(m.tint) u.uTint.value.setRGB(m.tint[0],m.tint[1],m.tint[2]); else u.uTint.value.setRGB(0.8,0.8,0.8);
+}
+function fluidTargets(){
+  const size=renderer.getDrawingBufferSize(new THREE.Vector2());
+  const w=size.x, h=size.y, fw=Math.max(2,Math.round(w*FR.scale)), fh=Math.max(2,Math.round(h*FR.scale));
+  if(FR.rts && FR.rts.w===w && FR.rts.h===h && FR.rts.fw===fw) return FR.rts;
+  if(FR.rts) ['scene','dA','dB','thick'].forEach(k=>FR.rts[k].dispose());
+  const dType=renderer.capabilities.isWebGL2&&renderer.extensions.get('EXT_color_buffer_float')?THREE.FloatType:THREE.HalfFloatType;
+  const fopt={type:THREE.HalfFloatType,format:THREE.RGBAFormat,minFilter:THREE.LinearFilter,magFilter:THREE.LinearFilter,depthBuffer:false};
+  const scene=new THREE.WebGLRenderTarget(w,h,{minFilter:THREE.LinearFilter,magFilter:THREE.LinearFilter});
+  scene.depthTexture=new THREE.DepthTexture(w,h);
+  FR.rts={w,h,fw,fh,scene,
+    // depth needs full float precision (half floats make the surface stair-stepped)
+    dA:new THREE.WebGLRenderTarget(fw,fh,{...fopt,type:dType,minFilter:THREE.NearestFilter,magFilter:THREE.NearestFilter,depthBuffer:true}),
+    dB:new THREE.WebGLRenderTarget(fw,fh,{...fopt,type:dType,minFilter:THREE.NearestFilter,magFilter:THREE.NearestFilter}),
+    thick:new THREE.WebGLRenderTarget(fw,fh,fopt)};
+  return FR.rts;
+}
+function renderWithFluid(){
+  const n=fl.n;
+  if(!n){ renderer.setRenderTarget(null); renderer.render(scene,camera); return; }
+  const T=fluidTargets();
+  // scene (with depth) to texture
+  renderer.setRenderTarget(T.scene); renderer.render(scene,camera);
+  // particles
+  const pos=FR.pos, col=FR.col;
+  for(let i=0,o=0;i<n;i++,o+=3){
+    pos[o]=fl.x[i]; pos[o+1]=fl.y[i]; pos[o+2]=fl.z[i];
+    col[o]=fl.r[i]; col[o+1]=fl.g[i]; col[o+2]=fl.b[i];
+  }
+  FR.geo.attributes.position.needsUpdate=true; FR.geo.attributes.color.needsUpdate=true;
+  FR.geo.setDrawRange(0,n);
+  const tanY=Math.tan(THREE.MathUtils.degToRad(camera.fov*0.5));
+  FR.depthMat.uniforms.uScale.value=T.fh/(2*tanY);
+  const clr=renderer.getClearColor(new THREE.Color()), ca=renderer.getClearAlpha();
+  renderer.setClearColor(0x000000,0);
+  FR.points.material=FR.depthMat; renderer.setRenderTarget(T.dA); renderer.clear(); renderer.render(FR.pScene,camera);
+  FR.points.material=FR.thickMat; renderer.setRenderTarget(T.thick); renderer.clear(); renderer.render(FR.pScene,camera);
+  // bilateral blur (2 iterations, separable)
+  const bu=FR.blurMat.uniforms; FR.quad.material=FR.blurMat; bu.tThick.value=T.thick.texture;
+  bu.uRadPx.value=FL_RAD*3.4*T.fh/(2*tanY);
+  for(let it=0;it<4;it++){
+    bu.tDepth.value=T.dA.texture; bu.uDir.value.set(1/T.fw,0); renderer.setRenderTarget(T.dB); renderer.render(FR.qScene,FR.qCam);
+    bu.tDepth.value=T.dB.texture; bu.uDir.value.set(0,1/T.fh); renderer.setRenderTarget(T.dA); renderer.render(FR.qScene,FR.qCam);
+  }
+  renderer.setClearColor(clr,ca);
+  // composite to screen
+  const cu=FR.compMat.uniforms;
+  cu.tScene.value=T.scene.texture; cu.tSceneDepth.value=T.scene.depthTexture; cu.tFluid.value=T.dA.texture; cu.tThick.value=T.thick.texture;
+  cu.uTexel.value.set(1/T.fw,1/T.fh); cu.uNear.value=camera.near; cu.uFar.value=camera.far;
+  cu.uTanY.value=tanY; cu.uAspect.value=camera.aspect;
+  cu.uCamRot.value.setFromMatrix4(camera.matrixWorld);
+  cu.uSun.value.copy(sun.position).sub(sun.target.position).normalize();
+  FR.quad.material=FR.compMat; renderer.setRenderTarget(null); renderer.render(FR.qScene,FR.qCam);
+}
+
 function drainFloor(){ drainUntil=simT+2.5; toast('床が抜けた！'); }
 
 // ─────────────────────────────────────────────
@@ -890,7 +1275,6 @@ function updateScreen(dt,spawnBudget){
   const trig=P.trigger, thr=P.thr;
   const nk=screenKinds.length, cnt=new Int32Array(nk);
   const mats=screenMeshes.map(m=>m.instanceMatrix.array), cols=screenMeshes.map(m=>m.instanceColor.array);
-  const wallTint=MAT().liquid&&P.screenSame;
   let wsum=0;
   for(let i=0;i<N;i++){
     const col=i%COLS, row=(i/COLS)|0;
@@ -899,6 +1283,7 @@ function updateScreen(dt,spawnBudget){
     colorize(i,R[i],G[i],B[i],CR,i*3);
     if(hole[i]>0) hole[i]=Math.max(0,hole[i]-dt*1.2);
     const k=vis?(1-hole[i]*0.92):0;
+    WDEP[i]=-1;
     if(k>0.01){
       const dv=P.invert?1-lum:lum;
       const d=(0.25+dv*depth)*k;
@@ -908,7 +1293,8 @@ function updateScreen(dt,spawnBudget){
       m[o+4]=0; m[o+5]=sxy; m[o+6]=0; m[o+7]=0;
       m[o+8]=0; m[o+9]=0; m[o+10]=d; m[o+11]=0;
       m[o+12]=col-COLS/2+0.5; m[o+13]=base+(ROWS-row-0.5); m[o+14]=d*0.5; m[o+15]=1;
-      if(wallTint) tintInto(CR,i*3,ca,n*3); else { ca[n*3]=CR[i*3]; ca[n*3+1]=CR[i*3+1]; ca[n*3+2]=CR[i*3+2]; }
+      ca[n*3]=CR[i*3]; ca[n*3+1]=CR[i*3+1]; ca[n*3+2]=CR[i*3+2];
+      WDEP[i]=d;
     }
 
     // spawn weight
@@ -927,89 +1313,35 @@ function updateScreen(dt,spawnBudget){
   screenMeshes.forEach((m,k)=>{ m.count=cnt[k]; m.instanceMatrix.needsUpdate=true; m.instanceColor.needsUpdate=true; });
 
   if(spawnBudget<=0||wsum<=0) return;
-  const scale=spawnBudget/wsum;
+  const liquid=MAT().liquid, scale=spawnBudget/wsum*(liquid?3/FP.cluster:1);
   for(let i=0;i<N;i++){
     const w=weight[i]; if(w<=0) continue;
     if(Math.random()<w*scale){
       const col=i%COLS, row=(i/COLS)|0;
       const dv=P.invert?1-L[i]:L[i];
       const d=0.25+dv*P.depth;
-      const k=P.screenSame?pixKind[i]:(Math.random()*kinds.length)|0;
-      tintInto(CR,i*3,TMP,0);
-      spawn(col-COLS/2+0.5, P.floor+(ROWS-row-0.5)-0.3, d*0.5+0.2, TMP[0],TMP[1],TMP[2], k);
+      const x=col-COLS/2+0.5, y=P.floor+(ROWS-row-0.5);
+      if(liquid){
+        // a small blob of fluid particles on the face of the voxel
+        tintInto(CR,i*3,TMP,0);
+        const cs=0.45+FP.cluster*0.06;
+        for(let q=0;q<FP.cluster;q++)
+          flSpawn(x+(Math.random()-0.5)*cs, y+(Math.random()-0.5)*cs, d+FL_RAD+0.05+Math.random()*cs*0.5,
+                  0, -1, P.spread*0.12*(0.5+Math.random()), TMP[0],TMP[1],TMP[2]);
+      }else{
+        const k=P.screenSame?pixKind[i]:(Math.random()*kinds.length)|0;
+        spawn(x, y-0.3, d*0.5+0.2, CR[i*3],CR[i*3+1],CR[i*3+2], k);
+      }
       if(P.hole) hole[i]=1;
     }
   }
 }
 
-function writeScaled(m,o,sx,sy,sz,x,y,z){
-  m[o]=sx; m[o+1]=0; m[o+2]=0; m[o+3]=0;
-  m[o+4]=0; m[o+5]=sy; m[o+6]=0; m[o+7]=0;
-  m[o+8]=0; m[o+9]=0; m[o+10]=sz; m[o+11]=0;
-  m[o+12]=x; m[o+13]=y; m[o+14]=z; m[o+15]=1;
-}
-// cylinder of radius r from point a to point b
-function writeThread(m,o,ax_,ay_,az_,bx,by,bz,r){
-  let dx=bx-ax_, dy=by-ay_, dz=bz-az_; const len=Math.hypot(dx,dy,dz)||1e-4;
-  dx/=len; dy/=len; dz/=len;
-  // basis: u ⟂ d, w = d × u
-  let ux=1,uy=0,uz=0; if(Math.abs(dx)>0.9){ux=0;uz=1;}
-  const dot=ux*dx+uy*dy+uz*dz; ux-=dx*dot; uy-=dy*dot; uz-=dz*dot;
-  const ul=Math.hypot(ux,uy,uz); ux/=ul; uy/=ul; uz/=ul;
-  const wx=dy*uz-dz*uy, wy=dz*ux-dx*uz, wz=dx*uy-dy*ux;
-  m[o]=ux*r; m[o+1]=uy*r; m[o+2]=uz*r; m[o+3]=0;
-  m[o+4]=dx*len; m[o+5]=dy*len; m[o+6]=dz*len; m[o+7]=0;
-  m[o+8]=wx*r; m[o+9]=wy*r; m[o+10]=wz*r; m[o+11]=0;
-  m[o+12]=(ax_+bx)/2; m[o+13]=(ay_+by)/2; m[o+14]=(az_+bz)/2; m[o+15]=1;
-}
-
 function renderDrops(){
   const nk=kinds.length, cnt=new Int32Array(nk);
   const mats=dropMeshes.map(m=>m.instanceMatrix.array), cols=dropMeshes.map(m=>m.instanceColor.array);
-  const tM=tearMesh.instanceMatrix.array, tC=tearMesh.instanceColor.array;
-  const bM=blobMesh.instanceMatrix.array, bC=blobMesh.instanceColor.array;
-  const hM=threadMesh.instanceMatrix.array, hC=threadMesh.instanceColor.array;
-  let nt=0, nb=0, nh=0;
-  const visc=P.visc, threadLife=0.05+visc*0.75;
   for(let id=0;id<MAX_DROPS;id++){
     const s=st[id]; if(s===0) continue;
-    if(liq[id]){
-      const size=sz[id];
-      if(s===4||s===1){
-        let sx=size, sy=size, x=px[id], y=py[id], z=pz[id], top;
-        if(s===4){
-          // swelling and stretching while still attached
-          const k=Math.min(1,(simT-landT[id])/spin[id]);
-          sx=size*(0.35+0.65*k); sy=sx*(1+k*(0.4+visc*0.9));
-          x=hx[id]; z=hz[id]; y=hy[id]-0.3-k*0.6*(1+visc);
-        }else{
-          const stretch=1+Math.min(1.1,Math.abs(vy[id])*0.018);
-          sy=size*stretch; sx=size/Math.sqrt(stretch);
-        }
-        top=y+sy*0.55;
-        writeScaled(tM,nt*16,sx,sy,sx,x,y,z);
-        tC[nt*3]=cr[id]; tC[nt*3+1]=cg[id]; tC[nt*3+2]=cb[id]; nt++;
-        // honey string back to where it came from
-        const tt=s===4?0:(simT-relT[id])/threadLife;
-        if(tt<1 && nh<8000 && visc>0.15){
-          const r=size*(0.05+0.09*visc)*(1-tt)*(s===4?1.6:1);
-          writeThread(hM,nh*16,hx[id],hy[id],hz[id],x,top,z,r);
-          hC[nh*3]=cr[id]; hC[nh*3+1]=cg[id]; hC[nh*3+2]=cb[id]; nh++;
-        }
-      }else{
-        // puddle blob: squashes on impact, then spreads out slowly
-        const t=simT-landT[id];
-        const spreadMax=1.45+(1-visc)*0.6;
-        let sp=1+(spreadMax-1)*(1-Math.exp(-t/(0.08+visc*0.9)));
-        let sy=th[id]*2.1;
-        if(t<0.8){ const q=Math.exp(-t*(10-visc*5))*Math.cos(t*(26-visc*10))*(0.25+visc*0.35); sy*=1-q; sp*=1+q*0.4; }
-        if(s===3){ const k=Math.max(0,1-t/0.5); sy*=k; sp*=0.7+0.3*k; }
-        const w=size*sp;
-        writeScaled(bM,nb*16,w,sy,w,rx[id],ry[id]-th[id]*0.5+sy*0.5,rz[id]);
-        bC[nb*3]=cr[id]; bC[nb*3+1]=cg[id]; bC[nb*3+2]=cb[id]; nb++;
-      }
-      continue;
-    }
     let size=sz[id], sx=size, sy=size, szz=size, yoff=0, a=ang[id];
     if(s===1){
       // stretch along the fall direction like a drip
@@ -1046,9 +1378,6 @@ function renderDrops(){
     const sk=(s===2||s===3)?1-Math.exp(-(simT-landT[id])*10):0;
     m[o+12]=px[id]+jx[id]*sk; m[o+13]=py[id]+yoff+jy[id]*sk; m[o+14]=pz[id]+jz[id]*sk; m[o+15]=1;
     ca[n*3]=cr[id]; ca[n*3+1]=cg[id]; ca[n*3+2]=cb[id];
-  }
-  for(const [mesh,n] of [[tearMesh,nt],[blobMesh,nb],[threadMesh,nh]]){
-    mesh.count=n; mesh.instanceMatrix.needsUpdate=true; mesh.instanceColor.needsUpdate=true;
   }
   dropMeshes.forEach((m,k)=>{ m.count=cnt[k]; m.instanceMatrix.needsUpdate=true; m.instanceColor.needsUpdate=true; });
 }
@@ -1184,18 +1513,19 @@ document.getElementById('selShape').addEventListener('change',e=>{
 document.getElementById('selColor').addEventListener('change',e=>{ P.colorMode=e.target.value; applyMaterial(); });
 bindRange('sTumble','tumble','vTumble',f1);
 bindCheck('cScreenSame','screenSame',()=>{ if(L) setupShapes(); });
-bindRange('sVisc','visc','vVisc',f2);
+bindRange('sVisc','visc','vVisc',f2,()=>applyFluidParams());
 bindRange('sMess','mess','vMess',f2);
 document.getElementById('selMat').addEventListener('change',e=>{
-  const wasLiquid=MAT().liquid;
   P.mat=e.target.value;
   const m=MAT();
   if(m.liquid){
     P.visc=m.visc; document.getElementById('sVisc').value=m.visc; document.getElementById('vVisc').textContent=m.visc.toFixed(2);
-    applyLiquidMat();
+    applyFluidParams();
   }
-  if(L && (wasLiquid!==m.liquid || P.screenSame)) setupShapes();
 });
+bindRange('sMaxFluid','maxFluid','vMaxFluid',v=>v.toLocaleString(),()=>{ FP.maxN=P.maxFluid; });
+bindCheck('cTray','tray',()=>{ if(trayMesh) trayMesh.visible=P.tray; });
+document.getElementById('selFQ').addEventListener('change',e=>{ FR.scale=parseFloat(e.target.value); });
 document.getElementById('selTrigger').addEventListener('change',e=>P.trigger=e.target.value);
 P.trigger=document.getElementById('selTrigger').value;
 bindRange('sRate','rate','vRate');
@@ -1223,7 +1553,7 @@ function frame(now){
   requestAnimationFrame(frame);
   const real=(now-last)/1000, dt=Math.min(1/30,real); last=now;
   fpsAcc+=real; fpsN++;
-  if(fpsAcc>0.5){ document.getElementById('stFps').textContent=Math.round(fpsN/fpsAcc); document.getElementById('stDrops').textContent=liveCount.toLocaleString(); fpsAcc=0; fpsN=0; }
+  if(fpsAcc>0.5){ document.getElementById('stFps').textContent=Math.round(fpsN/fpsAcc); document.getElementById('stDrops').textContent=(liveCount+fl.n).toLocaleString(); fpsAcc=0; fpsN=0; }
 
   if(!paused){
     simT+=dt;
@@ -1231,10 +1561,12 @@ function frame(now){
     const fresh=sampleSource();
     if(fresh||srcKind==='image') updateScreen(dt,P.rate*dt);
     stepDrops(dt);
+    stepFluid(dt);
   }
   if(P.auto){ autoT+=dt; updateCamera(); }
   renderDrops();
-  renderer.render(scene,camera);
+  camera.updateMatrixWorld();
+  renderWithFluid();
 }
 
 resize();
