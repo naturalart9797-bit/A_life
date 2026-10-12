@@ -124,6 +124,13 @@ const CATEGORIES=[
       {file:'vine_growth_morph.html', name:'蔓モーフ（2枚）', en:'Vine Growth Morph', desc:'AからBへ糸が伸びて形を描き替える成長モーフ。', tags:['先端成長','2枚モーフ'], vis:'vine'},
     ]
   },
+  {
+    title:'制作ツール', en:'Production Tools', color:'#e0a050',
+    desc:'作品づくりの企画・演出に使うツール。',
+    items:[
+      {file:'storyboard.html', name:'絵コンテ制作', en:'Storyboard', desc:'ドラッグで並べ替え・手描きスケッチ・ビデオコンテ再生・A4印刷。', tags:['絵コンテ','ツール'], vis:'story'},
+    ]
+  },
 ];
 
 // ─────────────────────────────────────────────
@@ -257,6 +264,17 @@ function drawPreview(p){
     // reaction-diffusion-ish spots
     if(!p.state){p.state=[];for(let i=0;i<24;i++)p.state.push({x:Math.random()*w,y:Math.random()*h,r:3+Math.random()*5,ph:Math.random()*6.28});}
     for(const s of p.state){const rr=s.r*(1+0.3*Math.sin(t*2+s.ph));ctx.fillStyle=`rgba(${cr},${cg},${cb},0.6)`;ctx.beginPath();ctx.arc(s.x,s.y,rr,0,6.28);ctx.fill();}
+  } else if(vis==='story'){
+    // storyboard frames sliding past
+    ctx.fillStyle='#05060a';ctx.fillRect(0,0,w,h);
+    const fw=62,fh=36,gap=14,off=(t*18)%(fw+gap);
+    for(let i=-1;i*(fw+gap)<w+fw;i++){
+      const x=i*(fw+gap)-off+gap,y=h/2-fh/2;
+      ctx.strokeStyle=`rgba(${cr},${cg},${cb},0.8)`;ctx.lineWidth=1;ctx.strokeRect(x,y,fw,fh);
+      const k=i+Math.floor(t*18/(fw+gap));
+      ctx.beginPath();ctx.moveTo(x+8,y+fh-8);ctx.lineTo(x+20+(k*13%30),y+10+(k*7%14));ctx.lineTo(x+fw-8,y+fh-10);ctx.stroke();
+      ctx.fillStyle=`rgba(${cr},${cg},${cb},0.5)`;ctx.fillRect(x,y+fh+5,fw*0.6,2);
+    }
   } else {
     // default
     ctx.fillStyle=`rgba(${cr},${cg},${cb},0.6)`;
