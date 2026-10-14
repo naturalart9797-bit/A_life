@@ -1,0 +1,13 @@
+schema_version = "1.0.0"
+
+id = "thorn_forest"
+version = "1.0.0"
+name = "Thorn Forest Generator"
+tagline = "Generate a forest of twisted thorns, brambles and roses"
+maintainer = "A_life"
+type = "add-on"
+
+blender_version_min = "4.2.0"
+
+license = ["SPDX:MIT"]
+tags = ["Add Mesh", "Object"]
