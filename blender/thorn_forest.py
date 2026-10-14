@@ -2,8 +2,8 @@
 """
 茨の森ジェネレーター (Thorn Forest Generator) for Blender
 
-株から立ち上がってアーチを描き、先端が地面に着くとそこから再び立ち上がる
-茨の茎と、鉤状のトゲを手続き生成する Blender アドオン。
+地を這って広がる茨と上へ伸びる茨の 2 種類の茎と、鉤状のトゲを
+手続き生成する Blender アドオン。
 
 使い方:
   * アドオンとして: 編集 > プリファレンス > アドオン > インストール でこのファイルを選択
@@ -17,10 +17,10 @@
 bl_info = {
     "name": "Thorn Forest Generator (茨の森)",
     "author": "A_life",
-    "version": (1, 1, 0),
+    "version": (1, 2, 0),
     "blender": (3, 6, 0),
     "location": "View3D > Sidebar > 茨の森",
-    "description": "アーチを描いて絡み合う茨の茂みとトゲを手続き生成する",
+    "description": "地を這う茨と上へ伸びる茨・トゲを手続き生成する",
     "category": "Add Mesh",
 }
 
@@ -44,19 +44,18 @@ UP = Vector((0.0, 0.0, 1.0))
 SETTINGS = {
     "seed": ("int", 1, 0, 1_000_000, "シード", "乱数シード"),
     "area_size": ("float", 24.0, 2.0, 500.0, "範囲", "森を生成する正方形の一辺 (m)"),
-    "clump_count": ("int", 16, 0, 500, "大きな株の数", "背の高い茨の株の数"),
-    "min_spacing": ("float", 2.5, 0.0, 50.0, "最小間隔", "大きな株どうしの最小距離 (m)"),
-    "clump_canes": ("int", 10, 1, 40, "株あたりの茎", "大きな株 1 つから伸びる茎の数"),
-    "cane_length": ("float", 6.0, 0.5, 50.0, "茎の長さ", "大きな株の茎の長さ (m)"),
-    "cane_radius": ("float", 0.05, 0.003, 1.0, "茎の太さ", "茎の根元の半径 (m)"),
-    "stiffness": ("float", 0.5, 0.0, 3.0, "立ち上がり", "大きいほど茎がまっすぐ高く伸びてから垂れる"),
+    "creeper_count": ("int", 70, 0, 2000, "這う茨の数", "地面を這って広がる茨の本数"),
+    "creeper_length": ("float", 8.0, 0.5, 50.0, "這う茨の長さ", "地を這う茎の長さ (m)"),
+    "creeper_radius": ("float", 0.035, 0.003, 1.0, "這う茨の太さ", "地を這う茎の根元の半径 (m)"),
+    "creeper_lift": ("float", 0.3, 0.0, 3.0, "浮き上がり", "地を這う茎がところどころ地面から浮く高さ (m)"),
+    "upright_count": ("int", 40, 0, 2000, "伸びる茨の数", "上へ伸びる茨の本数"),
+    "min_spacing": ("float", 1.5, 0.0, 50.0, "最小間隔", "上へ伸びる茨どうしの最小距離 (m)"),
+    "upright_height": ("float", 5.0, 0.5, 50.0, "伸びる茨の高さ", "上へ伸びる茎の長さ (m)"),
+    "upright_radius": ("float", 0.05, 0.003, 1.0, "伸びる茨の太さ", "上へ伸びる茎の根元の半径 (m)"),
+    "upright_lean": ("float", 10.0, 0.0, 60.0, "傾き", "上へ伸びる茎が鉛直から傾く最大角度 (度)"),
     "branch_levels": ("int", 2, 0, 4, "枝の階層", "枝分かれの深さ"),
-    "branches_per_vine": ("int", 3, 0, 12, "枝の数", "1 本の茎から出る枝の数"),
+    "branches_per_vine": ("float", 1.2, 0.0, 10.0, "枝の数", "茎 1 m あたりの枝の数"),
     "branch_ratio": ("float", 0.5, 0.05, 1.0, "枝の長さ比", "親の残り長さに対する枝の長さ"),
-    "bramble_count": ("int", 60, 0, 2000, "小さな藪の数", "低い茨の茂みの数"),
-    "bramble_canes": ("int", 5, 1, 20, "藪あたりの茎", "小さな藪 1 つから伸びる茎の数"),
-    "bramble_length": ("float", 3.0, 0.2, 30.0, "藪の茎の長さ", "小さな藪の茎の長さ (m)"),
-    "tip_rooting": ("bool", True, None, None, "先端から発根", "地面に着いた茎の先から新しい茎が立ち上がる"),
     "wiggle": ("float", 0.45, 0.0, 3.0, "うねり", "茎の曲がりの強さ"),
     "droop": ("float", 1.0, 0.0, 3.0, "垂れ下がり", "茎が先端に向かって垂れる強さ"),
     "step": ("float", 0.1, 0.02, 1.0, "解像度", "茎のサンプリング間隔 (m)。小さいほど滑らかで重い"),
@@ -175,54 +174,80 @@ def poisson_points(rng, count, half, min_dist, tries=30):
     return pts
 
 
-def spawn_branches(rng, s, vine, level, out):
+HUMP_OFFSET = Vector((17.3, 41.7, 5.9))
+
+
+def creep(rng, start, heading, length, s, z0):
+    """地面を這う茎の点列。水平面内で向きを変えながら進み、
+    ところどころ (地形のように共通のノイズ場で) 地面から弧状に浮く。"""
+    step = s.step
+    n = max(4, int(length / step))
+    x, y = start.x, start.y
+    off = Vector((rng.uniform(-500, 500), rng.uniform(-500, 500), 0.0))
+    pts = []
+    for i in range(n + 1):
+        if i:
+            # 進行方向は元の向きのまわりで蛇行させる (累積させると渦を巻いてしまう)
+            a = heading + noise.noise(Vector((i * step * 0.5, 0.0, 0.0)) + off) * s.wiggle * 2.6
+            a += rng.gauss(0.0, s.wiggle * 0.04)
+            x += math.cos(a) * step
+            y += math.sin(a) * step
+        h = noise.noise(Vector((x * 0.45, y * 0.45, 0.0)) + HUMP_OFFSET)
+        z = z0 + s.creeper_lift * min(1.0, max(0.0, h) * 1.8) ** 1.5
+        pts.append(Vector((x, y, z)))
+    return pts
+
+
+def spawn_branches(rng, s, vine, level, out, creeping):
     if level >= s.branch_levels or s.branches_per_vine <= 0:
         return
     n = len(vine.points)
     if n < 6:
         return
     total = vine.length()
-    for _ in range(s.branches_per_vine):
+    count = int(s.branches_per_vine * total + rng.random())
+    for _ in range(count):
         t = rng.uniform(0.2, 0.9)
         i = min(n - 2, int(t * (n - 1)))
         p = vine.points[i]
         tan = vine.tangent(i)
-        side = tan.cross(random_unit(rng))
-        side = side.normalized() if side.length > 1e-6 else any_perpendicular(tan)
-        if side.z > 0.0:  # 真上に突き出す枝は不自然なので横向きへ寄せる
-            side.z *= 0.3
-            side.normalize()
-        ang = math.radians(rng.uniform(25.0, 60.0))
-        d = tan * math.cos(ang) + side * math.sin(ang)
         length = total * (1.0 - t) * s.branch_ratio * rng.uniform(0.7, 1.2)
         if length < s.step * 4:
             continue
-        child = Vine(grow(rng, p.copy(), d, length, s, up_bias=0.0, droop=s.droop * 1.2), vine.radius(i) * 0.6)
+        r = vine.radius(i) * 0.6
+        if creeping:
+            heading = math.atan2(tan.y, tan.x) + rng.choice((-1, 1)) * math.radians(rng.uniform(30.0, 70.0))
+            pts = creep(rng, p, heading, length, s, r)
+        else:
+            side = tan.cross(random_unit(rng))
+            side = side.normalized() if side.length > 1e-6 else any_perpendicular(tan)
+            ang = math.radians(rng.uniform(25.0, 60.0))
+            d = tan * math.cos(ang) + side * math.sin(ang)
+            pts = grow(rng, p.copy(), d, length, s, up_bias=0.0, droop=s.droop * 1.2)
+        child = Vine(pts, r)
         out.append(child)
-        spawn_branches(rng, s, child, level + 1, out)
+        spawn_branches(rng, s, child, level + 1, out, creeping)
 
 
-def build_clump(rng, s, base, canes, length, radius, up_bias, lean, out, generation=0):
-    """根元付近からまとまって伸びる茎の株。
+def build_creeper(rng, s, base, out):
+    """地を這う茨: 1 本の茎が地面を這って進み、横へ這う枝を出す。"""
+    r = s.creeper_radius * rng.uniform(0.7, 1.3)
+    pts = creep(rng, base, rng.uniform(0, math.tau), s.creeper_length * rng.uniform(0.6, 1.3), s, r)
+    vine = Vine(pts, r)
+    out.append(vine)
+    spawn_branches(rng, s, vine, 0, out, creeping=True)
 
-    茎は外側へ傾いて立ち上がり、重さでアーチを描いて垂れる。先端が地面に
-    着いた茎は (tip_rooting 有効時) そこから小さな株として再び立ち上がる。
-    """
-    for _ in range(canes):
-        r = 0.25 * math.sqrt(rng.random())
-        a = rng.uniform(0, math.tau)
-        start = base + Vector((math.cos(a) * r, math.sin(a) * r, 0.0))
-        az = rng.uniform(0, math.tau)
-        tilt = math.radians(rng.uniform(*lean))
-        d = Vector((math.cos(az) * math.sin(tilt), math.sin(az) * math.sin(tilt), math.cos(tilt)))
-        pts = grow(rng, start, d, length * rng.uniform(0.6, 1.25), s, up_bias=up_bias * rng.uniform(0.7, 1.3))
-        cane = Vine(pts, radius * rng.uniform(0.6, 1.2))
-        out.append(cane)
-        spawn_branches(rng, s, cane, 0, out)
-        tip = pts[-1]
-        if s.tip_rooting and generation == 0 and tip.z <= 0.0 and len(pts) > 10:
-            build_clump(rng, s, tip, max(1, canes // 3), length * 0.5, radius * 0.6,
-                        up_bias * 0.8, (15, 45), out, generation + 1)
+
+def build_upright(rng, s, base, out):
+    """上へ伸びる茨: ほぼ鉛直に伸び、先端がわずかにしなる。枝は斜め上へ出て垂れる。"""
+    az = rng.uniform(0, math.tau)
+    tilt = math.radians(rng.uniform(0.0, s.upright_lean))
+    d = Vector((math.cos(az) * math.sin(tilt), math.sin(az) * math.sin(tilt), math.cos(tilt)))
+    pts = grow(rng, base, d, s.upright_height * rng.uniform(0.7, 1.3), s,
+               up_bias=0.8, droop=s.droop * 0.25)
+    vine = Vine(pts, s.upright_radius * rng.uniform(0.75, 1.25))
+    out.append(vine)
+    spawn_branches(rng, s, vine, 0, out, creeping=False)
 
 
 def build_vines(s):
@@ -230,13 +255,10 @@ def build_vines(s):
     noise.seed_set(s.seed)  # ノイズ表はプロセスごとに乱数初期化されるので固定する
     half = s.area_size * 0.5
     vines = []
-    for base in poisson_points(rng, s.clump_count, half * 0.9, s.min_spacing):
-        build_clump(rng, s, base, s.clump_canes, s.cane_length, s.cane_radius,
-                    s.stiffness, (15, 55), vines)
-    for _ in range(s.bramble_count):
-        base = Vector((rng.uniform(-half, half), rng.uniform(-half, half), 0.0))
-        build_clump(rng, s, base, s.bramble_canes, s.bramble_length, s.cane_radius * 0.6,
-                    0.2, (35, 70), vines)
+    for base in poisson_points(rng, s.upright_count, half * 0.95, s.min_spacing):
+        build_upright(rng, s, base, vines)
+    for _ in range(s.creeper_count):
+        build_creeper(rng, s, Vector((rng.uniform(-half, half), rng.uniform(-half, half), 0.0)), vines)
     return [v for v in vines if len(v.points) >= 4]
 
 
@@ -481,7 +503,7 @@ def setup_atmosphere(col, s):
     # 霧: ワールドボリュームは太陽光を完全に遮ってしまうため、森を覆う箱に入れる
     if s.fog_density > 0:
         half = s.area_size * 0.5 + 2.0
-        top = max(s.cane_length * 1.5, 4.0)
+        top = max(s.upright_height * 1.5, 4.0)
         mb = MeshBuilder()
         mb.add(
             [Vector((x, y, z)) for z in (0.0, top) for x, y in ((-half, -half), (half, -half), (half, half), (-half, half))],
@@ -588,9 +610,9 @@ class THORNFOREST_OT_randomize(bpy.types.Operator):
 
 PANEL_LAYOUT = (
     ("全体", ("seed", "area_size", "step")),
-    ("大きな株", ("clump_count", "min_spacing", "clump_canes", "cane_length", "cane_radius", "stiffness")),
-    ("小さな藪", ("bramble_count", "bramble_canes", "bramble_length")),
-    ("茎の形", ("branch_levels", "branches_per_vine", "branch_ratio", "wiggle", "droop", "tip_rooting")),
+    ("地を這う茨", ("creeper_count", "creeper_length", "creeper_radius", "creeper_lift")),
+    ("上へ伸びる茨", ("upright_count", "min_spacing", "upright_height", "upright_radius", "upright_lean")),
+    ("茎の形", ("branch_levels", "branches_per_vine", "branch_ratio", "wiggle", "droop")),
     ("トゲ", ("thorn_density", "thorn_size", "thorn_hook")),
     ("シーン", ("ground", "atmosphere", "fog_density", "convert_to_mesh", "clear_previous")),
 )
@@ -671,7 +693,7 @@ def _cli(argv):
         cam = bpy.data.objects.new("TF_Camera", cam_data)
         scene.collection.objects.link(cam)
         r = s.area_size * 0.62
-        h = s.cane_length * 0.5
+        h = s.upright_height * 0.6
         cam.location = (r, -r, h * 0.9)
         look = Vector((0, 0, h * 0.35)) - cam.location
         cam.rotation_euler = look.to_track_quat("-Z", "Y").to_euler()
