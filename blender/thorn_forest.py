@@ -61,12 +61,12 @@ SETTINGS = {
     "droop": ("float", 1.0, 0.0, 3.0, "垂れ下がり", "茎が先端に向かって垂れる強さ"),
     "step": ("float", 0.1, 0.02, 1.0, "解像度", "茎のサンプリング間隔 (m)。小さいほど滑らかで重い"),
     "thorn_density": ("float", 7.0, 0.0, 60.0, "トゲ密度", "1 m あたりのトゲの数"),
-    "thorn_size": ("float", 0.09, 0.005, 1.0, "トゲの長さ", "最も太い蔓でのトゲの長さ (m)"),
+    "thorn_size": ("float", 0.09, 0.005, 1.0, "トゲの長さ", "最も太い茎でのトゲの長さ (m)"),
     "thorn_hook": ("float", 0.5, -1.0, 2.0, "トゲの反り", "トゲが根元側へ鉤状に曲がる量"),
     "ground": ("bool", True, None, None, "地面", "地面を作成する"),
     "atmosphere": ("bool", True, None, None, "雰囲気", "霧・月光・暗い空を設定する"),
     "fog_density": ("float", 0.025, 0.0, 1.0, "霧の濃さ", "地表付近の霧の密度 (上空ほど薄くなる)"),
-    "convert_to_mesh": ("bool", False, None, None, "メッシュに変換", "蔓のカーブをメッシュに変換する (書き出し用)"),
+    "convert_to_mesh": ("bool", False, None, None, "メッシュに変換", "茎のカーブをメッシュに変換する (書き出し用)"),
     "clear_previous": ("bool", True, None, None, "前回分を削除", f"「{COLLECTION_NAME}」コレクションの中身を消してから生成する"),
 }
 
@@ -87,7 +87,7 @@ def default_settings(**overrides):
 # ---------------------------------------------------------------------------
 
 class Vine:
-    """太さが先細りする 1 本の蔓 (折れ線)。"""
+    """太さが先細りする 1 本の茎 (折れ線)。"""
 
     __slots__ = ("points", "r0", "r1")
 
@@ -241,7 +241,7 @@ def build_vines(s):
 
 
 def sample_along(rng, vine, density):
-    """密度 (個/m) に従って蔓上の位置 (index, 補間位置, 0..1 の t) を返す。"""
+    """密度 (個/m) に従って茎上の位置 (index, 補間位置, 0..1 の t) を返す。"""
     if density <= 0:
         return
     pts = vine.points
