@@ -1,9 +1,9 @@
 schema_version = "1.0.0"
 
 id = "thorn_forest"
-version = "1.2.0"
+version = "2.0.0"
 name = "Thorn Forest Generator"
-tagline = "Generate creeping and climbing thorny vines"
+tagline = "Generate realistic thorny shrubs with varied sizes"
 maintainer = "A_life"
 type = "add-on"
 
