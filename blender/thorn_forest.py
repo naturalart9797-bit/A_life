@@ -2,8 +2,8 @@
 """
 茨の森ジェネレーター (Thorn Forest Generator) for Blender
 
-ねじれた茨の幹・アーチを描いて垂れ下がる蔓・地を這う藪・鉤状のトゲ・
-葉・薔薇をまとめて手続き生成する Blender アドオン。
+株から立ち上がってアーチを描き、先端が地面に着くとそこから再び立ち上がる
+茨の茎と、鉤状のトゲを手続き生成する Blender アドオン。
 
 使い方:
   * アドオンとして: 編集 > プリファレンス > アドオン > インストール でこのファイルを選択
@@ -17,10 +17,10 @@
 bl_info = {
     "name": "Thorn Forest Generator (茨の森)",
     "author": "A_life",
-    "version": (1, 0, 0),
+    "version": (1, 1, 0),
     "blender": (3, 6, 0),
     "location": "View3D > Sidebar > 茨の森",
-    "description": "ねじれた茨の木・藪・トゲ・薔薇からなる茨の森を手続き生成する",
+    "description": "アーチを描いて絡み合う茨の茂みとトゲを手続き生成する",
     "category": "Add Mesh",
 }
 
@@ -44,32 +44,25 @@ UP = Vector((0.0, 0.0, 1.0))
 SETTINGS = {
     "seed": ("int", 1, 0, 1_000_000, "シード", "乱数シード"),
     "area_size": ("float", 24.0, 2.0, 500.0, "範囲", "森を生成する正方形の一辺 (m)"),
-    "tree_count": ("int", 9, 0, 200, "茨の木の数", "ねじれた幹を持つ茨の木の本数"),
-    "min_spacing": ("float", 3.0, 0.0, 50.0, "最小間隔", "茨の木どうしの最小距離 (m)"),
-    "trunk_height": ("float", 5.0, 0.5, 50.0, "幹の高さ", "幹の長さ (m)"),
-    "trunk_strands": ("int", 4, 1, 12, "幹の本数", "1 本の幹を構成するねじれた蔓の数"),
-    "trunk_radius": ("float", 0.28, 0.0, 5.0, "幹の太さ", "蔓が巻きつく螺旋の半径 (m)"),
-    "strand_radius": ("float", 0.09, 0.005, 2.0, "蔓の太さ", "幹を構成する蔓の根元半径 (m)"),
-    "twist": ("float", 1.5, 0.0, 10.0, "ねじれ", "幹全体での巻き数"),
-    "crown_length": ("float", 4.0, 0.0, 30.0, "樹冠の蔓の長さ", "幹の先端から垂れ下がる蔓の長さ (m)"),
+    "clump_count": ("int", 16, 0, 500, "大きな株の数", "背の高い茨の株の数"),
+    "min_spacing": ("float", 2.5, 0.0, 50.0, "最小間隔", "大きな株どうしの最小距離 (m)"),
+    "clump_canes": ("int", 10, 1, 40, "株あたりの茎", "大きな株 1 つから伸びる茎の数"),
+    "cane_length": ("float", 6.0, 0.5, 50.0, "茎の長さ", "大きな株の茎の長さ (m)"),
+    "cane_radius": ("float", 0.05, 0.003, 1.0, "茎の太さ", "茎の根元の半径 (m)"),
+    "stiffness": ("float", 0.5, 0.0, 3.0, "立ち上がり", "大きいほど茎がまっすぐ高く伸びてから垂れる"),
     "branch_levels": ("int", 2, 0, 4, "枝の階層", "枝分かれの深さ"),
-    "branches_per_vine": ("int", 3, 0, 12, "枝の数", "1 本の蔓から出る枝の数"),
-    "branch_ratio": ("float", 0.55, 0.05, 1.0, "枝の長さ比", "親の残り長さに対する枝の長さ"),
-    "bramble_count": ("int", 35, 0, 2000, "藪の数", "地面を這ってアーチを描く茨の株の数"),
-    "bramble_length": ("float", 4.5, 0.2, 30.0, "藪の蔓の長さ", "藪の蔓の長さ (m)"),
-    "bramble_canes": ("int", 6, 1, 20, "株あたりの蔓", "藪 1 株から伸びる蔓の数"),
-    "wiggle": ("float", 0.6, 0.0, 3.0, "うねり", "蔓のうねりの強さ"),
-    "droop": ("float", 0.9, 0.0, 3.0, "垂れ下がり", "蔓が先端に向かって垂れる強さ"),
-    "step": ("float", 0.12, 0.02, 1.0, "解像度", "蔓のサンプリング間隔 (m)。小さいほど滑らかで重い"),
+    "branches_per_vine": ("int", 3, 0, 12, "枝の数", "1 本の茎から出る枝の数"),
+    "branch_ratio": ("float", 0.5, 0.05, 1.0, "枝の長さ比", "親の残り長さに対する枝の長さ"),
+    "bramble_count": ("int", 60, 0, 2000, "小さな藪の数", "低い茨の茂みの数"),
+    "bramble_canes": ("int", 5, 1, 20, "藪あたりの茎", "小さな藪 1 つから伸びる茎の数"),
+    "bramble_length": ("float", 3.0, 0.2, 30.0, "藪の茎の長さ", "小さな藪の茎の長さ (m)"),
+    "tip_rooting": ("bool", True, None, None, "先端から発根", "地面に着いた茎の先から新しい茎が立ち上がる"),
+    "wiggle": ("float", 0.45, 0.0, 3.0, "うねり", "茎の曲がりの強さ"),
+    "droop": ("float", 1.0, 0.0, 3.0, "垂れ下がり", "茎が先端に向かって垂れる強さ"),
+    "step": ("float", 0.1, 0.02, 1.0, "解像度", "茎のサンプリング間隔 (m)。小さいほど滑らかで重い"),
     "thorn_density": ("float", 7.0, 0.0, 60.0, "トゲ密度", "1 m あたりのトゲの数"),
     "thorn_size": ("float", 0.09, 0.005, 1.0, "トゲの長さ", "最も太い蔓でのトゲの長さ (m)"),
     "thorn_hook": ("float", 0.5, -1.0, 2.0, "トゲの反り", "トゲが根元側へ鉤状に曲がる量"),
-    "leaves": ("bool", True, None, None, "葉", "細い蔓に葉を付ける"),
-    "leaf_density": ("float", 3.0, 0.0, 40.0, "葉の密度", "細い蔓 1 m あたりの葉の数"),
-    "leaf_size": ("float", 0.09, 0.005, 1.0, "葉の大きさ", "葉の長さ (m)"),
-    "roses": ("bool", True, None, None, "薔薇", "蔓の先端に薔薇を咲かせる"),
-    "rose_count": ("int", 25, 0, 2000, "薔薇の数", "咲かせる薔薇の数"),
-    "rose_size": ("float", 0.12, 0.01, 2.0, "薔薇の大きさ", "薔薇の半径 (m)"),
     "ground": ("bool", True, None, None, "地面", "地面を作成する"),
     "atmosphere": ("bool", True, None, None, "雰囲気", "霧・月光・暗い空を設定する"),
     "fog_density": ("float", 0.025, 0.0, 1.0, "霧の濃さ", "地表付近の霧の密度 (上空ほど薄くなる)"),
@@ -96,14 +89,12 @@ def default_settings(**overrides):
 class Vine:
     """太さが先細りする 1 本の蔓 (折れ線)。"""
 
-    __slots__ = ("points", "r0", "r1", "center")
+    __slots__ = ("points", "r0", "r1")
 
-    def __init__(self, points, r0, r1=None, center=None):
+    def __init__(self, points, r0, r1=None):
         self.points = points
         self.r0 = r0
         self.r1 = r0 * 0.12 if r1 is None else r1
-        # 幹の蔓のときは螺旋の中心線 (枝を外向きに出すため)
-        self.center = center
 
     def radius(self, i):
         t = i / max(1, len(self.points) - 1)
@@ -133,10 +124,10 @@ def random_unit(rng):
 
 
 def grow(rng, start, direction, length, s, up_bias=0.0, droop=None, wiggle=None):
-    """方向を少しずつ曲げながら成長する蔓の点列を返す。
+    """方向を少しずつ曲げながら成長する茎の点列を返す。
 
-    うねり (ノイズ場)・上向きの成長 (前半)・重力による垂れ (後半) を合成し、
-    地面に当たったら地表を這わせる。
+    なめらかなうねり (低周波ノイズ)・節ごとの小さな折れ・前半の上向きの成長・
+    後半の重力による垂れを合成する。地面に着いたらそこで止まる。
     """
     droop = s.droop if droop is None else droop
     wiggle = s.wiggle if wiggle is None else wiggle
@@ -145,39 +136,32 @@ def grow(rng, start, direction, length, s, up_bias=0.0, droop=None, wiggle=None)
     d = direction.normalized()
     p = start.copy()
     offset = Vector((rng.uniform(-500, 500), rng.uniform(-500, 500), rng.uniform(-500, 500)))
+    node = rng.uniform(0.15, 0.4)
+    walked = 0.0
     pts = [p.copy()]
     for i in range(n):
         t = i / n
-        turn = noise.noise_vector(p * 0.7 + offset) * wiggle * 1.6
+        turn = noise.noise_vector(p * 0.35 + offset) * wiggle * 1.6
         turn += UP * (up_bias * (1.0 - t) * 2.0)
         turn -= UP * (droop * t * 2.2)
         d = (d + turn * step).normalized()
+        walked += step
+        if walked >= node:  # 節: 向きがわずかに変わる
+            walked = 0.0
+            node = rng.uniform(0.15, 0.4)
+            d = (d + random_unit(rng) * wiggle * 0.12).normalized()
         p = p + d * step
-        if p.z < 0.02:  # 地面: 這わせる
-            p.z = 0.02
-            if d.z < 0.0:
-                d.z = abs(d.z) * 0.3
+        if p.z <= 0.0:
+            if i < 3:  # 生え際は地面から持ち上げる
+                p.z = 0.01
+                d.z = abs(d.z)
                 d.normalize()
+            else:
+                p.z = 0.0
+                pts.append(p.copy())
+                break
         pts.append(p.copy())
     return pts
-
-
-def parallel_transport_frames(pts):
-    """点列に沿ってねじれの少ない (tangent, normal, binormal) を返す。"""
-    n = len(pts)
-    tangents = []
-    for i in range(n):
-        d = pts[min(n - 1, i + 1)] - pts[max(0, i - 1)]
-        tangents.append(d.normalized() if d.length > 1e-9 else UP.copy())
-    normal = any_perpendicular(tangents[0])
-    frames = []
-    prev = tangents[0]
-    for t in tangents:
-        normal = prev.rotation_difference(t) @ normal
-        normal = (normal - t * normal.dot(t)).normalized()
-        frames.append((t, normal, t.cross(normal)))
-        prev = t
-    return frames
 
 
 def poisson_points(rng, count, half, min_dist, tries=30):
@@ -203,89 +187,42 @@ def spawn_branches(rng, s, vine, level, out):
         i = min(n - 2, int(t * (n - 1)))
         p = vine.points[i]
         tan = vine.tangent(i)
-        if vine.center is not None:
-            side = p - vine.center[i]
-            side = (side - tan * side.dot(tan))
-            side = side.normalized() if side.length > 1e-6 else any_perpendicular(tan)
-        else:
-            side = tan.cross(random_unit(rng))
-            side = side.normalized() if side.length > 1e-6 else any_perpendicular(tan)
-        ang = math.radians(rng.uniform(30.0, 70.0))
+        side = tan.cross(random_unit(rng))
+        side = side.normalized() if side.length > 1e-6 else any_perpendicular(tan)
+        if side.z > 0.0:  # 真上に突き出す枝は不自然なので横向きへ寄せる
+            side.z *= 0.3
+            side.normalize()
+        ang = math.radians(rng.uniform(25.0, 60.0))
         d = tan * math.cos(ang) + side * math.sin(ang)
         length = total * (1.0 - t) * s.branch_ratio * rng.uniform(0.7, 1.2)
         if length < s.step * 4:
             continue
-        child = Vine(grow(rng, p.copy(), d, length, s, up_bias=0.15), vine.radius(i) * 0.6)
+        child = Vine(grow(rng, p.copy(), d, length, s, up_bias=0.0, droop=s.droop * 1.2), vine.radius(i) * 0.6)
         out.append(child)
         spawn_branches(rng, s, child, level + 1, out)
 
 
-def build_tree(rng, s, base):
-    """ねじれた複数の蔓からなる幹 + 垂れ下がる樹冠を作る。"""
-    vines = []
-    lean = Vector((rng.uniform(-0.25, 0.25), rng.uniform(-0.25, 0.25), 1.0))
-    height = s.trunk_height * rng.uniform(0.75, 1.25)
-    spine = grow(rng, base, lean, height, s, up_bias=0.6, droop=0.0, wiggle=s.wiggle * 0.5)
-    frames = parallel_transport_frames(spine)
-    m = len(spine)
-    strands = max(1, s.trunk_strands)
-    phase0 = rng.uniform(0, math.tau)
-    for k in range(strands):
-        phase = phase0 + math.tau * k / strands
-        pts, center = [], []
-        for i, (c, (_, nrm, bnm)) in enumerate(zip(spine, frames)):
-            u = i / (m - 1)
-            R = s.trunk_radius * (1.0 + 0.8 * (1.0 - u) ** 3) * (1.0 - 0.35 * u)
-            a = phase + math.tau * s.twist * u
-            pts.append(c + (nrm * math.cos(a) + bnm * math.sin(a)) * R)
-            center.append(c)
-        # 根: 外側の地面へ広がる
-        out_dir = pts[0] - spine[0]
-        out_dir.z = 0.0
-        if out_dir.length > 1e-6 and s.trunk_radius > 0:
-            out_dir.normalize()
-            root = spine[0] + out_dir * s.trunk_radius * 3.5
-            root.z = 0.0
-            mid = spine[0] + out_dir * s.trunk_radius * 2.4
-            mid.z = s.trunk_radius * 0.25
-            pts = [root, mid] + pts
-            center = [spine[0], spine[0]] + center
-        r0 = s.strand_radius * rng.uniform(0.85, 1.15)
-        strand = Vine(pts, r0, r0 * 0.55, center)
-        vines.append(strand)
-        spawn_branches(rng, s, strand, max(0, s.branch_levels - 1), vines)
+def build_clump(rng, s, base, canes, length, radius, up_bias, lean, out, generation=0):
+    """根元付近からまとまって伸びる茎の株。
 
-        # 樹冠: 幹の先端から外へアーチを描いて垂れる
-        if s.crown_length > 0:
-            tip = pts[-1]
-            outward = tip - spine[-1]
-            outward = outward.normalized() if outward.length > 1e-6 else any_perpendicular(frames[-1][0])
-            d = frames[-1][0] * 0.6 + outward * 0.8
-            crown = Vine(
-                [tip.copy()] + grow(rng, tip.copy(), d, s.crown_length * rng.uniform(0.8, 1.3),
-                                    s, up_bias=0.35)[1:],
-                strand.r1,
-            )
-            vines.append(crown)
-            spawn_branches(rng, s, crown, 0, vines)
-    return vines
-
-
-def build_bramble(rng, s, base):
-    """地面から放射状に伸びて弧を描く藪の株。"""
-    vines = []
-    for _ in range(max(1, s.bramble_canes)):
+    茎は外側へ傾いて立ち上がり、重さでアーチを描いて垂れる。先端が地面に
+    着いた茎は (tip_rooting 有効時) そこから小さな株として再び立ち上がる。
+    """
+    for _ in range(canes):
+        r = 0.25 * math.sqrt(rng.random())
+        a = rng.uniform(0, math.tau)
+        start = base + Vector((math.cos(a) * r, math.sin(a) * r, 0.0))
         az = rng.uniform(0, math.tau)
-        elev = math.radians(rng.uniform(50, 80))
-        d = Vector((math.cos(az) * math.cos(elev), math.sin(az) * math.cos(elev), math.sin(elev)))
-        cane = Vine(
-            grow(rng, base + Vector((0, 0, 0.02)), d, s.bramble_length * rng.uniform(0.6, 1.3),
-                 s, up_bias=0.2, droop=s.droop * 1.3),
-            s.strand_radius * rng.uniform(0.45, 0.75),
-        )
-        vines.append(cane)
-        spawn_branches(rng, s, cane, max(0, s.branch_levels - 1), vines)
-    return vines
+        tilt = math.radians(rng.uniform(*lean))
+        d = Vector((math.cos(az) * math.sin(tilt), math.sin(az) * math.sin(tilt), math.cos(tilt)))
+        pts = grow(rng, start, d, length * rng.uniform(0.6, 1.25), s, up_bias=up_bias * rng.uniform(0.7, 1.3))
+        cane = Vine(pts, radius * rng.uniform(0.6, 1.2))
+        out.append(cane)
+        spawn_branches(rng, s, cane, 0, out)
+        tip = pts[-1]
+        if s.tip_rooting and generation == 0 and tip.z <= 0.0 and len(pts) > 10:
+            build_clump(rng, s, tip, max(1, canes // 3), length * 0.5, radius * 0.6,
+                        up_bias * 0.8, (15, 45), out, generation + 1)
 
 
 def build_vines(s):
@@ -293,11 +230,13 @@ def build_vines(s):
     noise.seed_set(s.seed)  # ノイズ表はプロセスごとに乱数初期化されるので固定する
     half = s.area_size * 0.5
     vines = []
-    for base in poisson_points(rng, s.tree_count, half * 0.9, s.min_spacing):
-        vines.extend(build_tree(rng, s, base))
+    for base in poisson_points(rng, s.clump_count, half * 0.9, s.min_spacing):
+        build_clump(rng, s, base, s.clump_canes, s.cane_length, s.cane_radius,
+                    s.stiffness, (15, 55), vines)
     for _ in range(s.bramble_count):
         base = Vector((rng.uniform(-half, half), rng.uniform(-half, half), 0.0))
-        vines.extend(build_bramble(rng, s, base))
+        build_clump(rng, s, base, s.bramble_canes, s.bramble_length, s.cane_radius * 0.6,
+                    0.2, (35, 70), vines)
     return [v for v in vines if len(v.points) >= 4]
 
 
@@ -382,101 +321,6 @@ def build_thorns(rng, s, vines):
     return mb
 
 
-def build_leaves(rng, s, vines):
-    mb = MeshBuilder()
-    if not s.leaves or s.leaf_density <= 0:
-        return mb
-    thin = s.strand_radius * 0.45
-    for v in vines:
-        for i, p, t in sample_along(rng, v, s.leaf_density):
-            r = v.radius(i)
-            if r > thin:
-                continue
-            tan = v.tangent(i)
-            side = tan.cross(random_unit(rng))
-            if side.length < 1e-6:
-                continue
-            side.normalize()
-            fwd = (side + tan * 0.5 + UP * 0.2).normalized()
-            wid = fwd.cross(tan)
-            wid = wid.normalized() if wid.length > 1e-6 else any_perpendicular(fwd)
-            nrm = fwd.cross(wid)
-            L = s.leaf_size * rng.uniform(0.6, 1.3)
-            W = L * 0.32
-            fold = L * 0.06
-            sag = -UP * (L * 0.15)
-            b = p + side * r
-            verts = [
-                b,
-                b + fwd * (L * 0.12),
-                b + fwd * (L * 0.45) + wid * W + nrm * fold,
-                b + fwd * (L * 0.55),
-                b + fwd * (L * 0.45) - wid * W + nrm * fold,
-                b + fwd * L + sag,
-            ]
-            faces = [(0, 1, 2), (0, 4, 1), (1, 3, 2), (1, 4, 3), (2, 3, 5), (3, 4, 5)]
-            mb.add(verts, faces)
-    return mb
-
-
-def add_rose(mb, center, axis, size, rng):
-    """層状の花弁で構成した簡易的な薔薇。"""
-    z = axis.normalized()
-    x = any_perpendicular(z)
-    y = z.cross(x)
-    to_world = Matrix((
-        (x.x, y.x, z.x, center.x),
-        (x.y, y.y, z.y, center.y),
-        (x.z, y.z, z.z, center.z),
-        (0, 0, 0, 1),
-    )) @ Matrix.Rotation(rng.uniform(0, math.tau), 4, "Z") @ Matrix.Scale(size, 4)
-    layers = 5
-    nu, nv = 4, 3
-    for L in range(layers):
-        count = 3 + 2 * L
-        lf = L / (layers - 1)
-        tilt = math.radians(-15 + 80 * lf ** 1.6)  # 内側は中心へ巻き込み、外側は開く
-        w = 0.5 + 0.3 * lf
-        h = 0.6 + 0.25 * lf
-        rr = 0.04 + 0.2 * lf
-        off = rng.uniform(0, math.tau)
-        for k in range(count):
-            ang = off + math.tau * k / count
-            rot = Matrix.Rotation(ang, 4, "Z") @ Matrix.Translation((rr, 0, 0)) @ Matrix.Rotation(tilt, 4, "Y")
-            verts, faces = [], []
-            for j in range(nv + 1):
-                v = j / nv
-                width = w * (0.35 + 0.65 * math.sin(math.pi * (0.25 + 0.6 * v)))
-                for i in range(nu + 1):
-                    u = i / nu * 2 - 1
-                    lx = 0.25 * width * u * u + 0.35 * h * v * v * lf  # 縁と先端が外へ反る
-                    ly = u * width * 0.5
-                    lz = v * h
-                    verts.append(to_world @ (rot @ Vector((lx, ly, lz))))
-            for j in range(nv):
-                for i in range(nu):
-                    a = j * (nu + 1) + i
-                    faces.append((a, a + 1, a + nu + 2, a + nu + 1))
-            mb.add(verts, faces)
-
-
-def build_roses(rng, s, vines):
-    mb = MeshBuilder()
-    if not s.roses or s.rose_count <= 0 or not vines:
-        return mb
-    # 先端が地面より上にある細い蔓の先に咲かせる
-    thin = s.strand_radius * 0.3
-    candidates = [v for v in vines if v.points[-1].z > 0.3 and v.r1 < thin] or vines
-    rng.shuffle(candidates)
-    for v in candidates[: s.rose_count]:
-        n = len(v.points)
-        i = rng.randint(max(0, n - 4), n - 1)
-        axis = (v.tangent(i) * 0.5 + UP).normalized()
-        size = s.rose_size * rng.uniform(0.7, 1.3)
-        add_rose(mb, v.points[i] + axis * (size * 0.1), axis, size, rng)
-    return mb
-
-
 # ---------------------------------------------------------------------------
 # Blender オブジェクト / マテリアル
 # ---------------------------------------------------------------------------
@@ -546,8 +390,6 @@ def materials():
     return {
         "bark": get_material("TF_Bark", (0.035, 0.03, 0.018), 0.75, (0.075, 0.055, 0.03), 40.0, 0.4),
         "thorn": get_material("TF_Thorn", (0.10, 0.03, 0.02), 0.35, (0.03, 0.012, 0.01), 120.0),
-        "leaf": get_material("TF_Leaf", (0.02, 0.045, 0.015), 0.55, (0.035, 0.06, 0.02), 15.0),
-        "rose": get_material("TF_Rose", (0.30, 0.005, 0.02), 0.45, (0.12, 0.0, 0.01), 8.0),
         "ground": get_material("TF_Ground", (0.025, 0.02, 0.015), 0.95, (0.05, 0.045, 0.03), 3.0, 0.3),
     }
 
@@ -639,7 +481,7 @@ def setup_atmosphere(col, s):
     # 霧: ワールドボリュームは太陽光を完全に遮ってしまうため、森を覆う箱に入れる
     if s.fog_density > 0:
         half = s.area_size * 0.5 + 2.0
-        top = max(s.trunk_height * 2.5, 4.0)
+        top = max(s.cane_length * 1.5, 4.0)
         mb = MeshBuilder()
         mb.add(
             [Vector((x, y, z)) for z in (0.0, top) for x, y in ((-half, -half), (half, -half), (half, half), (-half, half))],
@@ -683,14 +525,9 @@ def generate(s):
         if s.convert_to_mesh:
             obj = curve_to_mesh(obj)
         created.append(obj)
-    for name, mb, mat in (
-        ("TF_Thorns", build_thorns(rng, s, vines), mats["thorn"]),
-        ("TF_Leaves", build_leaves(rng, s, vines), mats["leaf"]),
-        ("TF_Roses", build_roses(rng, s, vines), mats["rose"]),
-    ):
-        obj = make_mesh_object(col, name, mb, mat)
-        if obj is not None:
-            created.append(obj)
+    obj = make_mesh_object(col, "TF_Thorns", build_thorns(rng, s, vines), mats["thorn"])
+    if obj is not None:
+        created.append(obj)
     if s.ground:
         created.append(make_ground(col, s, mats["ground"]))
     if s.atmosphere:
@@ -751,12 +588,10 @@ class THORNFOREST_OT_randomize(bpy.types.Operator):
 
 PANEL_LAYOUT = (
     ("全体", ("seed", "area_size", "step")),
-    ("茨の木", ("tree_count", "min_spacing", "trunk_height", "trunk_strands", "trunk_radius",
-                "strand_radius", "twist", "crown_length")),
-    ("枝・藪", ("branch_levels", "branches_per_vine", "branch_ratio", "bramble_count",
-               "bramble_canes", "bramble_length", "wiggle", "droop")),
+    ("大きな株", ("clump_count", "min_spacing", "clump_canes", "cane_length", "cane_radius", "stiffness")),
+    ("小さな藪", ("bramble_count", "bramble_canes", "bramble_length")),
+    ("茎の形", ("branch_levels", "branches_per_vine", "branch_ratio", "wiggle", "droop", "tip_rooting")),
     ("トゲ", ("thorn_density", "thorn_size", "thorn_hook")),
-    ("葉・薔薇", ("leaves", "leaf_density", "leaf_size", "roses", "rose_count", "rose_size")),
     ("シーン", ("ground", "atmosphere", "fog_density", "convert_to_mesh", "clear_previous")),
 )
 
@@ -836,8 +671,9 @@ def _cli(argv):
         cam = bpy.data.objects.new("TF_Camera", cam_data)
         scene.collection.objects.link(cam)
         r = s.area_size * 0.62
-        cam.location = (r, -r, s.trunk_height * 0.9)
-        look = Vector((0, 0, s.trunk_height * 0.35)) - cam.location
+        h = s.cane_length * 0.5
+        cam.location = (r, -r, h * 0.9)
+        look = Vector((0, 0, h * 0.35)) - cam.location
         cam.rotation_euler = look.to_track_quat("-Z", "Y").to_euler()
         scene.camera = cam
         scene.render.engine = "CYCLES"

@@ -1,9 +1,9 @@
 schema_version = "1.0.0"
 
 id = "thorn_forest"
-version = "1.0.0"
+version = "1.1.0"
 name = "Thorn Forest Generator"
-tagline = "Generate a forest of twisted thorns, brambles and roses"
+tagline = "Generate tangled arching thorn thickets"
 maintainer = "A_life"
 type = "add-on"
 
