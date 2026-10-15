@@ -18,7 +18,7 @@ Blender アドオン。
 bl_info = {
     "name": "Thorn Forest Generator (茨の森)",
     "author": "A_life",
-    "version": (2, 0, 0),
+    "version": (2, 1, 0),
     "blender": (3, 6, 0),
     "location": "View3D > Sidebar > 茨の森",
     "description": "大きさのばらつきを持ったリアルないばらの低木・小高木の群落を生成する",
@@ -59,7 +59,8 @@ SETTINGS = {
     "length_ratio": ("float", 0.6, 0.2, 1.0, "枝の長さ比", "親の枝に対する子の枝の長さ"),
     "radius_ratio": ("float", 0.6, 0.2, 0.95, "枝の太さ比", "分岐点での親の太さに対する子の太さ"),
     "up_tendency": ("float", 0.35, 0.0, 3.0, "上向き", "枝が光を求めて上へ向かう強さ"),
-    "wiggle": ("float", 0.5, 0.0, 3.0, "曲がり", "枝のなめらかな曲がりの強さ"),
+    "wiggle": ("float", 1.0, 0.0, 3.0, "うねり", "枝がうねうねと曲がる強さ"),
+    "wave_count": ("float", 3.0, 0.5, 12.0, "うねりの回数", "1 本の枝の中で曲がる回数の目安"),
     "crookedness": ("float", 0.9, 0.0, 3.0, "ジグザグ", "節ごとに枝が折れ曲がる強さ (いばらの小枝らしさ)"),
     "droop": ("float", 0.4, 0.0, 3.0, "枝垂れ", "細い枝が重さで垂れる強さ"),
     "step": ("float", 0.1, 0.02, 1.0, "解像度", "枝のサンプリング間隔の上限 (m)。小さいほど滑らかで重い"),
@@ -133,23 +134,24 @@ GOLDEN_ANGLE = math.pi * (3.0 - math.sqrt(5.0))
 def grow_branch(rng, s, start, direction, length, depth, dmax, up):
     """1 本の枝の点列。なめらかな曲がり・節ごとの折れ (ジグザグ)・上向きの成長・
     細い枝ほど強い重力による垂れを合成する。変化量は解像度と長さに依存しない。"""
-    step = min(s.step, max(length / 6.0, 0.01))
-    n = max(4, int(round(length / step)))
+    # うねりを表現できるよう、短い小枝でも 1 うねりあたり 4 点以上を確保する
+    n = max(8, int(math.ceil(s.wave_count * 4)), int(round(length / s.step)))
     step = length / n
     d = direction.normalized()
     p = start.copy()
     off = Vector((rng.uniform(-500, 500), rng.uniform(-500, 500), rng.uniform(-500, 500)))
-    freq = 2.0 / max(length, 0.2)  # 1 本の枝に 1〜2 回のゆるい曲がり
+    freq = s.wave_count / max(length, 0.05)  # 枝の長さあたりのうねりの周波数
+    bend = s.wiggle * (0.5 if depth == 0 else 1.0) * 7.0  # 幹は控えめに
     sag = s.droop * depth / max(1, dmax)
     kink = s.crookedness * (0.08 + 0.12 * depth / max(1, dmax))
     next_node = rng.randint(2, 5)
     pts = [p.copy()]
     for i in range(n):
         t = i / n
-        turn = noise.noise_vector(p * freq + off) * s.wiggle
-        turn += UP * up
-        turn -= UP * (sag * t)
-        d = (d + turn * (2.0 / n)).normalized()
+        # 枝に沿った距離で引くノイズで向きを曲げ続けると、うねうねと蛇行する
+        wave = noise.noise_vector(Vector((i * step * freq, 0.0, 0.0)) + off)
+        d = (d + wave * (bend / n)).normalized()
+        d = (d + (UP * up - UP * (sag * t)) * (2.0 / n)).normalized()
         if i == next_node:  # 節: 小枝がジグザグに折れる
             d = (d + random_unit(rng) * kink).normalized()
             next_node = i + rng.randint(2, 5)
@@ -599,7 +601,7 @@ PANEL_LAYOUT = (
     ("大きさのばらつき", ("min_height", "max_height", "small_bias")),
     ("樹形", ("tree_ratio", "stems", "trunk_radius")),
     ("枝", ("branch_levels", "branch_count", "branch_angle", "length_ratio", "radius_ratio",
-           "up_tendency", "wiggle", "crookedness", "droop")),
+           "up_tendency", "wiggle", "wave_count", "crookedness", "droop")),
     ("トゲ", ("thorn_density", "thorn_size", "thorn_hook")),
     ("シーン", ("ground", "atmosphere", "fog_density", "convert_to_mesh", "clear_previous")),
 )
