@@ -18,7 +18,7 @@ Blender アドオン。
 bl_info = {
     "name": "Thorn Forest Generator (茨の森)",
     "author": "A_life",
-    "version": (2, 2, 0),
+    "version": (3, 0, 0),
     "blender": (3, 6, 0),
     "location": "View3D > Sidebar > 茨の森",
     "description": "大きさのばらつきを持ったリアルないばらの低木・小高木の群落を生成する",
@@ -45,7 +45,7 @@ UP = Vector((0.0, 0.0, 1.0))
 SETTINGS = {
     "seed": ("int", 1, 0, 1_000_000, "シード", "乱数シード"),
     "area_size": ("float", 16.0, 2.0, 500.0, "範囲", "森を生成する正方形の一辺 (m)"),
-    "plant_count": ("int", 45, 0, 2000, "株の数", "生成するいばらの株の数"),
+    "plant_count": ("int", 60, 0, 2000, "株の数", "生成するいばらの株の数"),
     "spacing": ("float", 0.35, 0.0, 3.0, "間隔", "樹冠どうしの間隔の係数。0 で自由に重なり、1 で樹冠が接する程度"),
     "min_height": ("float", 1.0, 0.1, 50.0, "最小の高さ", "いちばん小さい株の高さ (m)"),
     "max_height": ("float", 6.0, 0.1, 50.0, "最大の高さ", "いちばん大きい株の高さ (m)"),
@@ -54,23 +54,24 @@ SETTINGS = {
     "stems": ("int", 4, 1, 12, "株立ちの幹数", "株立ち型の株の根元から出る幹の数 (平均)"),
     "trunk_radius": ("float", 0.06, 0.005, 1.0, "幹の太さ", "高さ 4 m の株の幹の半径 (m)。株の大きさに応じて変わる"),
     "branch_levels": ("int", 4, 1, 6, "枝の階層", "大きい株の枝分かれの深さ (小さい株は自動で浅くなる)"),
-    "branch_count": ("int", 4, 1, 8, "枝の数", "1 本の枝から出る側枝の数 (先端の延長枝は別)"),
+    "branch_count": ("int", 5, 1, 8, "枝の数", "1 本の枝から出る側枝の数 (先端の延長枝は別)"),
     "branch_angle": ("float", 50.0, 5.0, 90.0, "分岐角", "側枝が親の枝から開く角度 (度)"),
     "length_ratio": ("float", 0.6, 0.2, 1.0, "枝の長さ比", "親の枝に対する子の枝の長さ"),
     "radius_ratio": ("float", 0.6, 0.2, 0.95, "枝の太さ比", "分岐点での親の太さに対する子の太さ"),
     "up_tendency": ("float", 0.35, 0.0, 3.0, "上向き", "枝が光を求めて上へ向かう強さ"),
-    "wiggle": ("float", 1.0, 0.0, 3.0, "うねり", "枝がうねうねと曲がる強さ"),
-    "wave_count": ("float", 3.0, 0.5, 12.0, "うねりの回数", "1 本の枝の中で曲がる回数の目安"),
-    "segment_count": ("int", 5, 0, 40, "直線区間の数", "1 本の枝を何本の直線でつなぐか。少ないほど角ばってシャープになる。0 でなめらかな曲線"),
-    "crookedness": ("float", 0.9, 0.0, 3.0, "ジグザグ", "節ごとに枝が折れ曲がる強さ (いばらの小枝らしさ)"),
+    "internode": ("float", 0.12, 0.02, 1.0, "節の間隔", "小枝の節と節の距離 (m)。太い枝ほど自動で長くなる。節で枝の向きが少し変わる"),
+    "crookedness": ("float", 1.0, 0.0, 3.0, "節の折れ", "節ごとに枝の向きが変わる大きさ (1 で平均約 10°)。節間はほぼまっすぐなので直線的な枝になる"),
+    "wiggle": ("float", 0.3, 0.0, 3.0, "うねり", "枝全体のゆるやかな曲がり (小さいほど直線的)"),
     "droop": ("float", 0.4, 0.0, 3.0, "枝垂れ", "細い枝が重さで垂れる強さ"),
-    "step": ("float", 0.1, 0.02, 1.0, "解像度", "枝のサンプリング間隔の上限 (m)。小さいほど滑らかで重い"),
-    "thorn_density": ("float", 5.0, 0.0, 60.0, "トゲ密度", "枝 1 m あたりのトゲの数 (幹には付かない)"),
+    "spur_ratio": ("float", 0.5, 0.0, 1.0, "短枝の多さ", "節から出る、先がトゲ状にとがった短い枝の割合"),
+    "dead_ratio": ("float", 0.08, 0.0, 1.0, "枯れ枝の割合", "途中で折れて止まった枝の割合"),
+    "fallen_count": ("int", 80, 0, 5000, "落ち枝の数", "地面に落ちている枯れ枝の数"),
+    "thorn_chance": ("float", 0.5, 0.0, 1.0, "トゲの付く割合", "枝の節ごとにトゲが付く確率 (幹には付かない)"),
     "thorn_size": ("float", 0.025, 0.002, 0.5, "トゲの長さ", "トゲの長さ (m)"),
-    "thorn_hook": ("float", 0.1, -1.0, 2.0, "トゲの反り", "トゲが根元側へ鉤状に曲がる量 (0 でまっすぐ)"),
+    "thorn_hook": ("float", 0.05, -1.0, 2.0, "トゲの反り", "トゲが根元側へ鉤状に曲がる量 (0 でまっすぐ)"),
     "ground": ("bool", True, None, None, "地面", "地面を作成する"),
-    "atmosphere": ("bool", True, None, None, "雰囲気", "霧・月光・暗い空を設定する"),
-    "fog_density": ("float", 0.015, 0.0, 1.0, "霧の濃さ", "地表付近の霧の密度 (上空ほど薄くなる)"),
+    "atmosphere": ("bool", True, None, None, "空と光", "空・低い日差し・霞を設定する"),
+    "fog_density": ("float", 0.01, 0.0, 1.0, "霞の濃さ", "地表付近の霞の密度 (上空ほど薄くなる)"),
     "convert_to_mesh": ("bool", False, None, None, "メッシュに変換", "枝のカーブをメッシュに変換する (書き出し用)"),
     "clear_previous": ("bool", True, None, None, "前回分を削除", f"「{COLLECTION_NAME}」コレクションの中身を消してから生成する"),
 }
@@ -94,13 +95,18 @@ def default_settings(**overrides):
 class Vine:
     """太さが先細りする 1 本の枝 (折れ線)。depth は幹=0 から数えた枝の階層。"""
 
-    __slots__ = ("points", "r0", "r1", "depth")
+    __slots__ = ("points", "r0", "r1", "depth", "spur")
 
-    def __init__(self, points, r0, r1=None, depth=0):
-        self.points = points
+    def __init__(self, points, r0, r1=None, depth=0, spur=False):
+        self.points = points  # 偶数番目が節、奇数番目が節間の中点
         self.r0 = r0
         self.r1 = r0 * 0.12 if r1 is None else r1
         self.depth = depth
+        self.spur = spur
+
+    def nodes(self):
+        """根元と先端を除く節の点番号。"""
+        return range(2, len(self.points) - 1, 2)
 
     def radius(self, i):
         t = i / max(1, len(self.points) - 1)
@@ -132,77 +138,88 @@ def random_unit(rng):
 GOLDEN_ANGLE = math.pi * (3.0 - math.sqrt(5.0))
 
 
+def perpendicular_jitter(rng, d):
+    v = d.cross(random_unit(rng))
+    return v.normalized() if v.length > 1e-6 else any_perpendicular(d)
+
+
 def grow_branch(rng, s, start, direction, length, depth, dmax, up):
-    """1 本の枝の点列。なめらかな曲がり・節ごとの折れ (ジグザグ)・上向きの成長・
-    細い枝ほど強い重力による垂れを合成する。変化量は解像度と長さに依存しない。"""
-    # うねりを表現できるよう、短い小枝でも 1 うねりあたり 4 点以上を確保する
-    n = max(8, int(math.ceil(s.wave_count * 4)), int(round(length / s.step)))
-    step = length / n
+    """節ごとに少しずつ向きを変えて伸びる、直線的な枝の点列。
+
+    節間 (節と節の間) はほぼまっすぐでわずかに弓なり、節で向きが小さく折れる。
+    それに枝全体のゆるやかなうねり・上向きの成長・細い枝ほど強い垂れを重ねる。
+    """
+    internode = s.internode * (1.0 + 1.5 * (dmax - depth) / max(1, dmax))  # 太い枝ほど節間が長い
+    nodes = max(1, min(40, round(length / internode)))
+    seg = length / nodes
     d = direction.normalized()
     p = start.copy()
     off = Vector((rng.uniform(-500, 500), rng.uniform(-500, 500), rng.uniform(-500, 500)))
-    freq = s.wave_count / max(length, 0.05)  # 枝の長さあたりのうねりの周波数
-    bend = s.wiggle * (0.5 if depth == 0 else 1.0) * 7.0  # 幹は控えめに
     sag = s.droop * depth / max(1, dmax)
-    kink = s.crookedness * (0.08 + 0.12 * depth / max(1, dmax))
-    next_node = rng.randint(2, 5)
+    kink = math.radians(10.0) * s.crookedness * (0.35 if depth == 0 else 1.0)
+    rate = 2.0 / nodes  # 変化の総量が節の数によらないように
     pts = [p.copy()]
-    for i in range(n):
-        t = i / n
-        # 枝に沿った距離で引くノイズで向きを曲げ続けると、うねうねと蛇行する
-        wave = noise.noise_vector(Vector((i * step * freq, 0.0, 0.0)) + off)
-        d = (d + wave * (bend / n)).normalized()
-        d = (d + (UP * up - UP * (sag * t)) * (2.0 / n)).normalized()
-        if i == next_node:  # 節: 小枝がジグザグに折れる
-            d = (d + random_unit(rng) * kink).normalized()
-            next_node = i + rng.randint(2, 5)
-        p = p + d * step
-        if p.z < 0.0:  # 地面には潜らない
-            p.z = 0.0
-            d.z = abs(d.z)
+    for k in range(nodes):
+        t = k / nodes
+        if k > 0:
+            angle = kink * abs(rng.gauss(0.0, 1.0))
+            d = (d + perpendicular_jitter(rng, d) * math.tan(min(angle, 1.2))).normalized()
+        wave = noise.noise_vector(Vector((k * seg * 0.7, 0.0, 0.0)) + off) * s.wiggle
+        d = (d + (wave + UP * up - UP * (sag * t)) * rate).normalized()
+        bow = perpendicular_jitter(rng, d) * (seg * rng.uniform(0.0, 0.04))
+        mid = p + d * (seg * 0.5) + bow
+        p = p + d * seg
+        for q in (mid, p):
+            q.z = max(q.z, 0.0)  # 地面には潜らない
+        if p.z == 0.0 and d.z < 0.0:
+            d.z = 0.0
             d.normalize()
-        pts.append(p.copy())
-    return straighten(rng, s, pts)
+        pts.extend((mid, p.copy()))
+    return pts
 
 
-def straighten(rng, s, pts):
-    """うねった点列を、節で鋭く折れ曲がる直線区間の連なりに間引く。"""
-    if s.segment_count <= 0:
-        return pts
-    n = len(pts) - 1
-    segs = max(2, min(n, round(s.segment_count * rng.uniform(0.7, 1.3))))
-    spacing = n / segs
-    idx = [0]
-    for k in range(1, segs):
-        j = int(round(k * spacing + rng.uniform(-0.3, 0.3) * spacing))
-        if idx[-1] < j < n:
-            idx.append(j)
-    idx.append(n)
-    out = [pts[j].copy() for j in idx]
-    # 節を横へずらして折れ角をはっきりさせる (根元は動かさない)
-    for k in range(1, len(out) - 1):
-        seg = (out[k + 1] - out[k - 1]).length * 0.5
-        out[k] += random_unit(rng) * (seg * 0.2 * s.crookedness)
-        out[k].z = max(out[k].z, 0.0)
-    return out
+def add_spur(rng, s, vine, i, out):
+    """節から出る短枝。短く、先が鋭くとがってトゲのように見える。"""
+    p = vine.points[i]
+    tan = vine.tangent(i)
+    tilt = math.radians(rng.uniform(40.0, 80.0))
+    d = (tan * math.cos(tilt) + perpendicular_jitter(rng, tan) * math.sin(tilt)).normalized()
+    length = rng.uniform(0.02, 0.09)
+    bend = perpendicular_jitter(rng, d) * (length * 0.06)
+    pts = [p.copy(), p + d * (length * 0.5) + bend, p + d * length]
+    out.append(Vine(pts, max(vine.radius(i) * 0.55, 0.001), 0.0003, vine.depth + 1, spur=True))
 
 
-def add_branch(rng, s, start, direction, length, r0, depth, dmax, t0, out):
-    """枝を 1 本作り、側枝と先端の延長枝を再帰的に付ける。"""
+def add_branch(rng, s, start, direction, length, r0, depth, dmax, t0, out, dead=False):
+    """枝を 1 本作り、側枝・短枝・先端の延長枝を再帰的に付ける。"""
     up = s.up_tendency * (1.5 if depth == 0 else 0.6)
     pts = grow_branch(rng, s, start, direction, length, depth, dmax, up)
-    last = depth >= dmax
-    vine = Vine(pts, r0, max(0.0012, r0 * (0.12 if last else 0.45)), depth)
+    last = dead or depth >= dmax
+    if dead:
+        r1 = r0 * 0.7  # 折れた枝は先が太いまま途切れる
+    elif last:
+        r1 = max(0.0004, r0 * 0.08)  # 小枝の先は鋭くとがる
+    else:
+        r1 = r0 * 0.45
+    vine = Vine(pts, r0, r1, depth)
     out.append(vine)
+    n = len(pts)
+    nodes = list(vine.nodes())
+    # 側枝は 1 つの節から 1 本ずつ、t0 より先の節に互生 (黄金角) で出す
+    lateral = []
+    if not last:
+        cands = [i for i in nodes if i / (n - 1) >= t0] or nodes[-1:]
+        count = min(len(cands), max(1, round(s.branch_count * rng.uniform(0.6, 1.4))))
+        lateral = sorted(rng.sample(cands, count))
+    if depth >= 1 and not dead:
+        for i in nodes:
+            if i not in lateral and rng.random() < s.spur_ratio * 0.5:
+                add_spur(rng, s, vine, i, out)
     if last:
         return
-    n = len(pts)
-    count = max(1, round(s.branch_count * rng.uniform(0.6, 1.4)))
     phi = rng.uniform(0, math.tau)
-    for c in range(count):
-        # 側枝は枝に沿って層状に、互生 (黄金角) で配置する
-        t = t0 + (1.0 - t0) * (c + rng.uniform(0.15, 0.85)) / count
-        i = min(n - 2, int(t * (n - 1)))
+    for i in lateral:
+        t = i / (n - 1)
         tan = vine.tangent(i)
         phi += GOLDEN_ANGLE + rng.uniform(-0.3, 0.3)
         a = any_perpendicular(tan)
@@ -212,9 +229,12 @@ def add_branch(rng, s, start, direction, length, r0, depth, dmax, t0, out):
         cd = tan * math.cos(tilt) + side * math.sin(tilt)
         clen = length * s.length_ratio * rng.uniform(0.7, 1.2) * (1.2 - 0.5 * t)  # 根元側ほど長い
         cr = min(vine.radius(i) * 0.9, vine.radius(i) * s.radius_ratio * rng.uniform(0.75, 1.1))
-        add_branch(rng, s, pts[i], cd, clen, cr, depth + 1, dmax, 0.15, out)
+        is_dead = depth >= 1 and rng.random() < s.dead_ratio
+        if is_dead:
+            clen *= rng.uniform(0.15, 0.45)
+        add_branch(rng, s, pts[i], cd, clen, cr, depth + 1, dmax, 0.15, out, dead=is_dead)
     # 先端の延長枝 (頂芽の伸長)
-    tip_dir = (vine.tangent(n - 1) + random_unit(rng) * 0.25).normalized()
+    tip_dir = (vine.tangent(n - 1) + perpendicular_jitter(rng, vine.tangent(n - 1)) * 0.2).normalized()
     add_branch(rng, s, pts[-1], tip_dir, length * s.length_ratio * rng.uniform(0.8, 1.15),
                vine.r1, depth + 1, dmax, 0.15, out)
 
@@ -254,31 +274,30 @@ def place_plants(rng, s):
     return placed
 
 
+def build_fallen(rng, s, out):
+    """地面に落ちた枯れ枝。小さな枝を作ってから地面に寝かせる。"""
+    half = s.area_size * 0.5
+    for _ in range(s.fallen_count):
+        base = Vector((rng.uniform(-half, half), rng.uniform(-half, half), 0.0))
+        az = rng.uniform(0, math.tau)
+        d = Vector((math.cos(az), math.sin(az), 0.3))
+        part = []
+        r0 = rng.uniform(0.003, 0.012)
+        add_branch(rng, s, base, d, rng.uniform(0.25, 1.2), r0, 1, 2, 0.15, part)
+        for v in part:
+            for q in v.points:
+                q.z = r0 + (q.z - base.z) * 0.06
+        out.extend(part)
+
+
 def build_vines(s):
     rng = random.Random(s.seed)
     noise.seed_set(s.seed)  # ノイズ表はプロセスごとに乱数初期化されるので固定する
     vines = []
     for base, height in place_plants(rng, s):
         build_plant(rng, s, base, height, vines)
-    return [v for v in vines if len(v.points) >= 2]
-
-
-def sample_along(rng, vine, density):
-    """密度 (個/m) に従って枝上の位置 (index, 補間位置, 0..1 の t) を返す。"""
-    if density <= 0:
-        return
-    pts = vine.points
-    spacing = 1.0 / density
-    dist_to_next = rng.uniform(0.2, 1.0) * spacing
-    for i in range(len(pts) - 1):
-        seg = (pts[i + 1] - pts[i]).length
-        pos = 0.0
-        while pos + dist_to_next <= seg:
-            pos += dist_to_next
-            f = pos / seg if seg > 0 else 0.0
-            yield i, pts[i].lerp(pts[i + 1], f), (i + f) / (len(pts) - 1)
-            dist_to_next = spacing * rng.uniform(0.5, 1.5)
-        dist_to_next -= seg - pos
+    build_fallen(rng, s, vines)
+    return [v for v in vines if len(v.points) >= 3]
 
 
 class MeshBuilder:
@@ -320,27 +339,25 @@ def add_thorn(mb, base, axis, back, length, radius, hook, sides=5, rings=4):
 
 
 def build_thorns(rng, s, vines):
-    """枝 (幹以外) に細いトゲを付ける。トゲは枝の先端側へ斜めに出る。"""
+    """枝の節にトゲを付ける (幹と短枝には付けない)。トゲは枝の先端側へ斜めに出る。"""
     mb = MeshBuilder()
-    if s.thorn_density <= 0:
+    if s.thorn_chance <= 0:
         return mb
     for v in vines:
-        if v.depth == 0:
+        if v.depth == 0 or v.spur:
             continue
-        for i, p, t in sample_along(rng, v, s.thorn_density):
+        for i in v.nodes():
+            if rng.random() >= s.thorn_chance:
+                continue
+            p = v.points[i]
             r = v.radius(i)
             tan = v.tangent(i)
-            side = tan.cross(random_unit(rng))
-            if side.length < 1e-6:
-                continue
-            side.normalize()
-            length = s.thorn_size * rng.uniform(0.6, 1.4)
-            if t > 0.9:  # 先端付近は小さく
-                length *= 0.6
-            axis = (side + tan * rng.uniform(0.3, 0.8)).normalized()
+            side = perpendicular_jitter(rng, tan)
+            length = s.thorn_size * rng.uniform(0.5, 1.4)
+            axis = (side + tan * rng.uniform(0.2, 0.7)).normalized()
             add_thorn(mb, p + side * (r * 0.6), axis, -tan, length,
-                      min(r * 0.8, length * 0.16), s.thorn_hook * rng.uniform(0.5, 1.5),
-                      sides=3, rings=2)
+                      min(r * 0.9, length * 0.14), s.thorn_hook * rng.uniform(0.5, 1.5),
+                      sides=5, rings=3)
     return mb
 
 
@@ -379,13 +396,23 @@ def _principled(mat):
     return nt, bsdf
 
 
+def _object_coords(nt):
+    """テクスチャ座標をオブジェクト座標 (メートル単位) にする。生成座標だとオブジェクト全体に
+    引き伸ばされ、広い地面や森全体を 1 つにしたカーブで模様が粗くなりすぎるため。"""
+    tc = next((n for n in nt.nodes if n.type == "TEX_COORD"), None) or nt.nodes.new("ShaderNodeTexCoord")
+    return tc.outputs["Object"]
+
+
 def _noise_color(nt, bsdf, c1, c2, scale, bump_strength):
     tex = nt.nodes.new("ShaderNodeTexNoise")
+    nt.links.new(_object_coords(nt), tex.inputs["Vector"])
     tex.inputs["Scale"].default_value = scale
     tex.inputs["Detail"].default_value = 8.0
     ramp = nt.nodes.new("ShaderNodeValToRGB")
     ramp.color_ramp.elements[0].color = (*c1, 1.0)
     ramp.color_ramp.elements[1].color = (*c2, 1.0)
+    ramp.color_ramp.elements[0].position = 0.3  # ノイズの値は中央付近に集まるのでコントラストを広げる
+    ramp.color_ramp.elements[1].position = 0.7
     nt.links.new(tex.outputs["Fac"], ramp.inputs["Fac"])
     nt.links.new(ramp.outputs["Color"], bsdf.inputs["Base Color"])
     if bump_strength > 0:
@@ -395,7 +422,8 @@ def _noise_color(nt, bsdf, c1, c2, scale, bump_strength):
         nt.links.new(bump.outputs["Normal"], bsdf.inputs["Normal"])
 
 
-def get_material(name, color, roughness=0.7, noise_to=None, noise_scale=30.0, bump=0.0):
+def get_material(name, color, roughness=0.7, noise_to=None, noise_scale=30.0, bump=0.0, cells=0.0):
+    """ノイズで色むらを付けたマテリアル。cells > 0 なら細胞状の溝 (樹皮の割れ目など) の凹凸も加える。"""
     mat = bpy.data.materials.get(name)
     if mat is not None:
         return mat
@@ -406,15 +434,28 @@ def get_material(name, color, roughness=0.7, noise_to=None, noise_scale=30.0, bu
     bsdf.inputs["Roughness"].default_value = roughness
     if noise_to is not None:
         _noise_color(nt, bsdf, color, noise_to, noise_scale, bump)
+    if cells > 0:
+        vor = nt.nodes.new("ShaderNodeTexVoronoi")
+        vor.feature = "DISTANCE_TO_EDGE"
+        vor.inputs["Scale"].default_value = cells
+        nt.links.new(_object_coords(nt), vor.inputs["Vector"])
+        b2 = nt.nodes.new("ShaderNodeBump")
+        b2.inputs["Strength"].default_value = 0.35
+        b2.inputs["Distance"].default_value = 0.002
+        nt.links.new(vor.outputs["Distance"], b2.inputs["Height"])
+        prev = bsdf.inputs["Normal"].links[0].from_socket if bsdf.inputs["Normal"].is_linked else None
+        if prev is not None:
+            nt.links.new(prev, b2.inputs["Normal"])
+        nt.links.new(b2.outputs["Normal"], bsdf.inputs["Normal"])
     return mat
 
 
 def materials():
     return {
-        "bark": get_material("TF_Bark", (0.035, 0.03, 0.027), 0.8, (0.08, 0.07, 0.06), 25.0, 0.5),
-        "twig": get_material("TF_Twig", (0.10, 0.07, 0.045), 0.6, (0.22, 0.15, 0.09), 60.0),
-        "thorn": get_material("TF_Thorn", (0.16, 0.11, 0.07), 0.45, (0.06, 0.04, 0.03), 200.0),
-        "ground": get_material("TF_Ground", (0.02, 0.018, 0.016), 0.95, (0.07, 0.05, 0.035), 2.0, 0.3),
+        "bark": get_material("TF_Bark", (0.028, 0.024, 0.02), 0.85, (0.085, 0.072, 0.06), 30.0, 0.6, cells=45.0),
+        "twig": get_material("TF_Twig", (0.075, 0.045, 0.028), 0.55, (0.19, 0.12, 0.072), 25.0, 0.2),
+        "thorn": get_material("TF_Thorn", (0.16, 0.10, 0.06), 0.4, (0.04, 0.025, 0.018), 200.0),
+        "ground": get_material("TF_Ground", (0.018, 0.013, 0.009), 0.95, (0.10, 0.066, 0.036), 3.0, 0.6, cells=5.0),
     }
 
 
@@ -438,7 +479,7 @@ def make_mesh_object(col, name, mb, mat, smooth=True):
     return link_object(col, name, me, mat)
 
 
-def make_vine_curve(col, name, vines, mat, bevel_resolution=2, resolution_u=3, sharp=False):
+def make_vine_curve(col, name, vines, mat, bevel_resolution=2, resolution_u=3):
     cu = bpy.data.curves.new(name, "CURVE")
     cu.dimensions = "3D"
     cu.fill_mode = "FULL"
@@ -447,8 +488,7 @@ def make_vine_curve(col, name, vines, mat, bevel_resolution=2, resolution_u=3, s
     cu.resolution_u = resolution_u
     cu.use_fill_caps = True
     for v in vines:
-        # 角ばった枝は POLY (節で鋭く折れる)、なめらかな枝は NURBS
-        sp = cu.splines.new("POLY" if sharp else "NURBS")
+        sp = cu.splines.new("NURBS")
         sp.points.add(len(v.points) - 1)
         co, radius = [], []
         for i, p in enumerate(v.points):
@@ -456,9 +496,8 @@ def make_vine_curve(col, name, vines, mat, bevel_resolution=2, resolution_u=3, s
             radius.append(v.radius(i))
         sp.points.foreach_set("co", co)
         sp.points.foreach_set("radius", radius)
-        if not sharp:
-            sp.order_u = 4
-            sp.use_endpoint_u = True
+        sp.order_u = 3  # 節の折れが丸まりすぎないよう低い次数にする
+        sp.use_endpoint_u = True
         sp.use_smooth = True
     return link_object(col, name, cu, mat)
 
@@ -477,7 +516,7 @@ def curve_to_mesh(obj):
 
 
 def make_ground(col, s, mat):
-    half = s.area_size * 1.5
+    half = max(s.area_size * 6.0, 150.0)  # 地平線まで地面が続くように
     me = bpy.data.meshes.new("TF_Ground")
     me.from_pydata([(-half, -half, 0), (half, -half, 0), (half, half, 0), (-half, half, 0)], [], [(0, 1, 2, 3)])
     return link_object(col, "TF_Ground", me, mat)
@@ -495,11 +534,26 @@ def setup_atmosphere(col, s):
     bg.inputs["Color"].default_value = (0.045, 0.05, 0.06, 1.0)
     bg.inputs["Strength"].default_value = 1.0
     nt.links.new(bg.outputs["Background"], out.inputs["Surface"])
+    # 物理ベースの空 (太陽は下のライトで描くので空の太陽円盤は消す)
+    sky = next((n for n in nt.nodes if n.type == "TEX_SKY"), None) or nt.nodes.new("ShaderNodeTexSky")
+    for sky_type in ("MULTIPLE_SCATTERING", "NISHITA", "HOSEK_WILKIE"):
+        try:
+            sky.sky_type = sky_type
+            break
+        except TypeError:
+            continue
+    if hasattr(sky, "sun_disc"):
+        sky.sun_disc = False
+    if hasattr(sky, "sun_elevation"):
+        sky.sun_elevation = math.radians(25)
+        sky.sun_rotation = math.radians(125)
+    nt.links.new(sky.outputs["Color"], bg.inputs["Color"])
+    bg.inputs["Strength"].default_value = 0.12
 
     # 低い角度の暖かい日差し
     light = bpy.data.lights.new("TF_Sun", "SUN")
-    light.energy = 4.0
-    light.color = (1.0, 0.78, 0.55)
+    light.energy = 5.0
+    light.color = (1.0, 0.8, 0.6)
     light.angle = math.radians(2)
     sun = bpy.data.objects.new("TF_Sun", light)
     sun.rotation_euler = (math.radians(65), 0.0, math.radians(35))
@@ -507,7 +561,7 @@ def setup_atmosphere(col, s):
 
     # 霧: ワールドボリュームは太陽光を完全に遮ってしまうため、森を覆う箱に入れる
     if s.fog_density > 0:
-        half = s.area_size * 1.5
+        half = max(s.area_size * 1.5, 20.0)
         top = max(s.max_height * 1.5, 4.0)
         mb = MeshBuilder()
         mb.add(
@@ -522,7 +576,7 @@ def setup_atmosphere(col, s):
         mnt.nodes.clear()
         mout = mnt.nodes.new("ShaderNodeOutputMaterial")
         vol = mnt.nodes.new("ShaderNodeVolumePrincipled")
-        vol.inputs["Color"].default_value = (0.6, 0.6, 0.62, 1.0)
+        vol.inputs["Color"].default_value = (0.75, 0.72, 0.68, 1.0)
         vol.inputs["Anisotropy"].default_value = 0.4
         # 地表で濃く、箱の高さ 50% で消える高さ霧
         coord = mnt.nodes.new("ShaderNodeTexCoord")
@@ -556,7 +610,7 @@ def generate(s):
     for name, group, mat, bevel_res, res_u in groups:
         if not group:
             continue
-        obj = make_vine_curve(col, name, group, mat, bevel_res, res_u, sharp=s.segment_count > 0)
+        obj = make_vine_curve(col, name, group, mat, bevel_res, res_u)
         if s.convert_to_mesh:
             obj = curve_to_mesh(obj)
         created.append(obj)
@@ -622,12 +676,13 @@ class THORNFOREST_OT_randomize(bpy.types.Operator):
 
 
 PANEL_LAYOUT = (
-    ("全体", ("seed", "area_size", "plant_count", "spacing", "step")),
+    ("全体", ("seed", "area_size", "plant_count", "spacing")),
     ("大きさのばらつき", ("min_height", "max_height", "small_bias")),
     ("樹形", ("tree_ratio", "stems", "trunk_radius")),
     ("枝", ("branch_levels", "branch_count", "branch_angle", "length_ratio", "radius_ratio",
-           "up_tendency", "wiggle", "wave_count", "segment_count", "crookedness", "droop")),
-    ("トゲ", ("thorn_density", "thorn_size", "thorn_hook")),
+           "up_tendency", "internode", "crookedness", "wiggle", "droop")),
+    ("リアルさ", ("spur_ratio", "dead_ratio", "fallen_count")),
+    ("トゲ", ("thorn_chance", "thorn_size", "thorn_hook")),
     ("シーン", ("ground", "atmosphere", "fog_density", "convert_to_mesh", "clear_previous")),
 )
 

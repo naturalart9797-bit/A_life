@@ -1,7 +1,7 @@
 schema_version = "1.0.0"
 
 id = "thorn_forest"
-version = "2.2.0"
+version = "3.0.0"
 name = "Thorn Forest Generator"
 tagline = "Generate realistic thorny shrubs with varied sizes"
 maintainer = "A_life"
