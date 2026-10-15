@@ -19,6 +19,7 @@ bl_info = {
 import math
 import random
 
+import bmesh
 import bpy
 from bpy.props import (
     BoolProperty,
@@ -30,6 +31,7 @@ from bpy.props import (
 from mathutils import Matrix, Vector, noise
 
 TAG = "visceral_plant"
+THORN_TAG = "visceral_plant_thorns"
 UP = Vector((0, 0, 1))
 
 
@@ -381,6 +383,10 @@ def tube_to_rings(tube, p, rng):
     }
     base_depth = depth_by_kind.get(tube.kind, 0.0)
     use_taenia = tube.kind in ("strand", "top") and p.taenia_count > 0
+    gnarly = p.gnarl > 0 and tube.kind != "bulb"
+    gscale = 1.2 * p.gnarl_scale / max(p.strand_radius, 1e-3)
+    sharp_start = p.sharp_tips and tube.kind == "strand"
+    sharp_end = p.sharp_tips and tube.kind in ("root", "shoot")
 
     phase = rng.uniform(0, math.tau)
     twist = rng.uniform(-0.5, 0.5)
@@ -404,6 +410,11 @@ def tube_to_rings(tube, p, rng):
             if p.surface_noise > 0:
                 q = center + dirv * rr
                 rr *= 1.0 + p.surface_noise * noise.noise(q * nscale + noise_off)
+            if gnarly:
+                # ごつごつした節: 正の側だけを尖らせたノイズでこぶを作る
+                q = center + dirv * rr
+                g = noise.noise(q * gscale + noise_off * 0.5)
+                rr *= 1.0 + p.gnarl * (max(0.0, g) ** 1.5 * 1.8 - 0.12)
             ring.append(center + dirv * rr)
         return ring
 
@@ -424,23 +435,25 @@ def tube_to_rings(tube, p, rng):
             taenia = use_taenia
         rings.append(section(c, tangents[i], normals[i], r, s_phase, s_len, depth, taenia))
 
-    # 両端を半球でふさぐ
-    cap_steps = max(2, res // 4)
-    t_end, n_end, r_end = tangents[-1], normals[-1], radii[-1]
-    end_rings = []
-    for k in range(1, cap_steps):
-        a = (k / cap_steps) * (math.pi / 2)
-        center = pts[-1] + t_end * (r_end * math.sin(a))
-        end_rings.append(section(center, t_end, n_end, r_end * math.cos(a), s_phase, s_len, 0.0, False))
-    tip_end = pts[-1] + t_end * r_end
+    # 両端をふさぐ (根や小枝の先は鋭い円錐、それ以外は半球)
+    def cap(end, d, t, nrm, r, sharp, s_ph, s_l):
+        # d: 伸ばす向き, t: 断面の向き (リングの頂点順をそろえるため本体と同じ接線)
+        steps = max(2, res // 4)
+        out = []
+        if sharp:
+            length = r * 5.0
+            for k in range(1, steps):
+                u = k / steps
+                out.append(section(end + d * (length * u), t, nrm, r * (1.0 - u) ** 1.3, s_ph, s_l, 0.0, False))
+            return out, end + d * length
+        for k in range(1, steps):
+            a = (k / steps) * (math.pi / 2)
+            out.append(section(end + d * (r * math.sin(a)), t, nrm, r * math.cos(a), s_ph, s_l, 0.0, False))
+        return out, end + d * r
 
-    t0, n0, r0 = tangents[0], normals[0], radii[0]
-    start_rings = []
-    for k in range(cap_steps - 1, 0, -1):
-        a = (k / cap_steps) * (math.pi / 2)
-        center = pts[0] - t0 * (r0 * math.sin(a))
-        start_rings.append(section(center, t0, n0, r0 * math.cos(a), phase, 0.0, 0.0, False))
-    tip_start = pts[0] - t0 * r0
+    end_rings, tip_end = cap(pts[-1], tangents[-1], tangents[-1], normals[-1], radii[-1], sharp_end, s_phase, s_len)
+    start_rings, tip_start = cap(pts[0], -tangents[0], tangents[0], normals[0], radii[0], sharp_start, phase, 0.0)
+    start_rings.reverse()
 
     return start_rings + rings + end_rings, tip_start, tip_end
 
@@ -474,6 +487,70 @@ def build_mesh_data(tubes, p):
         for k in range(res):
             k1 = (k + 1) % res
             faces.append((last + k, last + k1, ei))
+    return verts, faces
+
+
+def build_thorn_data(tubes, p):
+    """茨のような鋭いとげ (曲がった円錐) を各チューブの表面に生やす."""
+    rng = random.Random(p.seed * 104729 + 7)
+    verts, faces = [], []
+    if not p.thorn_enable or p.thorn_density <= 0:
+        return verts, faces
+    kinds = {"strand", "top", "shoot", "sac"}
+    if p.thorn_on_roots:
+        kinds.add("root")
+    res = 6
+    segs = 5
+    for tube in tubes:
+        if tube.kind not in kinds or len(tube.points) < 3:
+            continue
+        pts, radii = tube.points, tube.radii
+        tangents, normals = _transport_frames(pts)
+        # 弧長に沿って密度どおりにとげを配置
+        acc = rng.uniform(0, 1.0 / p.thorn_density)
+        spacing = 1.0 / p.thorn_density
+        for i in range(1, len(pts)):
+            acc += (pts[i] - pts[i - 1]).length
+            while acc >= spacing:
+                acc -= spacing * rng.uniform(0.6, 1.4)
+                t, nrm, r = tangents[i], normals[i], radii[i]
+                th = rng.uniform(0, math.tau)
+                out = nrm * math.cos(th) + t.cross(nrm) * math.sin(th)
+                size = max(0.35, min(1.4, r / max(p.strand_radius, 1e-4)))
+                length = p.thorn_length * size * rng.uniform(0.6, 1.3)
+                base = pts[i] + out * (r * 0.75)
+                tip_guess = base + out * length
+                if tip_guess.z < 0.0 or (tube.kind == "root" and out.z < -0.3):
+                    continue
+                # 茨のように根元側へ反り返る向き
+                axis = (out + t * (-p.thorn_tilt)).normalized()
+                bend = t * (-p.thorn_hook)
+                side = _any_perpendicular(axis)
+                side2 = axis.cross(side)
+                w = length * p.thorn_width
+                start = len(verts)
+                for k in range(segs):
+                    u = k / segs
+                    c = base + axis * (length * u) + bend * (length * u * u)
+                    rad = w * (1.0 - u) ** 1.4
+                    for j in range(res):
+                        a = math.tau * j / res
+                        verts.append(c + (side * math.cos(a) + side2 * math.sin(a)) * rad)
+                tip = len(verts)
+                verts.append(base + axis * length + bend * length)
+                bottom = len(verts)
+                verts.append(base - axis * (w * 0.5))
+                for k in range(segs - 1):
+                    a0 = start + k * res
+                    b0 = a0 + res
+                    for j in range(res):
+                        j1 = (j + 1) % res
+                        faces.append((a0 + j, a0 + j1, b0 + j1, b0 + j))
+                last = start + (segs - 1) * res
+                for j in range(res):
+                    j1 = (j + 1) % res
+                    faces.append((last + j, last + j1, tip))
+                    faces.append((bottom, start + j1, start + j))
     return verts, faces
 
 
@@ -578,7 +655,7 @@ def make_flesh_material(name, color_a, color_b, vein_color):
     links.new(coord.outputs["Object"], n2.inputs["Vector"])
     bump = nodes.new("ShaderNodeBump")
     bump.location = (300, -400)
-    _set_input(bump, ["Strength"], 0.25)
+    _set_input(bump, ["Strength"], 0.45)
     links.new(n2.outputs["Fac"], bump.inputs["Height"])
     links.new(bump.outputs["Normal"], bsdf.inputs["Normal"])
 
@@ -637,6 +714,46 @@ def setup_object(obj, p, tubes, verts):
         sd.render_levels = p.subdivision
 
 
+def _thorn_child(obj):
+    for child in obj.children:
+        if child.get(THORN_TAG):
+            return child
+    return None
+
+
+def update_thorns(obj, p, tubes):
+    """とげは別オブジェクト (子) にして、リメッシュで先端が丸まらないようにする."""
+    child = _thorn_child(obj)
+    tverts, tfaces = build_thorn_data(tubes, p)
+    if not tverts:
+        if child is not None:
+            old = child.data
+            bpy.data.objects.remove(child)
+            if old.users == 0:
+                bpy.data.meshes.remove(old)
+        return
+    mesh = bpy.data.meshes.new(obj.name + "_Thorns")
+    mesh.from_pydata([tuple(v) for v in tverts], [], tfaces)
+    mesh.validate()
+    mesh.update()
+    for poly in mesh.polygons:
+        poly.use_smooth = True
+    if obj.data.materials:
+        mesh.materials.append(obj.data.materials[0])
+    if child is None:
+        child = bpy.data.objects.new(obj.name + "_Thorns", mesh)
+        child[THORN_TAG] = True
+        for coll in obj.users_collection:
+            coll.objects.link(child)
+        child.parent = obj
+        child.hide_select = True
+    else:
+        old = child.data
+        child.data = mesh
+        if old.users == 0:
+            bpy.data.meshes.remove(old)
+
+
 def regenerate(obj, p):
     """既存の内臓植物オブジェクトのメッシュを作り直す."""
     mesh, tubes, verts = build_plant_mesh(p, obj.data.name if obj.data else "VisceralPlant")
@@ -645,6 +762,7 @@ def regenerate(obj, p):
     if old is not None and old.users == 0:
         bpy.data.meshes.remove(old)
     setup_object(obj, p, tubes, verts)
+    update_thorns(obj, p, tubes)
 
 
 def create_plant(context, p):
@@ -654,6 +772,7 @@ def create_plant(context, p):
     context.collection.objects.link(obj)
     obj.location = context.scene.cursor.location.copy()
     setup_object(obj, p, tubes, verts)
+    update_thorns(obj, p, tubes)
     for o in context.selected_objects:
         o.select_set(False)
     obj.select_set(True)
@@ -738,9 +857,21 @@ class VisceralPlantSettings(bpy.types.PropertyGroup):
     root_gravity: _F("下向きの力", 0.18, 0, 2)
     root_wander: _F("根の蛇行", 0.35, 0, 3)
     root_curl: _F("先端の巻き", 0.7, 0, 3)
-    root_taper: _F("根の先細り", 0.3, 0.05, 1)
+    root_taper: _F("根の先細り", 0.15, 0.05, 1)
     extra_roots: _I("追加の根", 3, 0, 20)
     self_avoid: _F("根の自己回避", 0.5, 0, 3)
+
+    # 茨のとげ・ごつごつ
+    thorn_enable: _B("とげ", True)
+    thorn_density: _F("とげの密度", 22.0, 0, 300, description="管 1m あたりのとげの数")
+    thorn_length: _F("とげの長さ", 0.09, 0.002, 2, unit="LENGTH")
+    thorn_width: _F("とげの太さ", 0.32, 0.05, 1.5, description="長さに対する根元の太さ")
+    thorn_tilt: _F("とげの傾き", 0.45, -2, 2, description="正で根元側へ傾く (茨のように)")
+    thorn_hook: _F("とげの反り", 0.35, -2, 2)
+    thorn_on_roots: _B("根にもとげ", True)
+    gnarl: _F("ごつごつ", 0.4, 0, 1.5, description="節やこぶによる表面の凹凸")
+    gnarl_scale: _F("ごつごつの細かさ", 1.0, 0.1, 10)
+    sharp_tips: _B("鋭い先端", True, description="根や小枝の先を円錐状に尖らせる")
 
     # 腸の表面
     haustra_depth: _F("くびれの深さ", 0.14, 0, 0.9, description="結腸のハウストラのような環状のくびれ")
@@ -754,7 +885,7 @@ class VisceralPlantSettings(bpy.types.PropertyGroup):
     ring_resolution: _I("断面の分割数", 12, 6, 64)
     fuse: _B("融合 (リメッシュ)", True, description="ボクセルリメッシュで管同士をなめらかにつなげる")
     fuse_detail: _F("融合の細かさ", 0.45, 0.1, 3, description="小さいほど細かい (重い)")
-    smooth_iterations: _I("スムーズ回数", 3, 0, 30)
+    smooth_iterations: _I("スムーズ回数", 1, 0, 30)
     subdivision: _I("サブディビジョン", 0, 0, 3)
 
     # マテリアル
@@ -823,6 +954,18 @@ class OBJECT_OT_visceral_plant_apply(bpy.types.Operator):
         obj = _active_plant(context)
         depsgraph = context.evaluated_depsgraph_get()
         new_mesh = bpy.data.meshes.new_from_object(obj.evaluated_get(depsgraph))
+        child = _thorn_child(obj)
+        if child is not None:
+            # とげを本体メッシュに統合する
+            bm = bmesh.new()
+            bm.from_mesh(new_mesh)
+            bm.from_mesh(child.data)
+            bm.to_mesh(new_mesh)
+            bm.free()
+            thorn_mesh = child.data
+            bpy.data.objects.remove(child)
+            if thorn_mesh.users == 0:
+                bpy.data.meshes.remove(thorn_mesh)
         old = obj.data
         obj.modifiers.clear()
         obj.data = new_mesh
@@ -892,6 +1035,9 @@ _sub_panels = (
     _sub_panel("VIEW3D_PT_visceral_root", "根",
                ["root_flare", "root_reach", "root_gravity", "root_wander", "root_curl",
                 "root_taper", "extra_roots", "self_avoid"]),
+    _sub_panel("VIEW3D_PT_visceral_thorn", "茨のとげ・ごつごつ",
+               ["thorn_enable", "thorn_density", "thorn_length", "thorn_width", "thorn_tilt",
+                "thorn_hook", "thorn_on_roots", "gnarl", "gnarl_scale", "sharp_tips"], closed=False),
     _sub_panel("VIEW3D_PT_visceral_surface", "腸の表面",
                ["haustra_depth", "haustra_period", "taenia_count", "taenia_depth",
                 "surface_noise", "root_segmentation"]),
