@@ -1,0 +1,11 @@
+schema_version = "1.0.0"
+
+id = "visceral_plant"
+version = "1.0.0"
+name = "Visceral Plant"
+tagline = "Generate plants whose stems and roots look like stomachs and intestines"
+maintainer = "A_life"
+type = "add-on"
+blender_version_min = "4.2.0"
+license = ["SPDX:GPL-3.0-or-later"]
+tags = ["Add Mesh"]
