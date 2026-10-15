@@ -18,7 +18,7 @@ Blender アドオン。
 bl_info = {
     "name": "Thorn Forest Generator (茨の森)",
     "author": "A_life",
-    "version": (2, 1, 0),
+    "version": (2, 2, 0),
     "blender": (3, 6, 0),
     "location": "View3D > Sidebar > 茨の森",
     "description": "大きさのばらつきを持ったリアルないばらの低木・小高木の群落を生成する",
@@ -61,6 +61,7 @@ SETTINGS = {
     "up_tendency": ("float", 0.35, 0.0, 3.0, "上向き", "枝が光を求めて上へ向かう強さ"),
     "wiggle": ("float", 1.0, 0.0, 3.0, "うねり", "枝がうねうねと曲がる強さ"),
     "wave_count": ("float", 3.0, 0.5, 12.0, "うねりの回数", "1 本の枝の中で曲がる回数の目安"),
+    "segment_count": ("int", 5, 0, 40, "直線区間の数", "1 本の枝を何本の直線でつなぐか。少ないほど角ばってシャープになる。0 でなめらかな曲線"),
     "crookedness": ("float", 0.9, 0.0, 3.0, "ジグザグ", "節ごとに枝が折れ曲がる強さ (いばらの小枝らしさ)"),
     "droop": ("float", 0.4, 0.0, 3.0, "枝垂れ", "細い枝が重さで垂れる強さ"),
     "step": ("float", 0.1, 0.02, 1.0, "解像度", "枝のサンプリング間隔の上限 (m)。小さいほど滑らかで重い"),
@@ -161,7 +162,29 @@ def grow_branch(rng, s, start, direction, length, depth, dmax, up):
             d.z = abs(d.z)
             d.normalize()
         pts.append(p.copy())
-    return pts
+    return straighten(rng, s, pts)
+
+
+def straighten(rng, s, pts):
+    """うねった点列を、節で鋭く折れ曲がる直線区間の連なりに間引く。"""
+    if s.segment_count <= 0:
+        return pts
+    n = len(pts) - 1
+    segs = max(2, min(n, round(s.segment_count * rng.uniform(0.7, 1.3))))
+    spacing = n / segs
+    idx = [0]
+    for k in range(1, segs):
+        j = int(round(k * spacing + rng.uniform(-0.3, 0.3) * spacing))
+        if idx[-1] < j < n:
+            idx.append(j)
+    idx.append(n)
+    out = [pts[j].copy() for j in idx]
+    # 節を横へずらして折れ角をはっきりさせる (根元は動かさない)
+    for k in range(1, len(out) - 1):
+        seg = (out[k + 1] - out[k - 1]).length * 0.5
+        out[k] += random_unit(rng) * (seg * 0.2 * s.crookedness)
+        out[k].z = max(out[k].z, 0.0)
+    return out
 
 
 def add_branch(rng, s, start, direction, length, r0, depth, dmax, t0, out):
@@ -237,7 +260,7 @@ def build_vines(s):
     vines = []
     for base, height in place_plants(rng, s):
         build_plant(rng, s, base, height, vines)
-    return [v for v in vines if len(v.points) >= 4]
+    return [v for v in vines if len(v.points) >= 2]
 
 
 def sample_along(rng, vine, density):
@@ -415,7 +438,7 @@ def make_mesh_object(col, name, mb, mat, smooth=True):
     return link_object(col, name, me, mat)
 
 
-def make_vine_curve(col, name, vines, mat, bevel_resolution=2, resolution_u=3):
+def make_vine_curve(col, name, vines, mat, bevel_resolution=2, resolution_u=3, sharp=False):
     cu = bpy.data.curves.new(name, "CURVE")
     cu.dimensions = "3D"
     cu.fill_mode = "FULL"
@@ -424,7 +447,8 @@ def make_vine_curve(col, name, vines, mat, bevel_resolution=2, resolution_u=3):
     cu.resolution_u = resolution_u
     cu.use_fill_caps = True
     for v in vines:
-        sp = cu.splines.new("NURBS")
+        # 角ばった枝は POLY (節で鋭く折れる)、なめらかな枝は NURBS
+        sp = cu.splines.new("POLY" if sharp else "NURBS")
         sp.points.add(len(v.points) - 1)
         co, radius = [], []
         for i, p in enumerate(v.points):
@@ -432,8 +456,9 @@ def make_vine_curve(col, name, vines, mat, bevel_resolution=2, resolution_u=3):
             radius.append(v.radius(i))
         sp.points.foreach_set("co", co)
         sp.points.foreach_set("radius", radius)
-        sp.order_u = 4
-        sp.use_endpoint_u = True
+        if not sharp:
+            sp.order_u = 4
+            sp.use_endpoint_u = True
         sp.use_smooth = True
     return link_object(col, name, cu, mat)
 
@@ -531,7 +556,7 @@ def generate(s):
     for name, group, mat, bevel_res, res_u in groups:
         if not group:
             continue
-        obj = make_vine_curve(col, name, group, mat, bevel_res, res_u)
+        obj = make_vine_curve(col, name, group, mat, bevel_res, res_u, sharp=s.segment_count > 0)
         if s.convert_to_mesh:
             obj = curve_to_mesh(obj)
         created.append(obj)
@@ -601,7 +626,7 @@ PANEL_LAYOUT = (
     ("大きさのばらつき", ("min_height", "max_height", "small_bias")),
     ("樹形", ("tree_ratio", "stems", "trunk_radius")),
     ("枝", ("branch_levels", "branch_count", "branch_angle", "length_ratio", "radius_ratio",
-           "up_tendency", "wiggle", "wave_count", "crookedness", "droop")),
+           "up_tendency", "wiggle", "wave_count", "segment_count", "crookedness", "droop")),
     ("トゲ", ("thorn_density", "thorn_size", "thorn_hook")),
     ("シーン", ("ground", "atmosphere", "fog_density", "convert_to_mesh", "clear_previous")),
 )
