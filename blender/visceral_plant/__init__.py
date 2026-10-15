@@ -1,17 +1,17 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Visceral Plant - 胃や腸のような茎と根を持つ植物モデルを生成する Blender アドオン.
 
-茎は「腸」のようにくびれ (ハウストラ) と縦溝 (結腸ヒモ) を持ちながら蛇行し、
-ところどころで「胃」のような袋状に膨らみ、幽門のような括約部でくびれる。
-根は小腸のように折り畳まれながら下へ伸び、さらに細い根へ分岐する。
+腸のような管が何本もねじれ合いながら垂直に伸びて幹をつくり、
+途中で胃袋のような塊を抱え込む。下では管がほどけて根となり、
+地面を這いながら先端がくるりと巻く。上では一本の細い茎にまとまる。
 """
 
 bl_info = {
     "name": "Visceral Plant (内臓植物ジェネレーター)",
     "author": "A_life",
-    "version": (1, 0, 0),
+    "version": (2, 0, 0),
     "blender": (3, 6, 0),
-    "location": "View3D > Add > Mesh > Visceral Plant / サイドバー > Visceral",
+    "location": "View3D > サイドバー (N) > Visceral / Add > Mesh > Visceral Plant",
     "description": "胃や腸のような茎・根の構造を持つ植物メッシュを手続き的に生成します",
     "category": "Add Mesh",
 }
@@ -25,8 +25,12 @@ from bpy.props import (
     FloatProperty,
     FloatVectorProperty,
     IntProperty,
+    PointerProperty,
 )
 from mathutils import Matrix, Vector, noise
+
+TAG = "visceral_plant"
+UP = Vector((0, 0, 1))
 
 
 # ---------------------------------------------------------------------------
@@ -48,6 +52,10 @@ def _any_perpendicular(v):
 def _smoothstep(t):
     t = max(0.0, min(1.0, t))
     return t * t * (3.0 - 2.0 * t)
+
+
+def _rand_offset(rng, s=500.0):
+    return Vector((rng.uniform(-s, s), rng.uniform(-s, s), rng.uniform(-s, s)))
 
 
 class SpatialHash:
@@ -75,7 +83,7 @@ class SpatialHash:
                             continue
                         d = p - q
                         dist = d.length
-                        limit = (r + qr) * 1.15
+                        limit = (r + qr) * 1.2
                         if 1e-6 < dist < limit:
                             push += d / dist * ((limit - dist) / limit)
         return push
@@ -85,10 +93,9 @@ class Tube:
     """中心線 (points) と各点の半径 (radii) からなるチューブ."""
 
     def __init__(self, kind):
-        self.kind = kind  # "stem", "branch", "root", "bulb"
+        self.kind = kind  # "strand", "sac", "top", "shoot", "root", "bulb"
         self.points = []
         self.radii = []
-        self.attached = False
 
 
 # ---------------------------------------------------------------------------
@@ -100,83 +107,143 @@ class VisceralGrower:
         self.p = p
         self.rng = random.Random(p.seed)
         self.tubes = []
-        self.hash = SpatialHash(p.stem_radius * 2.5)
+        self.hash = SpatialHash(p.strand_radius * 3.0)
         self._owner = 0
 
-    # --- 1本のチューブを成長させる -------------------------------------
-    def grow(self, kind, start, direction, length, r0, r1, *,
-             wander, coil, fold, tropism, tropism_dir, sacs=()):
+    def _new_owner(self):
+        self._owner += 1
+        return self._owner
+
+    # --- 幹: ねじれ合う腸の束 ----------------------------------------
+    def _bundle_envelope(self, u, z):
+        """高さ u (0..1) での束の半径."""
+        p = self.p
+        r = p.bundle_radius
+        # 下端で根に向かって大きく広がる
+        r *= 1.0 + p.root_flare * (1.0 - _smoothstep(u / 0.22)) ** 2
+        # 上端で一本にまとまる
+        r *= 1.0 - 0.92 * _smoothstep((u - 0.7) / 0.3)
+        # 胃袋を抱え込む
+        if p.sac_enable:
+            zs = p.height * p.sac_height
+            half = p.sac_size * p.sac_elongation
+            dz = (z - zs) / half
+            if abs(dz) < 1.0:
+                wrap = p.sac_size * math.sqrt(1.0 - dz * dz) * 0.8 + p.strand_radius * 0.3
+                r = max(r, wrap)
+        return r
+
+    def _strand(self, index, count):
         p = self.p
         rng = self.rng
-        tube = Tube(kind)
-        owner = self._owner
-        self._owner += 1
+        H = p.height
+        z0 = H * p.bundle_bottom
+        z1 = H * p.bundle_top
+        theta0 = math.tau * index / count + rng.uniform(-0.35, 0.35)
+        turns = p.twist * rng.uniform(0.75, 1.25)
+        off = _rand_offset(rng)
+        loops = []
+        for _ in range(p.loop_count):
+            if rng.random() < 1.0 / max(count, 1) * 1.5:
+                loops.append((rng.uniform(0.2, 0.8), p.loop_size * rng.uniform(0.7, 1.3),
+                              rng.uniform(-1.2, 1.2)))
+        bulges = []
+        for _ in range(p.strand_bulges):
+            if rng.random() < 0.5:
+                bulges.append((rng.uniform(0.15, 0.85), rng.uniform(0.05, 0.09)))
 
-        step = max(min(r0, r1) * 0.55, p.stem_radius * 0.12)
+        est_len = math.hypot(z1 - z0, math.tau * turns * p.bundle_radius * 1.3)
+        n = max(12, int(est_len / (p.strand_radius * 0.45)))
+        tube = Tube("strand")
+        for k in range(n + 1):
+            u = k / n
+            z = z0 + (z1 - z0) * u
+            r = self._bundle_envelope(u, z)
+            ang = theta0 + math.tau * turns * u
+            ang += p.irregularity * 1.5 * noise.noise(Vector((u * 3.0, 0.0, 0.0)) + off)
+            for (uc, amp, swing) in loops:
+                g = math.exp(-((u - uc) / 0.07) ** 2)
+                r += amp * g
+                ang += swing * g
+            pos = Vector((r * math.cos(ang), r * math.sin(ang), z))
+            jitter = noise.noise_vector(Vector((u * 4.0, 1.7, 0.0)) + off)
+            pos += jitter * (p.irregularity * p.bundle_radius * 0.5) * (1.0 - _smoothstep((u - 0.75) / 0.25))
+            rad = p.strand_radius * (1.15 - 0.45 * u)
+            for (uc, w) in bulges:
+                rad *= 1.0 + p.bulge_size * math.exp(-((u - uc) / w) ** 2)
+            tube.points.append(pos)
+            tube.radii.append(rad)
+        return tube, theta0
+
+    # --- 地面を這う根 --------------------------------------------------
+    def _crawl(self, start, direction, length, r0, r1, outward):
+        p = self.p
+        rng = self.rng
+        owner = self._new_owner()
+        step = max(min(r0, r1) * 0.7, p.strand_radius * 0.18)
+        n = max(6, int(length / step))
+        pos = start.copy()
+        d = direction.normalized()
+        curl_sign = rng.choice((-1.0, 1.0))
+        off = _rand_offset(rng)
+        freq = 1.0 / max(p.strand_radius * 12.0, 1e-3)
+        pts, radii = [], []
+        for i in range(n + 1):
+            t = i / n
+            r = r0 + (r1 - r0) * t
+            pts.append(pos.copy())
+            radii.append(r)
+            self.hash.insert(pos, r, owner, i)
+            if i == n:
+                break
+            nv = noise.noise_vector(pos * freq + off)
+            if pos.z <= r * 1.1:
+                # 地面を這う: 水平に蛇行し、先端でくるりと巻く
+                nv.z = 0.0
+                d = d + nv * p.root_wander
+                curl = p.root_curl * 0.6 * _smoothstep((t - 0.55) / 0.45)
+                d = d + Vector((0, 0, curl_sign)).cross(d) * curl
+                d = d + outward * 0.12
+                d.z = 0.0
+            else:
+                d = d + nv * (p.root_wander * 0.4) + Vector((0, 0, -p.root_gravity))
+            if p.self_avoid > 0:
+                push = self.hash.repulsion(pos + d * step, r, owner, i,
+                                           ignore_recent=int(r * 3 / step) + 3)
+                if pos.z <= r * 1.1:
+                    push.z = 0.0
+                d = d + push * p.self_avoid
+            if d.length_squared < 1e-9:
+                d = outward.copy()
+            d.normalize()
+            pos = pos + d * step
+            if pos.z < r:
+                pos.z = r
+        return pts, radii
+
+    # --- 汎用の伸長 (上部の茎・小枝) -----------------------------------
+    def _grow(self, kind, start, direction, length, r0, r1, wander, curl, tropism):
+        p = self.p
+        rng = self.rng
+        step = max(min(r0, r1) * 0.6, p.strand_radius * 0.15)
         n = max(4, int(length / step))
         pos = start.copy()
         d = direction.normalized()
-        axis = _any_perpendicular(d)
-        axis.rotate(Matrix.Rotation(rng.uniform(0, math.tau), 3, d))
-        noise_off = Vector((rng.uniform(-500, 500), rng.uniform(-500, 500), rng.uniform(-500, 500)))
-        freq = 1.0 / max(p.stem_radius * 6.0, 1e-3)
-        fold_len = max(2, int(rng.uniform(0.6, 1.4) * (1.0 / max(fold, 1e-3)) / step * r0 * 8))
-        fold_counter = 0
-
+        off = _rand_offset(rng)
+        freq = 1.0 / max(p.height * 0.25, 1e-3)
+        axis = _random_unit(rng)
+        tube = Tube(kind)
         for i in range(n + 1):
             t = i / n
-            radius = r0 + (r1 - r0) * t
-            coil_gain = 1.0
-
-            # 胃袋 (sac): 半径を膨らませ、J字状に強く曲げる
-            for (s0, s1, scale) in sacs:
-                if s0 <= t <= s1:
-                    u = (t - s0) / (s1 - s0)
-                    # 噴門側はなだらか、幽門側で急にすぼまる非対称プロファイル
-                    bulge = math.sin(math.pi * (u ** 0.75)) ** 0.8
-                    radius *= 1.0 + (scale - 1.0) * bulge
-                    coil_gain = 3.0
-                elif s1 < t <= s1 + 0.03:
-                    # 幽門括約部
-                    u = (t - s1) / 0.03
-                    radius *= 1.0 - 0.45 * math.sin(math.pi * u)
-
             tube.points.append(pos.copy())
-            tube.radii.append(radius)
-            self.hash.insert(pos, radius, owner, i)
-
+            tube.radii.append(r0 + (r1 - r0) * t)
             if i == n:
                 break
-
-            # 蛇行 (ノイズ場)
-            nv = noise.noise_vector(pos * freq + noise_off)
-            d = d + nv * wander
-            # 腸のような折り畳み: 軸まわりに回転、時々軸が反転して蛇行する
-            d = d + axis.cross(d) * (coil * coil_gain)
-            fold_counter += 1
-            if fold > 0 and fold_counter >= fold_len:
-                fold_counter = 0
-                axis = -axis
-                axis = (axis + _random_unit(rng) * 0.6).normalized()
-            axis = (axis + _random_unit(rng) * 0.05).normalized()
-            # 屈性 (茎は上へ、根は下へ)
-            d = d + tropism_dir * tropism
-            # 自己回避
-            if p.self_avoid > 0:
-                push = self.hash.repulsion(pos + d * step, radius, owner, i, ignore_recent=int(radius * 3 / step) + 3)
-                d = d + push * p.self_avoid
-            if d.length_squared < 1e-9:
-                d = direction.copy()
+            d = d + noise.noise_vector(pos * freq + off) * wander
+            d = d + axis.cross(d) * curl
+            d = d + UP * tropism
             d.normalize()
-            # 地面より下に潜りすぎない / 上に出ない
-            if kind in ("stem", "branch") and pos.z < r0 and d.z < 0:
-                d.z = abs(d.z)
-                d.normalize()
-            if kind == "root" and pos.z > -radius * 0.5 and d.z > 0:
-                d.z = -abs(d.z)
-                d.normalize()
             pos = pos + d * step
-
         self.tubes.append(tube)
         return tube
 
@@ -184,129 +251,91 @@ class VisceralGrower:
     def build(self):
         p = self.p
         rng = self.rng
-        up = Vector((0, 0, 1))
+        H = p.height
+        count = max(1, p.strand_count)
 
-        # 茎の「胃袋」の位置をランダムに決める
-        sacs = []
-        if p.sac_count > 0:
-            slots = sorted(rng.uniform(0.15, 0.85) for _ in range(p.sac_count))
-            for s in slots:
-                w = p.sac_size * p.stem_radius * rng.uniform(2.5, 3.5) / p.stem_length
-                w = max(0.05, min(w, 0.4))
-                if sacs and s < sacs[-1][1] + 0.05:
-                    continue
-                sacs.append((s, min(s + w, 0.95), p.sac_size * rng.uniform(0.8, 1.2)))
+        # 1. ねじれ合う腸の束 + その下の根
+        for i in range(count):
+            strand, theta0 = self._strand(i, count)
+            base = strand.points[0]
+            down = (strand.points[0] - strand.points[1]).normalized()
+            outward = Vector((base.x, base.y, 0.0))
+            outward = outward.normalized() if outward.length > 1e-6 else Vector((math.cos(theta0), math.sin(theta0), 0))
+            r0 = strand.radii[0]
+            rpts, rradii = self._crawl(base, down, p.root_reach * rng.uniform(0.7, 1.3),
+                                       r0, r0 * p.root_taper, outward)
+            tube = Tube("strand")
+            tube.points = list(reversed(rpts))[:-1] + strand.points
+            tube.radii = list(reversed(rradii))[:-1] + strand.radii
+            tube.root_len = len(rpts) - 1
+            self.tubes.append(tube)
 
-        stem = self.grow(
-            "stem", Vector((0, 0, 0)), up, p.stem_length,
-            p.stem_radius, p.stem_radius * p.stem_taper,
-            wander=p.stem_wander, coil=p.stem_coil, fold=p.stem_fold,
-            tropism=p.stem_tropism, tropism_dir=up, sacs=sacs,
-        )
-
-        # 茎からの枝
-        self._branches(stem, p.branch_count, p.branch_depth, p.branch_length, up)
-
-        # 根
-        for k in range(p.root_count):
-            ang = math.tau * k / max(p.root_count, 1) + rng.uniform(-0.4, 0.4)
+        # 2. 束から直接出る追加の根
+        z0 = H * p.bundle_bottom
+        for _ in range(p.extra_roots):
+            ang = rng.uniform(0, math.tau)
             outward = Vector((math.cos(ang), math.sin(ang), 0))
-            d = (outward * p.root_spread + Vector((0, 0, -1))).normalized()
-            start = Vector((0, 0, p.stem_radius * 0.3)) + outward * p.stem_radius * 0.3
-            r0 = p.stem_radius * p.root_radius * rng.uniform(0.8, 1.1)
-            root = self.grow(
-                "root", start, d, p.root_length * rng.uniform(0.75, 1.2),
-                r0, r0 * 0.25,
-                wander=p.root_wander, coil=p.root_coil, fold=p.root_fold,
-                tropism=p.root_gravity, tropism_dir=Vector((0, 0, -1)),
-            )
-            root.attached = True
-            self._sub_roots(root, p.root_sub_count, depth=1)
+            z = z0 + rng.uniform(0.0, 0.12) * H
+            start = outward * (p.bundle_radius * 0.8) + Vector((0, 0, z))
+            r0 = p.strand_radius * rng.uniform(0.55, 0.85)
+            d = (outward + Vector((0, 0, -0.6))).normalized()
+            pts, radii = self._crawl(start, d, p.root_reach * rng.uniform(0.5, 1.0),
+                                     r0, r0 * p.root_taper, outward)
+            tube = Tube("root")
+            tube.points, tube.radii = pts, radii
+            self.tubes.append(tube)
 
-        # 地際の膨らみ (胃底のような球根)
-        if p.base_bulb > 0:
-            r = p.stem_radius * p.base_bulb
+        # 3. 胃袋 (束に抱え込まれた塊)
+        if p.sac_enable:
+            zs = H * p.sac_height
+            half = p.sac_size * p.sac_elongation
+            tilt = Vector((rng.uniform(-1, 1), rng.uniform(-1, 1), 0)) * p.sac_size * 0.35
+            sac = Tube("sac")
+            n = 14
+            for k in range(n + 1):
+                t = k / n
+                # J 字に曲がった中心線
+                bend = math.sin(math.pi * t) * tilt + tilt * (t - 0.5) * 0.6
+                sac.points.append(Vector((0, 0, zs - half + 2 * half * t)) + bend)
+                prof = math.sin(math.pi * (0.04 + 0.92 * t)) ** 0.65
+                asym = 1.0 + 0.25 * math.sin(math.pi * t * 0.8)
+                sac.radii.append(max(p.sac_size * prof * asym, p.strand_radius))
+            self.tubes.append(sac)
+
+        # 4. 上部の細い茎
+        z1 = H * p.bundle_top
+        top_start = Vector((0, 0, z1 - H * 0.04))
+        top = self._grow("top", top_start, UP, max(H - top_start.z, H * 0.05),
+                         p.top_radius * 1.3, p.top_radius * 0.75,
+                         wander=p.top_wiggle, curl=0.0, tropism=0.35)
+        if p.top_bulb:
+            end = top.points[-1]
+            d = (top.points[-1] - top.points[-2]).normalized()
+            r = p.top_radius * p.top_bulb_size
             bulb = Tube("bulb")
-            n = 9
-            for i in range(n + 1):
-                t = i / n
-                bulb.points.append(Vector((0, 0, -r * 0.4 + r * 1.4 * t)))
-                bulb.radii.append(max(r * math.sin(math.pi * (0.08 + 0.84 * t)), p.stem_radius * 0.6))
+            n = 10
+            for k in range(n + 1):
+                t = k / n
+                bulb.points.append(end + d * (-r * 0.4 + r * 2.2 * t))
+                prof = math.sin(math.pi * (0.05 + 0.9 * t)) ** 0.6
+                bulb.radii.append(max(r * prof, p.top_radius * 0.6))
             self.tubes.append(bulb)
 
+        # 5. 上部の茎から出る小枝
+        n_top = len(top.points)
+        for _ in range(p.shoot_count):
+            i = rng.randint(int(n_top * 0.05), max(int(n_top * 0.6), int(n_top * 0.05) + 1))
+            i = min(i, n_top - 2)
+            base = top.points[i]
+            tangent = (top.points[i + 1] - top.points[max(i - 1, 0)]).normalized()
+            side = _any_perpendicular(tangent)
+            side.rotate(Matrix.Rotation(rng.uniform(0, math.tau), 3, tangent))
+            d = (side + tangent * 0.35).normalized()
+            r0 = top.radii[i] * 0.5
+            self._grow("shoot", base, d, p.shoot_length * rng.uniform(0.6, 1.3),
+                       r0, r0 * 0.25, wander=0.25, curl=0.05, tropism=0.05)
+
         return self.tubes
-
-    def _branches(self, parent, count, depth, length, up):
-        p = self.p
-        rng = self.rng
-        if depth <= 0 or count <= 0:
-            return
-        n = len(parent.points)
-        for _ in range(count):
-            i = rng.randint(int(n * 0.25), max(int(n * 0.92), int(n * 0.25) + 1) - 1)
-            base = parent.points[i]
-            tangent = (parent.points[min(i + 1, n - 1)] - parent.points[max(i - 1, 0)]).normalized()
-            side = _any_perpendicular(tangent)
-            side.rotate(Matrix.Rotation(rng.uniform(0, math.tau), 3, tangent))
-            d = (side * 1.2 + tangent * 0.5 + up * 0.4).normalized()
-            r0 = parent.radii[i] * p.branch_radius
-            blen = length * rng.uniform(0.7, 1.2)
-            sacs = []
-            if rng.random() < p.branch_sac_chance:
-                s = rng.uniform(0.4, 0.7)
-                sacs.append((s, s + 0.18, p.sac_size * 0.8))
-            br = self.grow(
-                "branch", base, d, blen, r0, r0 * p.stem_taper,
-                wander=p.stem_wander * 1.2, coil=p.stem_coil * 1.2, fold=p.stem_fold,
-                tropism=p.stem_tropism * 0.7, tropism_dir=up, sacs=sacs,
-            )
-            br.attached = True
-            if p.tip_bulbs:
-                self._tip_bulb(br)
-            self._branches(br, max(1, count // 2), depth - 1, length * 0.6, up)
-        if p.tip_bulbs and parent.kind == "stem":
-            self._tip_bulb(parent)
-
-    def _tip_bulb(self, tube):
-        """枝先の果実状の袋 (胃のような球体)."""
-        p = self.p
-        end = tube.points[-1]
-        d = (tube.points[-1] - tube.points[-2]).normalized()
-        r = max(tube.radii[-1], p.stem_radius * 0.3) * p.tip_bulb_size
-        bulb = Tube("bulb")
-        bulb.attached = True
-        n = 10
-        for i in range(n + 1):
-            t = i / n
-            bulb.points.append(end + d * (-r * 0.3 + r * 2.0 * t))
-            prof = math.sin(math.pi * (0.06 + 0.88 * t)) ** 0.7
-            bulb.radii.append(max(r * prof, tube.radii[-1] * 0.8))
-        self.tubes.append(bulb)
-
-    def _sub_roots(self, parent, count, depth):
-        p = self.p
-        rng = self.rng
-        if depth > p.root_depth or count <= 0:
-            return
-        n = len(parent.points)
-        for _ in range(count):
-            i = rng.randint(int(n * 0.2), max(int(n * 0.9), int(n * 0.2) + 1) - 1)
-            base = parent.points[i]
-            tangent = (parent.points[min(i + 1, n - 1)] - parent.points[max(i - 1, 0)]).normalized()
-            side = _any_perpendicular(tangent)
-            side.rotate(Matrix.Rotation(rng.uniform(0, math.tau), 3, tangent))
-            d = (side + tangent * 0.6).normalized()
-            r0 = parent.radii[i] * 0.6
-            if r0 < p.stem_radius * 0.04:
-                continue
-            sub = self.grow(
-                "root", base, d, p.root_length * 0.45 * (0.7 ** (depth - 1)) * rng.uniform(0.7, 1.2),
-                r0, r0 * 0.3,
-                wander=p.root_wander, coil=p.root_coil * 1.2, fold=p.root_fold,
-                tropism=p.root_gravity * 0.8, tropism_dir=Vector((0, 0, -1)),
-            )
-            sub.attached = True
-            self._sub_roots(sub, max(1, count // 2), depth + 1)
 
 
 # ---------------------------------------------------------------------------
@@ -336,29 +365,31 @@ def _transport_frames(points):
 
 
 def tube_to_rings(tube, p, rng):
-    """チューブを断面リング列 (頂点座標) と先端点に変換する."""
+    """チューブを断面リング列 (頂点座標) と両端の点に変換する."""
     pts, radii = tube.points, tube.radii
     if len(pts) < 2:
         return [], None, None
     tangents, normals = _transport_frames(pts)
     res = p.ring_resolution
-    is_gut = tube.kind in ("stem", "branch")
-    is_root = tube.kind == "root"
+    root_len = getattr(tube, "root_len", 0)
 
-    # ハウストラ (腸のくびれ) の位相を弧長から計算
+    depth_by_kind = {
+        "strand": p.haustra_depth,
+        "top": p.haustra_depth * 0.6,
+        "sac": p.haustra_depth * 0.5,
+        "root": p.haustra_depth * p.root_segmentation,
+    }
+    base_depth = depth_by_kind.get(tube.kind, 0.0)
+    use_taenia = tube.kind in ("strand", "top") and p.taenia_count > 0
+
     phase = rng.uniform(0, math.tau)
     twist = rng.uniform(-0.5, 0.5)
-    noise_off = Vector((rng.uniform(-900, 900), rng.uniform(-900, 900), rng.uniform(-900, 900)))
+    noise_off = _rand_offset(rng, 900.0)
+    nscale = 3.0 / max(p.strand_radius, 1e-3)
 
-    def section(center, t, nrm, r, s_phase, s_len):
+    def section(center, t, nrm, r, s_phase, s_len, depth, taenia):
         b = t.cross(nrm)
         ring = []
-        if is_gut:
-            depth = p.haustra_depth
-        elif is_root:
-            depth = p.haustra_depth * p.root_segmentation
-        else:
-            depth = 0.0
         # 0..1 の周期関数: くびれ部で 0, 膨らみで 1
         seg = abs(math.sin(s_phase)) ** 0.6
         r_seg = r * (1.0 - depth * (1.0 - seg))
@@ -366,13 +397,13 @@ def tube_to_rings(tube, p, rng):
             th = math.tau * k / res + twist * s_len
             c, s = math.cos(th), math.sin(th)
             rr = r_seg
-            if is_gut and p.taenia_count > 0:
+            if taenia:
                 groove = max(0.0, math.cos(p.taenia_count * th)) ** 12
                 rr *= 1.0 - p.taenia_depth * groove * seg
             dirv = nrm * c + b * s
             if p.surface_noise > 0:
                 q = center + dirv * rr
-                rr *= 1.0 + p.surface_noise * noise.noise(q * (6.0 / p.stem_radius) + noise_off)
+                rr *= 1.0 + p.surface_noise * noise.noise(q * nscale + noise_off)
             ring.append(center + dirv * rr)
         return ring
 
@@ -384,16 +415,23 @@ def tube_to_rings(tube, p, rng):
             ds = (pts[i] - pts[i - 1]).length
             s_len += ds
             s_phase += math.pi * ds / max(radii[i] * p.haustra_period, 1e-5)
-        rings.append(section(c, tangents[i], normals[i], r, s_phase, s_len))
+        if i < root_len:
+            # 束から出た根の部分は根のくびれ設定に従う
+            depth = p.haustra_depth * p.root_segmentation
+            taenia = False
+        else:
+            depth = base_depth
+            taenia = use_taenia
+        rings.append(section(c, tangents[i], normals[i], r, s_phase, s_len, depth, taenia))
 
-    # 先端を半球でふさぐ
+    # 両端を半球でふさぐ
     cap_steps = max(2, res // 4)
     t_end, n_end, r_end = tangents[-1], normals[-1], radii[-1]
     end_rings = []
     for k in range(1, cap_steps):
         a = (k / cap_steps) * (math.pi / 2)
         center = pts[-1] + t_end * (r_end * math.sin(a))
-        end_rings.append(section(center, t_end, n_end, r_end * math.cos(a), s_phase, s_len))
+        end_rings.append(section(center, t_end, n_end, r_end * math.cos(a), s_phase, s_len, 0.0, False))
     tip_end = pts[-1] + t_end * r_end
 
     t0, n0, r0 = tangents[0], normals[0], radii[0]
@@ -401,7 +439,7 @@ def tube_to_rings(tube, p, rng):
     for k in range(cap_steps - 1, 0, -1):
         a = (k / cap_steps) * (math.pi / 2)
         center = pts[0] - t0 * (r0 * math.sin(a))
-        start_rings.append(section(center, t0, n0, r0 * math.cos(a), phase, 0.0))
+        start_rings.append(section(center, t0, n0, r0 * math.cos(a), phase, 0.0, 0.0, False))
     tip_start = pts[0] - t0 * r0
 
     return start_rings + rings + end_rings, tip_start, tip_end
@@ -425,7 +463,6 @@ def build_mesh_data(tubes, p):
             for k in range(res):
                 k1 = (k + 1) % res
                 faces.append((a0 + k, a0 + k1, b0 + k1, b0 + k))
-        # 先端のファン
         si = len(verts)
         verts.append(tip_s)
         for k in range(res):
@@ -555,187 +592,314 @@ def make_flesh_material(name, color_a, color_b, vein_color):
 
 
 # ---------------------------------------------------------------------------
+# 生成本体
+# ---------------------------------------------------------------------------
+
+def build_plant_mesh(p, name="VisceralPlant"):
+    tubes = VisceralGrower(p).build()
+    verts, faces = build_mesh_data(tubes, p)
+    mesh = bpy.data.meshes.new(name)
+    mesh.from_pydata([tuple(v) for v in verts], [], faces)
+    mesh.validate()
+    mesh.update()
+    for poly in mesh.polygons:
+        poly.use_smooth = True
+    return mesh, tubes, verts
+
+
+def setup_object(obj, p, tubes, verts):
+    mesh = obj.data
+    if p.use_material:
+        mat = make_flesh_material("VisceralFlesh", tuple(p.color_a), tuple(p.color_b), tuple(p.vein_color))
+        mesh.materials.clear()
+        mesh.materials.append(mat)
+
+    obj.modifiers.clear()
+    if p.fuse and verts:
+        min_r = max(min(min(t.radii) for t in tubes if t.radii), p.strand_radius * 0.35)
+        xs = [v.x for v in verts]
+        ys = [v.y for v in verts]
+        zs = [v.z for v in verts]
+        dims = max(max(xs) - min(xs), max(ys) - min(ys), max(zs) - min(zs), 1e-3)
+        voxel = max(min_r * p.fuse_detail, dims / 350.0)
+        rm = obj.modifiers.new("Fuse", "REMESH")
+        rm.mode = "VOXEL"
+        rm.voxel_size = voxel
+        rm.adaptivity = 0.0
+        rm.use_smooth_shade = True
+    if p.smooth_iterations > 0:
+        sm = obj.modifiers.new("Smooth", "SMOOTH")
+        sm.factor = 0.6
+        sm.iterations = p.smooth_iterations
+    if p.subdivision > 0:
+        sd = obj.modifiers.new("Subdivision", "SUBSURF")
+        sd.levels = p.subdivision
+        sd.render_levels = p.subdivision
+
+
+def regenerate(obj, p):
+    """既存の内臓植物オブジェクトのメッシュを作り直す."""
+    mesh, tubes, verts = build_plant_mesh(p, obj.data.name if obj.data else "VisceralPlant")
+    old = obj.data
+    obj.data = mesh
+    if old is not None and old.users == 0:
+        bpy.data.meshes.remove(old)
+    setup_object(obj, p, tubes, verts)
+
+
+def create_plant(context, p):
+    mesh, tubes, verts = build_plant_mesh(p)
+    obj = bpy.data.objects.new("VisceralPlant", mesh)
+    obj[TAG] = True
+    context.collection.objects.link(obj)
+    obj.location = context.scene.cursor.location.copy()
+    setup_object(obj, p, tubes, verts)
+    for o in context.selected_objects:
+        o.select_set(False)
+    obj.select_set(True)
+    context.view_layer.objects.active = obj
+    return obj
+
+
+def _active_plant(context):
+    obj = context.active_object
+    if obj is not None and obj.type == "MESH" and obj.get(TAG):
+        return obj
+    return None
+
+
+def _on_update(self, context):
+    if not self.auto_update:
+        return
+    obj = _active_plant(context)
+    if obj is not None:
+        regenerate(obj, self)
+
+
+# ---------------------------------------------------------------------------
+# 設定 (サイドバーに常時表示)
+# ---------------------------------------------------------------------------
+
+def _F(name, default, mn, mx, **kw):
+    return FloatProperty(name=name, default=default, min=mn, max=mx, update=_on_update, **kw)
+
+
+def _I(name, default, mn, mx, **kw):
+    return IntProperty(name=name, default=default, min=mn, max=mx, update=_on_update, **kw)
+
+
+def _B(name, default, **kw):
+    return BoolProperty(name=name, default=default, update=_on_update, **kw)
+
+
+def _C(name, default):
+    return FloatVectorProperty(name=name, subtype="COLOR", size=3, min=0, max=1,
+                               default=default, update=_on_update)
+
+
+class VisceralPlantSettings(bpy.types.PropertyGroup):
+    auto_update: BoolProperty(name="自動更新", default=True,
+                              description="値を変えるたびに選択中の内臓植物を作り直す")
+    seed: _I("シード", 1, 0, 100000)
+
+    # 全体・幹 (腸の束)
+    height: _F("高さ", 3.0, 0.3, 50, unit="LENGTH")
+    strand_count: _I("腸の本数", 5, 1, 16, description="幹を構成する、ねじれ合う管の本数")
+    strand_radius: _F("腸の太さ", 0.07, 0.005, 2, unit="LENGTH")
+    bundle_radius: _F("束の半径", 0.16, 0.0, 5, unit="LENGTH")
+    bundle_bottom: _F("束の下端", 0.12, 0.0, 0.6, subtype="FACTOR",
+                      description="高さに対して、管が根へほどける位置")
+    bundle_top: _F("束の上端", 0.68, 0.2, 0.98, subtype="FACTOR",
+                   description="高さに対して、管が一本の茎にまとまる位置")
+    twist: _F("ねじれ (回転数)", 1.3, -6, 6)
+    irregularity: _F("不規則さ", 0.45, 0, 2)
+    loop_count: _I("ループの数", 3, 0, 12, description="束から外へはみ出す腸のループ")
+    loop_size: _F("ループの大きさ", 0.22, 0, 3, unit="LENGTH")
+    strand_bulges: _I("管のこぶ", 2, 0, 8, description="管の途中のふくらみ")
+    bulge_size: _F("こぶの大きさ", 0.6, 0, 3)
+
+    # 胃袋
+    sac_enable: _B("胃袋", True)
+    sac_height: _F("胃袋の高さ", 0.4, 0.05, 0.95, subtype="FACTOR")
+    sac_size: _F("胃袋の大きさ", 0.24, 0.02, 5, unit="LENGTH")
+    sac_elongation: _F("胃袋の縦長さ", 1.3, 0.5, 4)
+
+    # 上部
+    top_radius: _F("上部の茎の太さ", 0.04, 0.003, 2, unit="LENGTH")
+    top_wiggle: _F("上部の揺らぎ", 0.12, 0, 2)
+    top_bulb: _B("先端のふくらみ", True)
+    top_bulb_size: _F("ふくらみの大きさ", 1.9, 0.5, 8)
+    shoot_count: _I("小枝の数", 3, 0, 20)
+    shoot_length: _F("小枝の長さ", 0.3, 0.01, 10, unit="LENGTH")
+
+    # 根
+    root_flare: _F("根元の広がり", 1.8, 0, 6)
+    root_reach: _F("根の長さ", 1.6, 0.05, 30, unit="LENGTH")
+    root_gravity: _F("下向きの力", 0.18, 0, 2)
+    root_wander: _F("根の蛇行", 0.35, 0, 3)
+    root_curl: _F("先端の巻き", 0.7, 0, 3)
+    root_taper: _F("根の先細り", 0.3, 0.05, 1)
+    extra_roots: _I("追加の根", 3, 0, 20)
+    self_avoid: _F("根の自己回避", 0.5, 0, 3)
+
+    # 腸の表面
+    haustra_depth: _F("くびれの深さ", 0.14, 0, 0.9, description="結腸のハウストラのような環状のくびれ")
+    haustra_period: _F("くびれの間隔", 2.4, 0.3, 20, description="半径に対するくびれ間隔の倍率")
+    taenia_count: _I("縦溝の数", 0, 0, 12, description="結腸ヒモのような縦方向の溝")
+    taenia_depth: _F("縦溝の深さ", 0.15, 0, 0.8)
+    surface_noise: _F("表面のゆらぎ", 0.04, 0, 0.5)
+    root_segmentation: _F("根のくびれ", 0.4, 0, 2)
+
+    # メッシュ
+    ring_resolution: _I("断面の分割数", 12, 6, 64)
+    fuse: _B("融合 (リメッシュ)", True, description="ボクセルリメッシュで管同士をなめらかにつなげる")
+    fuse_detail: _F("融合の細かさ", 0.45, 0.1, 3, description="小さいほど細かい (重い)")
+    smooth_iterations: _I("スムーズ回数", 3, 0, 30)
+    subdivision: _I("サブディビジョン", 0, 0, 3)
+
+    # マテリアル
+    use_material: _B("肉質マテリアル", True)
+    color_a: _C("色 1", (0.85, 0.42, 0.42))
+    color_b: _C("色 2", (0.55, 0.08, 0.12))
+    vein_color: _C("血管の色", (0.25, 0.02, 0.12))
+
+
+# ---------------------------------------------------------------------------
 # オペレーター
 # ---------------------------------------------------------------------------
 
 class MESH_OT_visceral_plant_add(bpy.types.Operator):
-    """胃や腸のような茎・根を持つ植物を追加"""
+    """サイドバーの設定で内臓植物を新規追加"""
 
     bl_idname = "mesh.visceral_plant_add"
-    bl_label = "Visceral Plant"
+    bl_label = "内臓植物を追加"
     bl_options = {"REGISTER", "UNDO"}
 
-    seed: IntProperty(name="シード", default=1, min=0)
-
-    # 茎
-    stem_length: FloatProperty(name="茎の長さ", default=3.0, min=0.2, max=50, unit="LENGTH")
-    stem_radius: FloatProperty(name="茎の太さ", default=0.16, min=0.01, max=5, unit="LENGTH")
-    stem_taper: FloatProperty(name="先細り", default=0.45, min=0.05, max=1.5)
-    stem_wander: FloatProperty(name="蛇行", default=0.35, min=0, max=3)
-    stem_coil: FloatProperty(name="巻き (腸の折り畳み)", default=0.18, min=0, max=1.5)
-    stem_fold: FloatProperty(name="折り返し頻度", default=0.6, min=0, max=5,
-                             description="巻き方向が反転する頻度。高いほど腸のように細かく蛇行する")
-    stem_tropism: FloatProperty(name="上向きの力", default=0.25, min=0, max=2)
-
-    # 腸の表面構造
-    haustra_depth: FloatProperty(name="くびれの深さ", default=0.28, min=0, max=0.9,
-                                 description="結腸のハウストラのような環状のくびれ")
-    haustra_period: FloatProperty(name="くびれの間隔", default=2.2, min=0.3, max=20,
-                                  description="半径に対するくびれ間隔の倍率")
-    taenia_count: IntProperty(name="縦溝の数", default=3, min=0, max=12,
-                              description="結腸ヒモのような縦方向の溝")
-    taenia_depth: FloatProperty(name="縦溝の深さ", default=0.18, min=0, max=0.8)
-    surface_noise: FloatProperty(name="表面のゆらぎ", default=0.06, min=0, max=0.5)
-
-    # 胃袋
-    sac_count: IntProperty(name="胃袋の数 (茎)", default=2, min=0, max=10)
-    sac_size: FloatProperty(name="胃袋の大きさ", default=2.6, min=1, max=8)
-    branch_sac_chance: FloatProperty(name="枝に胃袋が付く確率", default=0.35, min=0, max=1, subtype="FACTOR")
-    base_bulb: FloatProperty(name="地際の膨らみ", default=1.8, min=0, max=6)
-    tip_bulbs: BoolProperty(name="枝先の袋状の実", default=True)
-    tip_bulb_size: FloatProperty(name="実の大きさ", default=2.2, min=0.5, max=6)
-
-    # 枝
-    branch_count: IntProperty(name="枝の数", default=4, min=0, max=30)
-    branch_depth: IntProperty(name="枝の階層", default=2, min=0, max=4)
-    branch_length: FloatProperty(name="枝の長さ", default=1.5, min=0.1, max=30, unit="LENGTH")
-    branch_radius: FloatProperty(name="枝の太さ比", default=0.6, min=0.1, max=1.2)
-
-    # 根
-    root_count: IntProperty(name="根の数", default=5, min=0, max=30)
-    root_length: FloatProperty(name="根の長さ", default=2.4, min=0.1, max=30, unit="LENGTH")
-    root_radius: FloatProperty(name="根の太さ比", default=0.5, min=0.05, max=1.5)
-    root_spread: FloatProperty(name="根の広がり", default=1.4, min=0, max=5)
-    root_wander: FloatProperty(name="根の蛇行", default=0.5, min=0, max=3)
-    root_coil: FloatProperty(name="根の巻き (小腸)", default=0.5, min=0, max=1.5)
-    root_fold: FloatProperty(name="根の折り返し頻度", default=1.2, min=0, max=5)
-    root_gravity: FloatProperty(name="下向きの力", default=0.08, min=0, max=2)
-    root_sub_count: IntProperty(name="側根の数", default=2, min=0, max=10)
-    root_depth: IntProperty(name="側根の階層", default=1, min=0, max=3)
-    root_segmentation: FloatProperty(name="根のくびれ", default=0.5, min=0, max=2)
-
-    # メッシュ
-    ring_resolution: IntProperty(name="断面の分割数", default=16, min=6, max=64)
-    self_avoid: FloatProperty(name="自己回避", default=0.6, min=0, max=3,
-                              description="チューブ同士がめり込まないよう押し返す強さ")
-    fuse: BoolProperty(name="融合 (リメッシュ)", default=True,
-                       description="ボクセルリメッシュで分岐部をなめらかにつなげる")
-    fuse_detail: FloatProperty(name="融合の細かさ", default=0.5, min=0.1, max=3,
-                               description="小さいほど細かい (重い)")
-    smooth_iterations: IntProperty(name="スムーズ回数", default=4, min=0, max=30)
-    subdivision: IntProperty(name="サブディビジョン", default=0, min=0, max=3)
-    apply_modifiers: BoolProperty(name="モディファイアを適用", default=False)
-
-    # マテリアル
-    use_material: BoolProperty(name="肉質マテリアル", default=True)
-    color_a: FloatVectorProperty(name="色 1", subtype="COLOR", size=3, min=0, max=1,
-                                 default=(0.85, 0.42, 0.42))
-    color_b: FloatVectorProperty(name="色 2", subtype="COLOR", size=3, min=0, max=1,
-                                 default=(0.55, 0.08, 0.12))
-    vein_color: FloatVectorProperty(name="血管の色", subtype="COLOR", size=3, min=0, max=1,
-                                    default=(0.25, 0.02, 0.12))
-
-    def draw(self, context):
-        layout = self.layout
-        layout.use_property_split = True
-        layout.use_property_decorate = False
-        layout.prop(self, "seed")
-
-        def box(title, props):
-            b = layout.box()
-            b.label(text=title)
-            col = b.column(align=True)
-            for prop in props:
-                col.prop(self, prop)
-
-        box("茎", ["stem_length", "stem_radius", "stem_taper", "stem_wander",
-                   "stem_coil", "stem_fold", "stem_tropism"])
-        box("腸の表面", ["haustra_depth", "haustra_period", "taenia_count",
-                       "taenia_depth", "surface_noise"])
-        box("胃袋・実", ["sac_count", "sac_size", "branch_sac_chance", "base_bulb",
-                       "tip_bulbs", "tip_bulb_size"])
-        box("枝", ["branch_count", "branch_depth", "branch_length", "branch_radius"])
-        box("根", ["root_count", "root_length", "root_radius", "root_spread",
-                  "root_wander", "root_coil", "root_fold", "root_gravity",
-                  "root_sub_count", "root_depth", "root_segmentation"])
-        box("メッシュ", ["ring_resolution", "self_avoid", "fuse", "fuse_detail",
-                       "smooth_iterations", "subdivision", "apply_modifiers"])
-        box("マテリアル", ["use_material", "color_a", "color_b", "vein_color"])
-
     def execute(self, context):
-        grower = VisceralGrower(self)
-        tubes = grower.build()
-        verts, faces = build_mesh_data(tubes, self)
-        if not verts:
-            self.report({"WARNING"}, "メッシュを生成できませんでした")
-            return {"CANCELLED"}
-
-        mesh = bpy.data.meshes.new("VisceralPlant")
-        mesh.from_pydata([tuple(v) for v in verts], [], faces)
-        mesh.validate()
-        mesh.update()
-        for poly in mesh.polygons:
-            poly.use_smooth = True
-
-        obj = bpy.data.objects.new("VisceralPlant", mesh)
-        context.collection.objects.link(obj)
-        obj.location = context.scene.cursor.location.copy()
-
-        if self.use_material:
-            mat = make_flesh_material("VisceralFlesh_%d" % self.seed,
-                                      tuple(self.color_a), tuple(self.color_b), tuple(self.vein_color))
-            mesh.materials.append(mat)
-
-        if self.fuse:
-            min_r = min(min(t.radii) for t in tubes if t.radii)
-            xs = [v.x for v in verts]
-            ys = [v.y for v in verts]
-            zs = [v.z for v in verts]
-            dims = max(max(xs) - min(xs), max(ys) - min(ys), max(zs) - min(zs), 1e-3)
-            voxel = max(min_r * self.fuse_detail, dims / 400.0)
-            rm = obj.modifiers.new("Fuse", "REMESH")
-            rm.mode = "VOXEL"
-            rm.voxel_size = voxel
-            rm.adaptivity = 0.0
-            rm.use_smooth_shade = True
-        if self.smooth_iterations > 0:
-            sm = obj.modifiers.new("Smooth", "SMOOTH")
-            sm.factor = 0.6
-            sm.iterations = self.smooth_iterations
-        if self.subdivision > 0:
-            sd = obj.modifiers.new("Subdivision", "SUBSURF")
-            sd.levels = self.subdivision
-            sd.render_levels = self.subdivision
-
-        if self.apply_modifiers and obj.modifiers:
-            depsgraph = context.evaluated_depsgraph_get()
-            evaluated = obj.evaluated_get(depsgraph)
-            new_mesh = bpy.data.meshes.new_from_object(evaluated)
-            obj.modifiers.clear()
-            old = obj.data
-            obj.data = new_mesh
-            new_mesh.name = "VisceralPlant"
-            bpy.data.meshes.remove(old)
-
-        for o in context.selected_objects:
-            o.select_set(False)
-        obj.select_set(True)
-        context.view_layer.objects.active = obj
+        create_plant(context, context.scene.visceral_plant)
         return {"FINISHED"}
 
 
-class VIEW3D_PT_visceral_plant(bpy.types.Panel):
-    bl_label = "Visceral Plant"
+class OBJECT_OT_visceral_plant_regenerate(bpy.types.Operator):
+    """選択中の内臓植物を現在の設定で作り直す"""
+
+    bl_idname = "object.visceral_plant_regenerate"
+    bl_label = "作り直す"
+    bl_options = {"REGISTER", "UNDO"}
+
+    @classmethod
+    def poll(cls, context):
+        return _active_plant(context) is not None
+
+    def execute(self, context):
+        regenerate(_active_plant(context), context.scene.visceral_plant)
+        return {"FINISHED"}
+
+
+class OBJECT_OT_visceral_plant_random_seed(bpy.types.Operator):
+    """シードをランダムに変える"""
+
+    bl_idname = "object.visceral_plant_random_seed"
+    bl_label = "ランダム"
+    bl_options = {"REGISTER", "UNDO"}
+
+    def execute(self, context):
+        context.scene.visceral_plant.seed = random.randint(0, 99999)
+        return {"FINISHED"}
+
+
+class OBJECT_OT_visceral_plant_apply(bpy.types.Operator):
+    """モディファイアを適用して通常のメッシュにする (以後は再生成されない)"""
+
+    bl_idname = "object.visceral_plant_apply"
+    bl_label = "確定 (モディファイア適用)"
+    bl_options = {"REGISTER", "UNDO"}
+
+    @classmethod
+    def poll(cls, context):
+        return _active_plant(context) is not None
+
+    def execute(self, context):
+        obj = _active_plant(context)
+        depsgraph = context.evaluated_depsgraph_get()
+        new_mesh = bpy.data.meshes.new_from_object(obj.evaluated_get(depsgraph))
+        old = obj.data
+        obj.modifiers.clear()
+        obj.data = new_mesh
+        if old.users == 0:
+            bpy.data.meshes.remove(old)
+        del obj[TAG]
+        return {"FINISHED"}
+
+
+# ---------------------------------------------------------------------------
+# UI
+# ---------------------------------------------------------------------------
+
+class _VisceralPanel:
     bl_space_type = "VIEW_3D"
     bl_region_type = "UI"
     bl_category = "Visceral"
 
+
+class VIEW3D_PT_visceral_plant(_VisceralPanel, bpy.types.Panel):
+    bl_label = "Visceral Plant"
+
     def draw(self, context):
-        col = self.layout.column()
-        col.label(text="胃や腸のような植物を生成")
-        col.operator(MESH_OT_visceral_plant_add.bl_idname, text="内臓植物を追加", icon="OUTLINER_OB_MESH")
-        col.label(text="生成後、左下の調整パネルで", icon="INFO")
-        col.label(text="パラメーターを変更できます")
+        s = context.scene.visceral_plant
+        layout = self.layout
+        col = layout.column(align=True)
+        col.operator(MESH_OT_visceral_plant_add.bl_idname, icon="ADD")
+        row = col.row(align=True)
+        row.operator(OBJECT_OT_visceral_plant_regenerate.bl_idname, icon="FILE_REFRESH")
+        row.operator(OBJECT_OT_visceral_plant_apply.bl_idname, icon="CHECKMARK", text="確定")
+        layout.prop(s, "auto_update")
+        row = layout.row(align=True)
+        row.prop(s, "seed")
+        row.operator(OBJECT_OT_visceral_plant_random_seed.bl_idname, text="", icon="FILE_REFRESH")
+        if _active_plant(context) is None:
+            layout.label(text="内臓植物を選択すると値の変更が反映されます", icon="INFO")
+
+
+def _sub_panel(idname, label, props, closed=True):
+    def draw(self, context):
+        s = context.scene.visceral_plant
+        layout = self.layout
+        layout.use_property_split = True
+        layout.use_property_decorate = False
+        col = layout.column(align=True)
+        for prop in props:
+            col.prop(s, prop)
+
+    return type(idname, (_VisceralPanel, bpy.types.Panel), {
+        "bl_label": label,
+        "bl_parent_id": "VIEW3D_PT_visceral_plant",
+        "bl_options": {"DEFAULT_CLOSED"} if closed else set(),
+        "draw": draw,
+    })
+
+
+_sub_panels = (
+    _sub_panel("VIEW3D_PT_visceral_trunk", "幹 (腸の束)",
+               ["height", "strand_count", "strand_radius", "bundle_radius", "bundle_bottom",
+                "bundle_top", "twist", "irregularity", "loop_count", "loop_size",
+                "strand_bulges", "bulge_size"], closed=False),
+    _sub_panel("VIEW3D_PT_visceral_sac", "胃袋",
+               ["sac_enable", "sac_height", "sac_size", "sac_elongation"]),
+    _sub_panel("VIEW3D_PT_visceral_top", "上部の茎",
+               ["top_radius", "top_wiggle", "top_bulb", "top_bulb_size",
+                "shoot_count", "shoot_length"]),
+    _sub_panel("VIEW3D_PT_visceral_root", "根",
+               ["root_flare", "root_reach", "root_gravity", "root_wander", "root_curl",
+                "root_taper", "extra_roots", "self_avoid"]),
+    _sub_panel("VIEW3D_PT_visceral_surface", "腸の表面",
+               ["haustra_depth", "haustra_period", "taenia_count", "taenia_depth",
+                "surface_noise", "root_segmentation"]),
+    _sub_panel("VIEW3D_PT_visceral_mesh", "メッシュ",
+               ["ring_resolution", "fuse", "fuse_detail", "smooth_iterations", "subdivision"]),
+    _sub_panel("VIEW3D_PT_visceral_material", "マテリアル",
+               ["use_material", "color_a", "color_b", "vein_color"]),
+)
 
 
 def _menu_func(self, context):
@@ -743,17 +907,27 @@ def _menu_func(self, context):
                          icon="OUTLINER_OB_MESH")
 
 
-_classes = (MESH_OT_visceral_plant_add, VIEW3D_PT_visceral_plant)
+_classes = (
+    VisceralPlantSettings,
+    MESH_OT_visceral_plant_add,
+    OBJECT_OT_visceral_plant_regenerate,
+    OBJECT_OT_visceral_plant_random_seed,
+    OBJECT_OT_visceral_plant_apply,
+    VIEW3D_PT_visceral_plant,
+    *_sub_panels,
+)
 
 
 def register():
     for cls in _classes:
         bpy.utils.register_class(cls)
+    bpy.types.Scene.visceral_plant = PointerProperty(type=VisceralPlantSettings)
     bpy.types.VIEW3D_MT_mesh_add.append(_menu_func)
 
 
 def unregister():
     bpy.types.VIEW3D_MT_mesh_add.remove(_menu_func)
+    del bpy.types.Scene.visceral_plant
     for cls in reversed(_classes):
         bpy.utils.unregister_class(cls)
 
