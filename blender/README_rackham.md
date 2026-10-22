@@ -29,13 +29,13 @@ blender -b myscene.blend -P rackham_shader.py -- --render //out.png   # シー�
 
 | 要素 | 実装 |
 |---|---|
-| 3段階の水彩トーン | Diffuse → Shader to RGB で光量を取り、smoothstep で「紙 / 中間ウォッシュ / 影」に分ける |
+| 水彩トーン | Diffuse → Shader to RGB で光量を取り、柔らかい smoothstep で「紙 / 中間ウォッシュ / 薄い影」に分ける（影は黒くせず中間調のアンバー） |
 | 褪せた顔料 | Base Color を彩度を落とし、影色(アンバー)に寄せてから紙色に乗算 |
 | ウォッシュのムラ | オブジェクト座標のノイズで光量を揺らし、帯の境界をにじませる |
 | 顔料の粒状感・縁の溜まり | 高周波ノイズと Layer Weight(Facing) で影色を重ねる |
-| ハッチング | スクリーン座標の Wave テクスチャを2方向に。暗さのしきい値ごとに1本目→クロスハッチが現れる。Distortion で手の揺れ |
-| 紙 | スクリーン座標の2種類のノイズでグレイン、ワールドは黄ばみムラのある紙色 |
-| 輪郭線 | Freestyle。Perlin ノイズ+サイン変位で揺れ、Backbone Stretcher で線のはみ出し、入り抜き＋カリグラフィ＋ノイズで筆圧 |
+| ハッチング | スクリーン座標の Wave テクスチャを2方向に、細く途切れ途切れに。最も暗い部分にだけ現れる |
+| 紙・背景 | スクリーン座標のノイズでグレイン。背景は雲状にムラのある灰ベージュのウォッシュ＋周辺減光 |
+| 輪郭線 | Freestyle。細く鋭いほぼ黒のペン線（入り抜き・わずかな揺れ）。Suggestive Contours で襞や窪みなど内側の線も描く |
 
 ## 主なパラメータ（グループノード `Rackham Ink & Wash`）
 
@@ -45,13 +45,15 @@ blender -b myscene.blend -P rackham_shader.py -- --render //out.png   # シー�
 - **Light / Shadow Threshold** – 紙が見える明部 / 影の境界
 - **Highlight Wash** – 明部にどれだけ薄く色を残すか
 - **Hatch Threshold / Cross Hatch Threshold** – ハッチが入り始める暗さ
-- **Hatch Density / Width / Wobble / Strength** – ハッチの密度・太さ・揺れ・濃さ
+- **Hatch Density / Width / Wobble / Strength / Breakup** – ハッチの密度・太さ・揺れ・濃さ・途切れ具合
 - **Wash Variation / Wash Scale** – 水彩ムラの強さ・大きさ
 - **Paper Grain** – 紙のザラつき
 - **Aspect** – レンダー解像度の縦横比（スクリプト実行時に自動設定。解像度を変えたら再実行かここを修正）
 
 輪郭線の太さや揺れは Freestyle の Line Style `Rackham Pen` で調整します
 （View Layer プロパティ → Freestyle Line Style）。
+線をもっと細くするには `Thickness`（初期値 1.1）を下げる。内側の線が多すぎる場合は
+View Layer → Freestyle の Suggestive Contours をオフに。
 
 ## コツ
 

@@ -26,9 +26,9 @@ import bpy
 GROUP_NAME = "Rackham Ink & Wash"
 LINESTYLE_NAME = "Rackham Pen"
 
-PAPER = (0.92, 0.86, 0.72, 1.0)   # 黄ばんだヴェラム
-INK = (0.13, 0.08, 0.05, 1.0)     # 焦げ茶のインク
-UMBER = (0.42, 0.34, 0.24, 1.0)   # 影色（泥っぽいアンバー）
+PAPER = (0.90, 0.86, 0.77, 1.0)   # 黄ばんだヴェラム
+INK = (0.07, 0.045, 0.03, 1.0)    # ほぼ黒の焦げ茶インク
+UMBER = (0.62, 0.53, 0.40, 1.0)   # 影色（薄いアンバーのウォッシュ）
 
 
 # --------------------------------------------------------------------------
@@ -92,22 +92,23 @@ GROUP_INPUTS = [
     ("Paper Color", "NodeSocketColor", PAPER, None, None),
     ("Ink Color", "NodeSocketColor", INK, None, None),
     ("Shadow Tint", "NodeSocketColor", UMBER, None, None),
-    ("Desaturate", "NodeSocketFloat", 0.4, 0.0, 1.0),
-    ("Highlight Wash", "NodeSocketFloat", 0.3, 0.0, 1.0),
+    ("Desaturate", "NodeSocketFloat", 0.3, 0.0, 1.0),
+    ("Highlight Wash", "NodeSocketFloat", 0.45, 0.0, 1.0),
     ("Light Threshold", "NodeSocketFloat", 0.62, 0.0, 1.0),
-    ("Shadow Threshold", "NodeSocketFloat", 0.30, 0.0, 1.0),
-    ("Band Softness", "NodeSocketFloat", 0.05, 0.001, 0.5),
+    ("Shadow Threshold", "NodeSocketFloat", 0.34, 0.0, 1.0),
+    ("Band Softness", "NodeSocketFloat", 0.14, 0.001, 0.5),
     ("Wash Variation", "NodeSocketFloat", 0.22, 0.0, 1.0),
     ("Wash Scale", "NodeSocketFloat", 3.0, 0.0, 100.0),
     ("Granulation", "NodeSocketFloat", 0.12, 0.0, 1.0),
     ("Edge Darkening", "NodeSocketFloat", 0.35, 0.0, 1.0),
-    ("Hatch Threshold", "NodeSocketFloat", 0.36, 0.0, 1.0),
-    ("Cross Hatch Threshold", "NodeSocketFloat", 0.16, 0.0, 1.0),
-    ("Hatch Density", "NodeSocketFloat", 30.0, 1.0, 500.0),
-    ("Hatch Width", "NodeSocketFloat", 0.28, 0.0, 1.0),
-    ("Hatch Wobble", "NodeSocketFloat", 1.5, 0.0, 20.0),
-    ("Hatch Strength", "NodeSocketFloat", 0.85, 0.0, 1.0),
-    ("Paper Grain", "NodeSocketFloat", 0.10, 0.0, 1.0),
+    ("Hatch Threshold", "NodeSocketFloat", 0.26, 0.0, 1.0),
+    ("Cross Hatch Threshold", "NodeSocketFloat", 0.10, 0.0, 1.0),
+    ("Hatch Density", "NodeSocketFloat", 45.0, 1.0, 500.0),
+    ("Hatch Width", "NodeSocketFloat", 0.10, 0.0, 1.0),
+    ("Hatch Wobble", "NodeSocketFloat", 0.8, 0.0, 20.0),
+    ("Hatch Strength", "NodeSocketFloat", 0.6, 0.0, 1.0),
+    ("Hatch Breakup", "NodeSocketFloat", 0.6, 0.0, 1.0),
+    ("Paper Grain", "NodeSocketFloat", 0.07, 0.0, 1.0),
     ("Aspect", "NodeSocketFloat", 16 / 9, 0.1, 10.0),
 ]
 
@@ -211,7 +212,7 @@ def build_group():
         L.new(_math(nt, "MULTIPLY", I["Hatch Density"], scale_mul, -1100, y - 250),
               wave.inputs["Scale"])
         L.new(I["Hatch Wobble"], wave.inputs["Distortion"])
-        w_hi = _math(nt, "ADD", I["Hatch Width"], 0.12, -700, y - 200)
+        w_hi = _math(nt, "ADD", I["Hatch Width"], 0.05, -700, y - 200)
         line = _smooth(nt, wave.outputs["Fac"], I["Hatch Width"], w_hi, -500, y, invert=True)
         t_lo = _math(nt, "SUBTRACT", threshold, 0.04, -700, y - 300)
         t_hi = _math(nt, "ADD", threshold, 0.04, -700, y - 380)
@@ -221,6 +222,15 @@ def build_group():
     h1 = hatch_layer(math.radians(35), 1.0, I["Hatch Threshold"], -500)
     h2 = hatch_layer(math.radians(-50), 1.15, I["Cross Hatch Threshold"], -1000)
     ink = _math(nt, "MAXIMUM", h1, h2, -100, -700)
+    # ペンの途切れ：ストロークをノイズで分断
+    brk = _node(N, "ShaderNodeTexNoise", -300, -1300)
+    brk.inputs["Scale"].default_value = 30.0
+    brk.inputs["Detail"].default_value = 1.0
+    L.new(screen, brk.inputs["Vector"])
+    brk_m = _smooth(nt, brk.outputs["Fac"], 0.42, 0.52, -100, -1300)
+    brk_m = _math(nt, "SUBTRACT", 1.0, brk_m, 100, -1300)
+    brk_m = _math(nt, "MULTIPLY", brk_m, I["Hatch Breakup"], 250, -1300)
+    ink = _math(nt, "MULTIPLY", ink, _math(nt, "SUBTRACT", 1.0, brk_m, 400, -1300), -100, -850)
     ink = _math(nt, "MULTIPLY", ink, I["Hatch Strength"], 100, -700)
     col = _mix(nt, "MIX", ink, col, I["Ink Color"], 700, 600)
 
@@ -313,22 +323,46 @@ def setup_world(scene):
     nt.nodes.clear()
     N, L = nt.nodes, nt.links
 
-    tc = _node(N, "ShaderNodeTexCoord", -900, 0)
-    noise = _node(N, "ShaderNodeTexNoise", -700, 0)
-    noise.inputs["Scale"].default_value = 6.0
-    noise.inputs["Detail"].default_value = 8.0
+    # 背景：雲のようにムラのある灰ベージュのウォッシュ + 周辺の減光
+    tc = _node(N, "ShaderNodeTexCoord", -1300, 0)
+    noise = _node(N, "ShaderNodeTexNoise", -1100, 100)
+    noise.inputs["Scale"].default_value = 2.5
+    noise.inputs["Detail"].default_value = 6.0
+    noise.inputs["Roughness"].default_value = 0.65
+    noise.inputs["Distortion"].default_value = 0.4
     L.new(tc.outputs["Window"], noise.inputs["Vector"])
-    ramp = _node(N, "ShaderNodeValToRGB", -500, 0)
-    ramp.color_ramp.elements[0].position = 0.3
-    ramp.color_ramp.elements[0].color = (0.80, 0.72, 0.56, 1)   # 黄ばみ・シミ
-    ramp.color_ramp.elements[1].position = 0.6
+    ramp = _node(N, "ShaderNodeValToRGB", -900, 100)
+    ramp.color_ramp.elements[0].position = 0.35
+    ramp.color_ramp.elements[0].color = (0.66, 0.62, 0.55, 1)   # 灰色がかったシミ
+    ramp.color_ramp.elements[1].position = 0.68
     ramp.color_ramp.elements[1].color = PAPER
     L.new(noise.outputs["Fac"], ramp.inputs["Fac"])
+
+    grain = _node(N, "ShaderNodeTexNoise", -1100, -200)
+    grain.inputs["Scale"].default_value = 300.0
+    L.new(tc.outputs["Window"], grain.inputs["Vector"])
+    gr = _node(N, "ShaderNodeMix", -700, 0, data_type="RGBA", blend_type="OVERLAY")
+    gr.inputs[0].default_value = 0.15
+    L.new(ramp.outputs["Color"], gr.inputs[6])
+    L.new(grain.outputs["Color"], gr.inputs[7])
+
+    vdist = _node(N, "ShaderNodeVectorMath", -1100, -400, operation="DISTANCE")
+    vdist.inputs[1].default_value = (0.5, 0.5, 0.0)
+    L.new(tc.outputs["Window"], vdist.inputs[0])
+    vig = _node(N, "ShaderNodeMapRange", -900, -400, interpolation_type="SMOOTHSTEP")
+    vig.inputs["From Min"].default_value = 0.35
+    vig.inputs["From Max"].default_value = 0.8
+    vig.inputs["To Max"].default_value = 0.45
+    L.new(vdist.outputs["Value"], vig.inputs["Value"])
+    vm = _node(N, "ShaderNodeMix", -500, 0, data_type="RGBA", blend_type="MULTIPLY")
+    L.new(vig.outputs["Result"], vm.inputs[0])
+    L.new(gr.outputs[2], vm.inputs[6])
+    vm.inputs[7].default_value = (0.70, 0.64, 0.56, 1)
 
     # カメラには紙、ライティングには弱い暖色の環境光
     lp = _node(N, "ShaderNodeLightPath", -300, 300)
     bg_cam = _node(N, "ShaderNodeBackground", -200, 0)
-    L.new(ramp.outputs["Color"], bg_cam.inputs["Color"])
+    L.new(vm.outputs[2], bg_cam.inputs["Color"])
     bg_amb = _node(N, "ShaderNodeBackground", -200, -200)
     bg_amb.inputs["Color"].default_value = (0.9, 0.82, 0.65, 1)
     bg_amb.inputs["Strength"].default_value = 0.25
@@ -346,7 +380,10 @@ def setup_freestyle(scene):
     vl = bpy.context.view_layer
     fs = vl.freestyle_settings
     fs.mode = "EDITOR"
-    fs.crease_angle = math.radians(130)
+    fs.crease_angle = math.radians(135)
+    # 内側の形を描く線（襞・窪み）。重すぎる場合は False に
+    fs.use_suggestive_contours = True
+    fs.kr_derivative_epsilon = 0.05
     fs.use_smoothness = True
 
     ls_set = fs.linesets[0] if len(fs.linesets) else fs.linesets.new("LineSet")
@@ -358,6 +395,7 @@ def setup_freestyle(scene):
     ls_set.select_crease = True
     ls_set.select_external_contour = True
     ls_set.select_contour = True
+    ls_set.select_suggestive_contour = True
 
     old = bpy.data.linestyles.get(LINESTYLE_NAME)
     if old:
@@ -365,7 +403,7 @@ def setup_freestyle(scene):
     st = bpy.data.linestyles.new(LINESTYLE_NAME)
     ls_set.linestyle = st
     st.color = INK[:3]
-    st.thickness = 2.0
+    st.thickness = 1.1
     st.thickness_position = "CENTER"
     st.caps = "ROUND"
     st.chaining = "PLAIN"
@@ -375,20 +413,17 @@ def setup_freestyle(scene):
     m = st.geometry_modifiers.new("Sampling", "SAMPLING")
     m.sampling = 2.0
     m = st.geometry_modifiers.new("Overshoot", "BACKBONE_STRETCHER")
-    m.backbone_length = 4.0
+    m.backbone_length = 2.0
     m = st.geometry_modifiers.new("Wobble", "PERLIN_NOISE_1D")
-    m.frequency = 12.0
-    m.amplitude = 1.6
-    m.octaves = 3
-    m = st.geometry_modifiers.new("Tremor", "SINUS_DISPLACEMENT")
-    m.wavelength = 18.0
-    m.amplitude = 0.6
+    m.frequency = 8.0
+    m.amplitude = 0.4
+    m.octaves = 2
 
     # ペン先の強弱：入り抜き＋カリグラフィ＋ノイズ
     m = st.thickness_modifiers.new("Taper", "ALONG_STROKE")
     m.mapping = "CURVE"
     m.blend = "MULTIPLY"
-    m.value_min, m.value_max = 0.35, 1.0
+    m.value_min, m.value_max = 0.2, 1.0
     cm = m.curve
     c = cm.curves[0]
     c.points[0].location = (0.0, 0.0)
@@ -399,14 +434,14 @@ def setup_freestyle(scene):
     m = st.thickness_modifiers.new("Nib", "CALLIGRAPHY")
     m.blend = "MULTIPLY"
     m.orientation = math.radians(35)
-    m.thickness_min, m.thickness_max = 0.6, 1.4
+    m.thickness_min, m.thickness_max = 0.7, 1.3
     m = st.thickness_modifiers.new("Pressure", "NOISE")
     m.blend = "ADD"
-    m.amplitude = 0.8
-    m.period = 20.0
+    m.amplitude = 0.25
+    m.period = 15.0
     m = st.alpha_modifiers.new("Ink Flow", "NOISE")
     m.blend = "ADD"
-    m.amplitude = 0.3
+    m.amplitude = 0.2
     m.period = 40.0
 
 
