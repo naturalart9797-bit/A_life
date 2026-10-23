@@ -2,10 +2,10 @@
 Arthur Rackham style ink & wash shader for Blender (4.2+ / 5.x, EEVEE)
 
 アーサー・ラッカムの挿絵風ルックを作るスクリプト。
-  - セピア系に褪色した水彩ウォッシュ（3段階トーン + ムラ + 顔料の溜まり）
-  - 暗部にだけ入るペンのハッチング / クロスハッチング（揺らぎ付き）
+  - 少し褪色した水彩ウォッシュ（柔らかいトーン + ムラ + 顔料の溜まり）
+  - 暗部のハッチング（初期値オフ。Hatch Strength を上げると有効）
   - ヴェラム紙の色とテクスチャ（スクリーン空間）
-  - Freestyle による手描き風の揺れる輪郭線（強弱・はみ出し付き）
+  - Freestyle による細く滑らかなペンの輪郭線（入り抜き付き）
 
 使い方:
   1. Blender の Scripting タブでこのファイルを開いて「Run Script」
@@ -26,9 +26,9 @@ import bpy
 GROUP_NAME = "Rackham Ink & Wash"
 LINESTYLE_NAME = "Rackham Pen"
 
-PAPER = (0.90, 0.86, 0.77, 1.0)   # 黄ばんだヴェラム
+PAPER = (0.93, 0.91, 0.86, 1.0)   # わずかに温かい白の紙
 INK = (0.07, 0.045, 0.03, 1.0)    # ほぼ黒の焦げ茶インク
-UMBER = (0.62, 0.53, 0.40, 1.0)   # 影色（薄いアンバーのウォッシュ）
+UMBER = (0.66, 0.63, 0.62, 1.0)   # 影色（ほぼ中性の薄いグレー）
 
 
 # --------------------------------------------------------------------------
@@ -92,21 +92,21 @@ GROUP_INPUTS = [
     ("Paper Color", "NodeSocketColor", PAPER, None, None),
     ("Ink Color", "NodeSocketColor", INK, None, None),
     ("Shadow Tint", "NodeSocketColor", UMBER, None, None),
-    ("Desaturate", "NodeSocketFloat", 0.3, 0.0, 1.0),
-    ("Highlight Wash", "NodeSocketFloat", 0.45, 0.0, 1.0),
+    ("Desaturate", "NodeSocketFloat", 0.2, 0.0, 1.0),
+    ("Highlight Wash", "NodeSocketFloat", 0.6, 0.0, 1.0),
     ("Light Threshold", "NodeSocketFloat", 0.62, 0.0, 1.0),
     ("Shadow Threshold", "NodeSocketFloat", 0.34, 0.0, 1.0),
     ("Band Softness", "NodeSocketFloat", 0.14, 0.001, 0.5),
     ("Wash Variation", "NodeSocketFloat", 0.22, 0.0, 1.0),
     ("Wash Scale", "NodeSocketFloat", 3.0, 0.0, 100.0),
-    ("Granulation", "NodeSocketFloat", 0.12, 0.0, 1.0),
+    ("Granulation", "NodeSocketFloat", 0.0, 0.0, 1.0),
     ("Edge Darkening", "NodeSocketFloat", 0.35, 0.0, 1.0),
     ("Hatch Threshold", "NodeSocketFloat", 0.26, 0.0, 1.0),
     ("Cross Hatch Threshold", "NodeSocketFloat", 0.10, 0.0, 1.0),
     ("Hatch Density", "NodeSocketFloat", 45.0, 1.0, 500.0),
     ("Hatch Width", "NodeSocketFloat", 0.10, 0.0, 1.0),
     ("Hatch Wobble", "NodeSocketFloat", 0.8, 0.0, 20.0),
-    ("Hatch Strength", "NodeSocketFloat", 0.6, 0.0, 1.0),
+    ("Hatch Strength", "NodeSocketFloat", 0.0, 0.0, 1.0),  # 0 = ハッチングなし
     ("Hatch Breakup", "NodeSocketFloat", 0.6, 0.0, 1.0),
     ("Paper Grain", "NodeSocketFloat", 0.07, 0.0, 1.0),
     ("Aspect", "NodeSocketFloat", 16 / 9, 0.1, 10.0),
@@ -174,7 +174,7 @@ def build_group():
     hsv = _node(N, "ShaderNodeHueSaturation", -1300, 900)
     L.new(I["Base Color"], hsv.inputs["Color"])
     L.new(_math(nt, "SUBTRACT", 1.0, I["Desaturate"], -1500, 850), hsv.inputs["Saturation"])
-    pigment = _mix(nt, "MIX", 0.2, hsv.outputs[0], I["Shadow Tint"], -1100, 900)  # セピア寄せ
+    pigment = _mix(nt, "MIX", 0.05, hsv.outputs[0], I["Shadow Tint"], -1100, 900)  # わずかに影色へ寄せてなじませる
     mid = _mix(nt, "MULTIPLY", 1.0, I["Paper Color"], pigment, -900, 900)
     shadow = _mix(nt, "MULTIPLY", 1.0, mid, I["Shadow Tint"], -700, 900)
     highlight = _mix(nt, "MIX", I["Highlight Wash"], I["Paper Color"], mid, -700, 750)
@@ -333,7 +333,7 @@ def setup_world(scene):
     L.new(tc.outputs["Window"], noise.inputs["Vector"])
     ramp = _node(N, "ShaderNodeValToRGB", -900, 100)
     ramp.color_ramp.elements[0].position = 0.35
-    ramp.color_ramp.elements[0].color = (0.66, 0.62, 0.55, 1)   # 灰色がかったシミ
+    ramp.color_ramp.elements[0].color = (0.74, 0.73, 0.70, 1)   # 灰色がかったシミ
     ramp.color_ramp.elements[1].position = 0.68
     ramp.color_ramp.elements[1].color = PAPER
     L.new(noise.outputs["Fac"], ramp.inputs["Fac"])
@@ -357,14 +357,14 @@ def setup_world(scene):
     vm = _node(N, "ShaderNodeMix", -500, 0, data_type="RGBA", blend_type="MULTIPLY")
     L.new(vig.outputs["Result"], vm.inputs[0])
     L.new(gr.outputs[2], vm.inputs[6])
-    vm.inputs[7].default_value = (0.70, 0.64, 0.56, 1)
+    vm.inputs[7].default_value = (0.78, 0.76, 0.73, 1)
 
     # カメラには紙、ライティングには弱い暖色の環境光
     lp = _node(N, "ShaderNodeLightPath", -300, 300)
     bg_cam = _node(N, "ShaderNodeBackground", -200, 0)
     L.new(vm.outputs[2], bg_cam.inputs["Color"])
     bg_amb = _node(N, "ShaderNodeBackground", -200, -200)
-    bg_amb.inputs["Color"].default_value = (0.9, 0.82, 0.65, 1)
+    bg_amb.inputs["Color"].default_value = (0.9, 0.9, 0.88, 1)
     bg_amb.inputs["Strength"].default_value = 0.25
     mix = _node(N, "ShaderNodeMixShader", 0, 0)
     L.new(lp.outputs["Is Camera Ray"], mix.inputs[0])
@@ -409,17 +409,15 @@ def setup_freestyle(scene):
     st.chaining = "PLAIN"
     st.use_same_object = True
 
-    # 手描きの揺らぎ・線のはみ出し
+    # 滑らかな線（ベジェで均す）＋わずかなはみ出し
     m = st.geometry_modifiers.new("Sampling", "SAMPLING")
     m.sampling = 2.0
+    m = st.geometry_modifiers.new("Smooth", "BEZIER_CURVE")
+    m.error = 2.0
     m = st.geometry_modifiers.new("Overshoot", "BACKBONE_STRETCHER")
-    m.backbone_length = 2.0
-    m = st.geometry_modifiers.new("Wobble", "PERLIN_NOISE_1D")
-    m.frequency = 8.0
-    m.amplitude = 0.4
-    m.octaves = 2
+    m.backbone_length = 1.5
 
-    # ペン先の強弱：入り抜き＋カリグラフィ＋ノイズ
+    # ペン先の強弱：入り抜き＋カリグラフィ
     m = st.thickness_modifiers.new("Taper", "ALONG_STROKE")
     m.mapping = "CURVE"
     m.blend = "MULTIPLY"
@@ -435,14 +433,6 @@ def setup_freestyle(scene):
     m.blend = "MULTIPLY"
     m.orientation = math.radians(35)
     m.thickness_min, m.thickness_max = 0.7, 1.3
-    m = st.thickness_modifiers.new("Pressure", "NOISE")
-    m.blend = "ADD"
-    m.amplitude = 0.25
-    m.period = 15.0
-    m = st.alpha_modifiers.new("Ink Flow", "NOISE")
-    m.blend = "ADD"
-    m.amplitude = 0.2
-    m.period = 40.0
 
 
 def setup_render(scene):
@@ -492,7 +482,7 @@ def build_demo():
     d = ground.modifiers.new("Bumps", "DISPLACE")
     d.texture = tex
     d.strength = 0.6
-    add(ground, (0.50, 0.46, 0.28, 1), **{"Wash Scale": 0.6})
+    add(ground, (0.55, 0.58, 0.38, 1), **{"Wash Scale": 0.6})
 
     # ねじれた古木
     bpy.ops.mesh.primitive_cylinder_add(vertices=24, radius=0.55, depth=6, end_fill_type="TRIFAN",
@@ -524,7 +514,7 @@ def build_demo():
     imp.name = "Goblin"
     s = imp.modifiers.new("Sub", "SUBSURF")
     s.levels = s.render_levels = 2
-    add(imp, (0.55, 0.62, 0.42, 1))
+    add(imp, (0.50, 0.66, 0.40, 1))
 
     # 岩
     for i, (x, y, r) in enumerate([(3.2, 1.5, 0.9), (-3.5, -1.0, 0.6), (0.4, 2.8, 0.5)]):
@@ -536,13 +526,13 @@ def build_demo():
         d = rock.modifiers.new("Rough", "DISPLACE")
         d.texture = tex
         d.strength = 0.25
-        add(rock, (0.52, 0.50, 0.44, 1))
+        add(rock, (0.52, 0.56, 0.62, 1))
 
     # 光とカメラ
     bpy.ops.object.light_add(type="SUN", rotation=(math.radians(50), math.radians(10), math.radians(-35)))
     sun = bpy.context.object
     sun.data.energy = 3.5
-    sun.data.color = (1.0, 0.95, 0.85)
+    sun.data.color = (1.0, 0.98, 0.94)
     sun.data.angle = math.radians(3)
 
     bpy.ops.object.camera_add(location=(7.5, -9.5, 4.2))

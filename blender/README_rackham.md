@@ -1,7 +1,7 @@
 # Arthur Rackham 風 Ink & Wash シェーダー (Blender)
 
 `rackham_shader.py` は、アーサー・ラッカムの挿絵みたいな
-「褪せたセピアの水彩ウォッシュ + ペンの輪郭線とハッチング + 黄ばんだ紙」
+「少し褪せた水彩ウォッシュ + 細く滑らかなペンの輪郭線 + ムラのある紙」
 のルックを Blender で作るスクリプトです。
 
 対応: Blender 4.2 以降 / 5.x（EEVEE）。`Shader to RGB` を使うので **Cycles では動きません**。
@@ -30,18 +30,18 @@ blender -b myscene.blend -P rackham_shader.py -- --render //out.png   # シー�
 | 要素 | 実装 |
 |---|---|
 | 水彩トーン | Diffuse → Shader to RGB で光量を取り、柔らかい smoothstep で「紙 / 中間ウォッシュ / 薄い影」に分ける（影は黒くせず中間調のアンバー） |
-| 褪せた顔料 | Base Color を彩度を落とし、影色(アンバー)に寄せてから紙色に乗算 |
+| 褪せた顔料 | Base Color の彩度を少し落とし、紙色に乗算（セピアには寄せすぎない） |
 | ウォッシュのムラ | オブジェクト座標のノイズで光量を揺らし、帯の境界をにじませる |
-| 顔料の粒状感・縁の溜まり | 高周波ノイズと Layer Weight(Facing) で影色を重ねる |
-| ハッチング | スクリーン座標の Wave テクスチャを2方向に、細く途切れ途切れに。最も暗い部分にだけ現れる |
+| 顔料の粒状感・縁の溜まり | Layer Weight(Facing) で縁に影色を重ねる。粒状感は `Granulation` で（初期値オフ） |
+| ハッチング | 初期値はオフ（`Hatch Strength` = 0）。上げると暗部に細い斜線が入る |
 | 紙・背景 | スクリーン座標のノイズでグレイン。背景は雲状にムラのある灰ベージュのウォッシュ＋周辺減光 |
-| 輪郭線 | Freestyle。細く鋭いほぼ黒のペン線（入り抜き・わずかな揺れ）。Suggestive Contours で襞や窪みなど内側の線も描く |
+| 輪郭線 | Freestyle。ベジェで均した細く滑らかなほぼ黒のペン線（入り抜き付き）。Suggestive Contours で襞や窪みなど内側の線も描く |
 
 ## 主なパラメータ（グループノード `Rackham Ink & Wash`）
 
 - **Base Color** – 固有色。彩度高めで入れても自動で褪色します
 - **Paper Color / Ink Color / Shadow Tint** – 紙・インク・影の色
-- **Desaturate** – 褪色の強さ（ラッカムらしさの肝。0.5〜0.7 推奨）
+- **Desaturate** – 褪色の強さ（初期値 0.2。上げるほど古びた印象に）
 - **Light / Shadow Threshold** – 紙が見える明部 / 影の境界
 - **Highlight Wash** – 明部にどれだけ薄く色を残すか
 - **Hatch Threshold / Cross Hatch Threshold** – ハッチが入り始める暗さ
@@ -57,6 +57,6 @@ View Layer → Freestyle の Suggestive Contours をオフに。
 
 ## コツ
 
-- ライトは Sun 1灯が基本。影がはっきりするほどハッチングが映えます
+- ライトは Sun 1灯が基本
 - 木の幹・根・岩など凹凸の多いモデルほど Freestyle の線が効いてラッカムっぽくなります
-- 画面全体の色は「セピア・オリーブ・くすんだ青灰」の範囲に抑えると雰囲気が出ます
+- 固有色は鮮やかすぎない中間色（オリーブ・くすんだ青灰・黄土など）を選ぶと雰囲気が出ます
