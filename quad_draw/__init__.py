@@ -12,7 +12,7 @@ bl_info = {
 }
 
 import bpy
-from bpy.props import BoolProperty, EnumProperty, FloatProperty, IntProperty, PointerProperty
+from bpy.props import BoolProperty, FloatProperty, IntProperty, PointerProperty
 
 from . import tool as qd_operator
 
@@ -33,14 +33,11 @@ class QuadDrawSettings(bpy.types.PropertyGroup):
         description="Mirror every operation across the retopo object's local X axis",
         default=False,
     )
-    center_clip: EnumProperty(
-        name="Center Clip",
-        items=(('OFF', "Off", "Vertices can go anywhere"),
-               ('POS', "+X", "Work on the +X half: nothing crosses X = 0, vertices near the "
-                             "centre snap onto it and stay on it while dragged"),
-               ('NEG', "-X", "Work on the -X half: nothing crosses X = 0, vertices near the "
-                             "centre snap onto it and stay on it while dragged")),
-        default='OFF',
+    center_lock: BoolProperty(
+        name="Center Lock",
+        description="Nothing crosses the centre (local X = 0): vertices near the centre snap "
+                    "onto it and centre vertices stay on it while dragged",
+        default=False,
     )
     brush_radius: IntProperty(
         name="Relax Brush", subtype='PIXEL', default=60, min=5, max=1000,
@@ -116,7 +113,7 @@ class MESH_OT_quad_draw_clear_dots(bpy.types.Operator):
 
 
 class MESH_OT_quad_draw_mirror(bpy.types.Operator):
-    """Copy the working half (Center Clip side, or the side with more geometry) to the
+    """Copy the working half (the side with more geometry) to the
     other side and merge the vertices on the centre line"""
     bl_idname = "mesh.quad_draw_mirror"
     bl_label = "Mirror & Merge"
@@ -133,7 +130,7 @@ class MESH_OT_quad_draw_mirror(bpy.types.Operator):
         ob = context.edit_object
         bm = bmesh.from_edit_mesh(ob.data)
         s = context.scene.quad_draw
-        side = {'POS': 1.0, 'NEG': -1.0}.get(s.center_clip) or mesh_ops.working_side(bm)
+        side = mesh_ops.working_side(bm)
         size = max(ob.dimensions) / max(max(ob.scale), 1e-9) if ob.dimensions.length else 1.0
         n = mesh_ops.mirror_merge(bm, side, max(size * 1e-4, 1e-6))
         bmesh.update_edit_mesh(ob.data)
@@ -159,7 +156,7 @@ class VIEW3D_PT_quad_draw(bpy.types.Panel):
             col.label(text="Or enter Edit Mode on a mesh", icon='INFO')
         layout.prop(s, "target")
         layout.prop(s, "symmetry")
-        layout.row().prop(s, "center_clip", expand=True)
+        layout.prop(s, "center_lock")
         row = layout.row()
         row.enabled = context.mode == 'EDIT_MESH'
         row.operator("mesh.quad_draw_mirror", icon='MOD_MIRROR')
