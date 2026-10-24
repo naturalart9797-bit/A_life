@@ -34,6 +34,9 @@ from .surface import ReferenceSurface, project_fn, normal_fn, empty_surface_size
 
 # Dots live outside the mesh (like Maya) and survive between tool sessions.
 _DOTS = {}
+# Bumped by operators that edit the mesh from outside the running tool
+# (e.g. the Mirror & Merge button), so the tool reloads its mesh data.
+_EXTERNAL_EDITS = [0]
 
 DRAG_THRESHOLD = 4  # px
 FILL_RADIUS = 350  # px, search radius for fill candidates
@@ -142,6 +145,7 @@ class MESH_OT_quad_draw(bpy.types.Operator):
         self.normal_at = normal_fn(self.surface)
 
         self.dots = _DOTS.setdefault(self.obj.name, [])
+        self._seen_edits = _EXTERNAL_EDITS[0]
 
         self.state = 'IDLE'
         self.mouse = Vector((event.mouse_x - self.region.x, event.mouse_y - self.region.y))
@@ -163,6 +167,7 @@ class MESH_OT_quad_draw(bpy.types.Operator):
         self.e_open = np.zeros(0, dtype=bool)
         self.retopo_bvh = None
 
+        self._refresh_clip_exempt()
         self.history = [self._snapshot()]
         self.redo_stack = []
 
@@ -178,6 +183,7 @@ class MESH_OT_quad_draw(bpy.types.Operator):
         context.workspace.status_text_set(
             "Quad Draw | LMB: dot / tweak   Shift: fill · drag relax   Ctrl: edge loop   "
             "Ctrl+Shift: delete   Tab+drag: extend / strip   Tab+MMB drag: extend border   "
+            "M: mirror & merge   "
             "B+drag: brush   Esc/Enter/Q: exit")
         if self.surface is None:
             self.report({'WARNING'}, "Quad Draw: no live surface found, drawing on the 3D cursor plane")
@@ -246,8 +252,83 @@ class MESH_OT_quad_draw(bpy.types.Operator):
         self.mesh_dirty = False
 
     def _mesh_changed(self, destructive=True):
+        self._apply_clip()
         bmesh.update_edit_mesh(self.obj.data, loop_triangles=True, destructive=destructive)
         self.mesh_dirty = True
+
+    # ------------------------------------------------------------------
+    # Centre clipping (work on one half, never cross X = 0)
+    # ------------------------------------------------------------------
+
+    def _clip_side(self):
+        return {'POS': 1.0, 'NEG': -1.0}.get(self.settings.center_clip, 0.0)
+
+    def _on_plane(self, co):
+        """``co`` on X = 0, as close to the surface as possible."""
+        co = co.copy()
+        co.x = 0.0
+        if self.surface is not None:
+            for _ in range(3):
+                p = self.project(co)
+                if p is None:
+                    break
+                co = p.copy()
+                co.x = 0.0
+        return co
+
+    def _clip_points(self, cos):
+        """Indices of points (local, numpy (n, 3)) that must go onto X = 0:
+        those past the centre, and those within half the pick radius (in
+        pixels) of their own mirror image."""
+        side = self._clip_side()
+        if not side or not len(cos):
+            return []
+        x = cos[:, 0]
+        out = set(np.nonzero(x * side < 0.0)[0].tolist())
+        near = np.nonzero((np.abs(x) > 0.0)
+                          & (np.abs(x) < self._local_px_size(Vector()) * self.settings.pick_radius * 4))[0]
+        if len(near) and self.region is not None:
+            a, ok_a = self._project_np(cos[near])
+            m = cos[near] * np.array([-1.0, 1.0, 1.0])
+            b, ok_b = self._project_np(m)
+            d = np.hypot(*(a - b).T)
+            px = self.settings.pick_radius * 0.5
+            out.update(near[(d < px) & ok_a & ok_b].tolist())
+        return sorted(out)
+
+    def _refresh_clip_exempt(self):
+        """Geometry already on the other side (e.g. made by Mirror & Merge) is
+        left alone by clipping; only what is drawn / moved now is clipped."""
+        side = self._clip_side()
+        tol = self._sym_tol()
+        self._clip_exempt = {v for v in self.bm.verts if v.co.x * side < -tol} if side else set()
+
+    def _apply_clip(self):
+        if not self._clip_side() or not self.bm.is_valid or getattr(self, "_no_clip", False):
+            return
+        exempt = getattr(self, "_clip_exempt", set())
+        verts = [v for v in self.bm.verts if v not in exempt]
+        if verts:
+            cos = np.array([v.co[:] for v in verts])
+            for i in self._clip_points(cos):
+                verts[i].co = self._on_plane(verts[i].co)
+        if self.dots:
+            cos = np.array([d[:] for d in self.dots])
+            for i in self._clip_points(cos):
+                self.dots[i] = self._on_plane(self.dots[i])
+
+    def _mirror_merge(self):
+        side = self._clip_side() or mesh_ops.working_side(self.bm)
+        tol = self._sym_tol()
+        mesh_ops.mirror_merge(self.bm, side, tol)
+        # Dots on the copied-over side are gone with the old geometry.
+        self.dots[:] = [d for d in self.dots if d.x * side >= -tol]
+        self._no_clip = True
+        try:
+            self._push_undo("Mirror & Merge")
+        finally:
+            self._no_clip = False
+        self._refresh_clip_exempt()
 
     def _snapshot(self):
         return (self.bm.copy(), [d.copy() for d in self.dots])
@@ -262,7 +343,12 @@ class MESH_OT_quad_draw(bpy.types.Operator):
         finally:
             bpy.data.meshes.remove(tmp)
         self.dots[:] = [d.copy() for d in dots]
-        self._mesh_changed()
+        self._no_clip = True
+        try:
+            self._mesh_changed()
+        finally:
+            self._no_clip = False
+        self._refresh_clip_exempt()
 
     def _blender_undo_push(self, message):
         try:
@@ -710,6 +796,9 @@ class MESH_OT_quad_draw(bpy.types.Operator):
     # ------------------------------------------------------------------
 
     def _add_dot(self, loc):
+        side = self._clip_side()
+        if side and (loc.x * side < 0 or self._clip_points(np.array([loc[:]]))):
+            loc = self._on_plane(loc)
         self.dots.append(loc.copy())
         i = len(self.dots) - 1
         mirror = None
@@ -749,7 +838,9 @@ class MESH_OT_quad_draw(bpy.types.Operator):
             if start_hit is None:
                 start_hit = sum((v.co for v in verts), Vector()) / len(verts)
             drag["mirror"] = {}
-            if self.settings.symmetry:
+            if self._clip_side() and not self.settings.symmetry:
+                drag["center"] = {v for v in verts if abs(v.co.x) <= self._sym_tol()}
+            elif self.settings.symmetry:
                 lookup = mesh_ops.MirrorLookup(self.bm, self._sym_tol())
                 for v in verts:
                     m = lookup.mirror_of(v)
@@ -777,6 +868,8 @@ class MESH_OT_quad_draw(bpy.types.Operator):
                 if target is not None:
                     drag["weld"] = target
                     loc = self._weld_target_co(target)
+            if self._clip_side() and (drag["center"] or self._clip_points(np.array([loc[:]]))):
+                loc = self._on_plane(loc)
             self.dots[i] = loc
             j = drag["mirror_dot"]
             if j is not None and j < len(self.dots):
@@ -1343,8 +1436,11 @@ class MESH_OT_quad_draw(bpy.types.Operator):
         return True
 
     def _modal(self, context, event):
-        if not self.bm.is_valid:
+        if not self.bm.is_valid or self._seen_edits != _EXTERNAL_EDITS[0]:
+            self._seen_edits = _EXTERNAL_EDITS[0]
             self._reload_bm()
+            self._refresh_clip_exempt()
+            self.history.append(self._snapshot())
         self.area.tag_redraw()
         etype, value = event.type, event.value
 
@@ -1383,6 +1479,10 @@ class MESH_OT_quad_draw(bpy.types.Operator):
                     self._undo()
                 self._update_hover()
                 return {'RUNNING_MODAL'}
+            if etype == 'M' and value == 'PRESS' and not (event.ctrl or event.alt or event.shift):
+                self._mirror_merge()
+                self._update_hover()
+                return {'RUNNING_MODAL'}
             if etype == 'Y' and value == 'PRESS' and event.ctrl:
                 self._redo()
                 self._update_hover()
@@ -1393,6 +1493,7 @@ class MESH_OT_quad_draw(bpy.types.Operator):
                 return {'PASS_THROUGH'}
             if etype == 'MIDDLEMOUSE' and value == 'PRESS' and self.tab:
                 self.press_mouse = self.mouse.copy()
+                self._refresh_clip_exempt()
                 self._update_hover()
                 if self.h_edge is not None:
                     self._begin_extend(self.h_edge, whole_border=True)
@@ -1451,6 +1552,7 @@ class MESH_OT_quad_draw(bpy.types.Operator):
 
     def _on_press(self):
         self.press_mouse = self.mouse.copy()
+        self._refresh_clip_exempt()
         self.drag_button = 'LEFTMOUSE'
         self._update_hover()
         if self.tab:

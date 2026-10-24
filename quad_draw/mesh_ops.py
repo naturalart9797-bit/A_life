@@ -439,3 +439,26 @@ def symmetrize_faces(bm, faces, tol, dots=None, ref_normal_fn=None):
         if nf is not None:
             new_faces.append(nf)
     return new_faces
+
+
+def mirror_merge(bm, side, tol):
+    """Copy the ``side`` half (+1: +X, -1: -X) onto the other side and merge
+    the centre line: vertices within ``tol`` of X = 0 are put on it first,
+    geometry on the other side is replaced. Returns the number of verts."""
+    for v in bm.verts:
+        if abs(v.co.x) <= tol:
+            v.co.x = 0.0
+    geom = list(bm.verts) + list(bm.edges) + list(bm.faces)
+    bmesh.ops.symmetrize(bm, input=geom, direction='X' if side > 0 else '-X', dist=tol)
+    for v in bm.verts:
+        if abs(v.co.x) <= tol:
+            v.co.x = 0.0
+    bm.normal_update()
+    return len(bm.verts)
+
+
+def working_side(bm):
+    """+1 or -1: the side of X = 0 holding most of the geometry."""
+    pos = sum(1 for v in bm.verts if v.co.x > 0)
+    neg = sum(1 for v in bm.verts if v.co.x < 0)
+    return 1.0 if pos >= neg else -1.0
