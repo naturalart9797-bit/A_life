@@ -264,7 +264,7 @@ class MESH_OT_quad_draw(bpy.types.Operator):
         return self.settings.center_lock
 
     def _side_of(self, co):
-        if abs(co.x) <= self._sym_tol():
+        if abs(co.x) <= self.tol:
             return 0.0
         return 1.0 if co.x > 0 else -1.0
 
@@ -298,7 +298,7 @@ class MESH_OT_quad_draw(bpy.types.Operator):
         if not self._lock_on() or not self.bm.is_valid:
             self._sides = {}
             return
-        self._sides = {v: (self._side_of(v.co), v.co.copy()) for v in self.bm.verts}
+        self._sides = {v: self._side_of(v.co) for v in self.bm.verts}
 
     def _neighbour_side(self, v):
         """Side of a new vertex, taken from the vertices it is connected to."""
@@ -306,51 +306,38 @@ class MESH_OT_quad_draw(bpy.types.Operator):
         total = 0.0
         ring = [e.other_vert(v) for e in v.link_edges]
         for u in ring:
-            r = sides.get(u)
-            if r is not None:
-                total += r[0]
+            total += sides.get(u, 0.0)
         if total == 0.0:
             for u in ring:
                 for f in u.link_faces:
                     for w in f.verts:
-                        r = sides.get(w)
-                        if r is not None:
-                            total += r[0]
+                        total += sides.get(w, 0.0)
         return 0.0 if total == 0.0 else (1.0 if total > 0 else -1.0)
 
     def _apply_clip(self):
         if not self._lock_on() or not self.bm.is_valid or getattr(self, "_no_clip", False):
             return
         sides = getattr(self, "_sides", {})
-        eps = (self.tol * 1e-3) ** 2
-        cross, moved = [], []
+        cross = []
         for v in self.bm.verts:
-            r = sides.get(v)
-            if r is None:
+            side = sides.get(v)
+            if side is None:
+                # New geometry (extend, strip, fill, loop...): only stopped at
+                # the centre, never pulled onto it.
                 side = self._neighbour_side(v)
-                moved.append(v)
-            else:
-                side = r[0]
-                if side == 0.0:
-                    if v.co.x != 0.0:
-                        cross.append(v)
-                    continue
-                if (v.co - r[1]).length_squared > eps:
-                    moved.append(v)
+            elif side == 0.0:
+                if v.co.x != 0.0:
+                    cross.append(v)
+                continue
             if side and v.co.x * side < 0.0:
                 cross.append(v)
-        crossed = set(cross)
-        moved = [v for v in moved if v not in crossed and v.co.x != 0.0]
-        if moved:
-            mask = self._near_center(np.array([v.co[:] for v in moved]))
-            cross += [v for v, m in zip(moved, mask) if m]
         for v in cross:
             v.co = self._on_plane(v.co)
 
     def _drop_center_faces(self, faces, new_verts):
         """Remove new faces squashed flat onto X = 0 by the lock (and their
         loose new vertices); returns the faces that remain."""
-        tol = self._sym_tol()
+        tol = self.tol
         keep = []
         for f in faces:
             if all(abs(v.co.x) <= tol for v in f.verts):
@@ -875,7 +862,8 @@ class MESH_OT_quad_draw(bpy.types.Operator):
         start_hit = self._hit(self.press_mouse)[0]
         if kind == 'DOT':
             drag["mirror_dot"] = self._mirror_dot_index(target) if self.settings.symmetry else None
-            drag["center"] = abs(self.dots[target].x) <= self._sym_tol()
+            drag["center"] = abs(self.dots[target].x) <= (
+                self._sym_tol() if self.settings.symmetry else self.tol)
             drag["side"] = self._side_of(self.dots[target])
         else:
             if kind == 'VERT':
@@ -890,7 +878,7 @@ class MESH_OT_quad_draw(bpy.types.Operator):
                 start_hit = sum((v.co for v in verts), Vector()) / len(verts)
             drag["mirror"] = {}
             if self._lock_on() and not self.settings.symmetry:
-                drag["center"] = {v for v in verts if abs(v.co.x) <= self._sym_tol()}
+                drag["center"] = {v for v in verts if abs(v.co.x) <= self.tol}
             elif self.settings.symmetry:
                 lookup = mesh_ops.MirrorLookup(self.bm, self._sym_tol())
                 for v in verts:
@@ -940,6 +928,9 @@ class MESH_OT_quad_draw(bpy.types.Operator):
                     # Snap onto the vertex it will merge with (Maya behaviour).
                     drag["weld"] = target
                     loc = self._weld_target_co(target)
+            if (self._lock_on() and drag["weld"] is None and v not in drag["center"]
+                    and self._near_center(np.array([loc[:]]))[0]):
+                loc = self._on_plane(loc)
             v.co = loc
         else:
             start = drag["start_hit"]
