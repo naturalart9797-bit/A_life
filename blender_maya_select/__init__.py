@@ -5,15 +5,14 @@
 #  * Double-click an edge to select its loop.
 #  * Shift + double-click selects the shortest path from the previously
 #    selected element to the clicked one (like Maya).
-#  * UV Toolkit (uv_toolkit.py): Maya's UV Toolkit in the UV Editor sidebar.
 
 bl_info = {
-    "name": "Maya Style Tools",
+    "name": "Maya Style Select",
     "author": "naturalart9797",
-    "version": (1, 2, 0),
+    "version": (1, 1, 0),
     "blender": (3, 0, 0),
-    "location": "View3D > Sidebar (N) > Maya, UV Editor > Sidebar (N) > UV Toolkit",
-    "description": "Maya-like symmetry selection, loop / path double-click select and a Maya-style UV Toolkit",
+    "location": "View3D > Sidebar (N) > Maya",
+    "description": "Maya-like symmetry selection, double-click loop and Shift + double-click path select",
     "category": "Mesh",
 }
 
@@ -21,8 +20,6 @@ import bpy
 import bmesh
 from bpy.app.handlers import persistent
 from mathutils import kdtree
-
-from . import uv_toolkit
 
 
 AXIS_INDEX = {'X': 0, 'Y': 1, 'Z': 2}
@@ -430,11 +427,9 @@ def register():
     bpy.app.handlers.depsgraph_update_post.append(_on_depsgraph_update)
     bpy.app.handlers.load_post.append(_on_load_post)
     _register_keymaps()
-    uv_toolkit.register(_select_mouse())
 
 
 def unregister():
-    uv_toolkit.unregister()
     _unregister_keymaps()
     if _on_load_post in bpy.app.handlers.load_post:
         bpy.app.handlers.load_post.remove(_on_load_post)

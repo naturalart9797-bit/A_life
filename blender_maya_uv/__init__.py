@@ -6,6 +6,16 @@
 # toggles, double-click selects a UV shell and Shift + double-click selects the
 # shortest path.
 
+bl_info = {
+    "name": "Maya Style UV Toolkit",
+    "author": "naturalart9797",
+    "version": (1, 0, 0),
+    "blender": (3, 0, 0),
+    "location": "UV Editor > Sidebar (N) > UV Toolkit, View3D > Sidebar (N) > Maya > UV",
+    "description": "Maya-like UV Toolkit: unfold in place, cut and sew, align, stack, texel density, checker",
+    "category": "UV",
+}
+
 import math
 
 import bpy
@@ -1126,13 +1136,18 @@ def _register_keymaps(select_mouse):
     _keymaps.append((km, kmi))
 
 
-def register(select_mouse='LEFTMOUSE'):
+def _select_mouse():
+    prefs = getattr(bpy.context.window_manager.keyconfigs.active, "preferences", None)
+    return 'RIGHTMOUSE' if getattr(prefs, "select_mouse", 'LEFT') == 'RIGHT' else 'LEFTMOUSE'
+
+
+def register():
     for cls in classes:
         bpy.utils.register_class(cls)
     bpy.types.Scene.maya_uv = bpy.props.PointerProperty(type=MayaUVSettings)
     bpy.types.IMAGE_HT_header.append(_draw_header)
     bpy.app.handlers.depsgraph_update_post.append(_track_uv_active)
-    _register_keymaps(select_mouse)
+    _register_keymaps(_select_mouse())
 
 
 def unregister():
@@ -1146,3 +1161,7 @@ def unregister():
     for cls in reversed(classes):
         bpy.utils.unregister_class(cls)
     _uv_active.clear()
+
+
+if __name__ == "__main__":
+    register()
