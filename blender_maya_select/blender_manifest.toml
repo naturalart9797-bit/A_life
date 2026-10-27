@@ -1,0 +1,13 @@
+schema_version = "1.0.0"
+
+id = "maya_style_select"
+version = "1.0.0"
+name = "Maya Style Select"
+tagline = "Maya-like symmetry selection, path click select and loop double-click"
+maintainer = "naturalart9797"
+type = "add-on"
+
+blender_version_min = "4.2.0"
+
+license = ["SPDX:GPL-3.0-or-later"]
+tags = ["Mesh", "Modeling"]
