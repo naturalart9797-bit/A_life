@@ -455,6 +455,7 @@ class VIEW3D_PT_maya_uv(bpy.types.Panel):
     def draw(self, context):
         s = settings(context)
         layout = self.layout
+        layout.prop(s, "shell_select_3d", toggle=True, icon='UV_ISLANDSEL')
         row = layout.row(align=True)
         row.operator("maya_uv.open_editor", icon='UV')
         row.operator("maya_uv.checker", text="Checker", icon='TEXTURE', depress=s.checker_on)

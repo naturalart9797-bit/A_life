@@ -26,6 +26,11 @@ def _update_checker_image(self, context):
     display.update_checker_image(self)
 
 
+def _update_shell_select(self, context):
+    from . import shell_select
+    shell_select._update_shell_select(self, context)
+
+
 class MayaUVSettings(bpy.types.PropertyGroup):
     # Transform
     pivot: bpy.props.EnumProperty(
@@ -112,6 +117,14 @@ class MayaUVSettings(bpy.types.PropertyGroup):
         default=False)
     border_width: bpy.props.FloatProperty(name="Border Width", default=3.0, min=1.0, max=10.0)
     isolate: bpy.props.BoolProperty(default=False)
+
+    # 3D Viewport
+    shell_select_3d: bpy.props.BoolProperty(
+        name="UV Shell Select",
+        description="Select whole UV shells in the 3D Viewport (Maya: UV Shell component). "
+                    "Switches to face select while on",
+        default=False, update=_update_shell_select)
+    shell_prev_select_mode: bpy.props.StringProperty(default="")
 
 
 def settings(context):
