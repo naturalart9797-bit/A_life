@@ -85,7 +85,17 @@ class IMAGE_PT_maya_uv_select(_SubPanel, bpy.types.Panel):
     bl_label = "Select"
 
     def draw(self, context):
+        s = settings(context)
         layout = self.layout
+        col = layout.column(align=True)
+        col.label(text="Symmetry")
+        col.row(align=True).prop(s, "uv_symmetry", expand=True)
+        if s.uv_symmetry in {'U', 'V'}:
+            row = col.row(align=True)
+            row.prop(s, "uv_symmetry_center")
+            row.prop(s, "uv_symmetry_tolerance")
+        elif s.uv_symmetry != 'OFF':
+            col.prop(s, "uv_symmetry_tolerance")
         col = layout.column(align=True)
         col.label(text="Convert")
         _row_ops(col, [("uv.maya_convert_selection", "UV", {"target": 'VERTEX'}),
@@ -190,13 +200,15 @@ class IMAGE_PT_maya_uv_transform(_SubPanel, bpy.types.Panel):
         # Straighten / orient / match / snap
         col = layout.column(align=True)
         col.label(text="Straighten")
-        _row_ops(col, [("uv.align", "UVs", {"axis": 'ALIGN_S'}),
-                       ("uv.align", "U", {"axis": 'ALIGN_T'}),
-                       ("uv.align", "V", {"axis": 'ALIGN_U'})])
         row = col.row(align=True)
-        row.operator("uv.maya_orient_shells", text="Orient Shells")
-        if op_available("uv.align_rotation"):
-            row.operator("uv.align_rotation", text="Orient to Edge").method = 'EDGE'
+        for axis in ('UV', 'U', 'V'):
+            row.operator("uv.maya_straighten", text=axis).axis = axis
+        col.prop(s, "straighten_angle")
+        col.label(text="Orient")
+        row = col.row(align=True)
+        row.operator("uv.maya_orient_edge", text="Edge Horizontal", icon='SNAP_EDGE').axis = 'U'
+        row.operator("uv.maya_orient_edge", text="Edge Vertical", icon='SNAP_EDGE').axis = 'V'
+        col.operator("uv.maya_orient_shells", text="Orient Shells")
 
         col = layout.column(align=True)
         row = col.row(align=True)
@@ -401,8 +413,8 @@ class MAYA_MT_uv_tools_pie(bpy.types.Menu):
         pie.operator("uv.maya_unfold", text="Unfold", icon='MOD_UVPROJECT')
         pie.operator("uv.maya_optimize", text="Optimize")
         pie.operator("uv.maya_sew", text="Move and Sew").move = True
-        pie.operator("uv.align", text="Straighten UVs").axis = 'ALIGN_S'
-        pie.operator("uv.maya_orient_shells", text="Orient Shells")
+        pie.operator("uv.maya_straighten", text="Straighten UVs").axis = 'UV'
+        pie.operator("uv.maya_orient_edge", text="Orient Edge", icon='SNAP_EDGE').axis = 'AUTO'
 
 
 class MAYA_MT_uv_convert_pie(bpy.types.Menu):

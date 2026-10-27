@@ -18,6 +18,13 @@ Blender の UV 展開を Maya の UV Toolkit とマーキングメニューに�
 * オンの間は面選択モードになり、オフにすると元の選択モードに戻ります。
 * 選択アドオン（Maya Style Select）の Symmetry と一緒に使うと、反対側のシェルも選ばれます。
 
+## UV のシンメトリ選択
+
+UV Toolkit > Select の **Symmetry** で、片側を選ぶと反対側も選ばれます（解除も同じ）。UV / 辺 / 面のどのモードでも、同期選択のオン・オフどちらでも使えます。
+
+* **X / Y / Z**：3D でオブジェクトの軸に対して対称な位置の UV を選択（左腕のシェルを選ぶと右腕のシェルも選ばれる）
+* **U / V**：UV 空間で Center（既定 0.5）の線に対して対称な位置の UV を選択
+
 ## マウス操作（UV エディター）
 
 | 操作 | 内容 |
@@ -36,9 +43,9 @@ Blender の UV 展開を Maya の UV Toolkit とマーキングメニューに�
 |---|---|
 | (上部) | コンポーネント切り替え（UV / Edge / Face / Shell）、Checker、Distortion、Borders（シェル境界を太線表示）、Isolate、Sync |
 | Pin | Pin / Unpin / Invert / Unpin All / Select Pinned |
-| Select | Convert（UV / Edge / Face / Shell / Shell Border）、Select by Type（Texture Borders / Overlapping / Back-Facing / Front-Facing / Unmapped / Similar）、Grow / Shrink / Invert / All、Soft Select（減衰の種類も） |
+| Select | **Symmetry**（Off / X / Y / Z / U / V）、Convert（UV / Edge / Face / Shell / Shell Border）、Select by Type（Texture Borders / Overlapping / Back-Facing / Front-Facing / Unmapped / Similar）、Grow / Shrink / Invert / All、Soft Select（減衰の種類も） |
 | Tools | Select / Move / Rotate / Scale / Cut（Rip）/ Grab / Unfold（Relax ブラシ）/ Pinch |
-| Transform | Pivot（Selection / Shell / UV Origin / 2D Cursor）、矢印で移動、回転、拡大縮小（UV / U / V）、Flip、Align（Shell ピボットならシェル単位）、Snap to Tile（3×3）、Straighten UVs / U / V、Orient Shells / Orient to Edge、Match UVs、Snap to Pixels、Randomize、Normalize、Unitize |
+| Transform | Pivot（Selection / Shell / UV Origin / 2D Cursor）、矢印で移動、回転、拡大縮小（UV / U / V）、Flip、Align（Shell ピボットならシェル単位）、Snap to Tile（3×3）、Straighten UVs / U / V（角度の許容値つき）、**Edge Horizontal / Edge Vertical**（選んだ辺が水平 / 垂直になるようシェルを回転）、Orient Shells、Match UVs、Snap to Pixels、Randomize、Normalize、Unitize |
 | Create | Planar X / Y / Z / Best、Camera-based、Cylindrical、Spherical、Cube、Automatic |
 | Cut and Sew | Cut、Sew、Move and Sew、Split、Create Shell、Create Shell (Grid)、Seams from Shells、Clear Seams、Auto Seams（角度指定） |
 | Unfold | **Unfold**（シェルの位置・大きさ・向きを保ったまま展開。U だけ / V だけも可）、Optimize、Straighten Shell、Unfold Brush |
@@ -56,5 +63,5 @@ Blender の UV 展開を Maya の UV Toolkit とマーキングメニューに�
 
 * Unfold は、Maya と同じくシェル単位で展開するため、実行前にシェルの境界をシームとして付けます。
 * Checker はビューレイヤーのマテリアル上書きを使います。表示中はすべてのオブジェクトがチェッカーになります（もう一度押すと元に戻ります）。
-* Orient to Edge は Blender に該当機能がある版（4.2 以降）でだけ表示されます。古い版の Orient Shells は簡易版の計算になります。
+* Orient Shells は Blender 4.2 以降の機能を使います。古い版では簡易版の計算になります。
 * Auto Seams は角度で切るため、なめらかな筒状の形などはシームが足りないことがあります。

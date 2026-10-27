@@ -9,7 +9,7 @@
 bl_info = {
     "name": "Maya Style UV Toolkit",
     "author": "naturalart9797",
-    "version": (2, 1, 0),
+    "version": (2, 2, 0),
     "blender": (3, 0, 0),
     "location": "UV Editor > Sidebar (N) > UV Toolkit, View3D > Sidebar (N) > Maya > UV",
     "description": "Maya's UV Toolkit, marking menus and UV editor display toggles",
@@ -18,7 +18,7 @@ bl_info = {
 
 import bpy
 
-from . import common, display, ops_select, ops_transform, ops_uv, shell_select, ui
+from . import common, display, ops_select, ops_transform, ops_uv, shell_select, ui, uv_symmetry
 
 
 class MayaUVPreferences(bpy.types.AddonPreferences):
@@ -89,6 +89,7 @@ def register():
     bpy.types.IMAGE_HT_header.append(ui.draw_header)
     bpy.app.handlers.depsgraph_update_post.append(ops_select.track_uv_active)
     bpy.app.handlers.depsgraph_update_post.append(shell_select.on_depsgraph_update)
+    bpy.app.handlers.depsgraph_update_post.append(uv_symmetry.on_depsgraph_update)
     display.register_draw()
     _register_keymaps()
 
@@ -98,6 +99,8 @@ def unregister():
         km.keymap_items.remove(kmi)
     _keymaps.clear()
     display.unregister_draw()
+    if uv_symmetry.on_depsgraph_update in bpy.app.handlers.depsgraph_update_post:
+        bpy.app.handlers.depsgraph_update_post.remove(uv_symmetry.on_depsgraph_update)
     if shell_select.on_depsgraph_update in bpy.app.handlers.depsgraph_update_post:
         bpy.app.handlers.depsgraph_update_post.remove(shell_select.on_depsgraph_update)
     if ops_select.track_uv_active in bpy.app.handlers.depsgraph_update_post:
@@ -108,3 +111,4 @@ def unregister():
         bpy.utils.unregister_class(cls)
     ops_select.clear_state()
     shell_select.clear_state()
+    uv_symmetry.clear_state()

@@ -9,7 +9,8 @@ from mathutils import Matrix, Vector
 from .common import (
     UVOperator, EPS, settings, update_all, is_sync, edit_meshes, update, loop_groups, group_bounds,
     transform_selection, selected_shells, islands, island_loops, bounds, center, uv_area,
-    world_area, move_loops, transform_loops, rotation, face_selected, op_available,
+    world_area, move_loops, transform_loops, rotation, aspect_rotation, image_aspect,
+    face_selected, op_available, loop_selected, loop_edge_selected,
 )
 
 
@@ -41,7 +42,7 @@ class UV_OT_maya_rotate(UVOperator, bpy.types.Operator):
     angle: bpy.props.FloatProperty(name="Angle", subtype='ANGLE', default=math.radians(90.0))
 
     def execute(self, context):
-        transform_selection(context, rotation(self.angle))
+        transform_selection(context, aspect_rotation(context, self.angle))
         return {'FINISHED'}
 
 
@@ -347,7 +348,153 @@ class UV_OT_maya_orient_shells(UVOperator, bpy.types.Operator):
         return {'FINISHED'}
 
 
+def _wrap_half_turn(a):
+    """Wrap an angle to (-90, 90] degrees: an edge has no direction."""
+    while a > math.pi / 2:
+        a -= math.pi
+    while a <= -math.pi / 2:
+        a += math.pi
+    return a
+
+
+def _edge_direction(isl, uv, sync, aspect):
+    """Direction of the selected edges of a shell (in image pixel proportions)."""
+    ax, ay = aspect
+    vecs = []
+    for f in isl:
+        for l in f.loops:
+            if loop_edge_selected(l, uv, sync):
+                d = l.link_loop_next[uv].uv - l[uv].uv
+                vecs.append(Vector((d.x * ax, d.y * ay)))
+    if not vecs:
+        # No edge: use the two selected UVs that are farthest apart.
+        pts = {(round(l[uv].uv.x, 6), round(l[uv].uv.y, 6))
+               for f in isl for l in f.loops if loop_selected(l, uv, sync)}
+        pts = [Vector((x * ax, y * ay)) for x, y in pts]
+        if len(pts) < 2:
+            return None
+        a, b = max(((p, q) for i, p in enumerate(pts) for q in pts[i + 1:]),
+                   key=lambda pq: (pq[0] - pq[1]).length_squared)
+        return b - a
+    ref = max(vecs, key=lambda v: v.length_squared)
+    total = Vector((0.0, 0.0))
+    for v in vecs:
+        total += v if v.dot(ref) >= 0 else -v
+    return total if total.length_squared > EPS * EPS else None
+
+
+class UV_OT_maya_straighten(UVOperator, bpy.types.Operator):
+    """Straighten the selected UV edges: rows of nearly horizontal edges become horizontal
+    (U), columns of nearly vertical edges become vertical (V) (Maya: Straighten UVs)"""
+    bl_idname = "uv.maya_straighten"
+    bl_label = "Straighten UVs"
+
+    axis: bpy.props.EnumProperty(
+        items=[('UV', "UV", "Straighten both"), ('U', "U", "Make nearly horizontal edges horizontal"),
+               ('V', "V", "Make nearly vertical edges vertical")])
+
+    def execute(self, context):
+        sync = is_sync(context)
+        tol = settings(context).straighten_angle
+        ax, ay = image_aspect(context)
+        count = 0
+        for ob, bm, uv, faces in edit_meshes(context):
+            # A UV vertex is a mesh vertex at one UV position (shared by its loops).
+            def node(l):
+                co = l[uv].uv
+                return (l.vert.index, round(co.x, 5), round(co.y, 5))
+
+            loops_of = {}
+            for f in faces:
+                for l in f.loops:
+                    loops_of.setdefault(node(l), []).append(l)
+            edges = []
+            for f in faces:
+                for l in f.loops:
+                    nxt = l.link_loop_next
+                    if loop_edge_selected(l, uv, sync) or (
+                            loop_selected(l, uv, sync) and loop_selected(nxt, uv, sync)):
+                        d = nxt[uv].uv - l[uv].uv
+                        if d.length_squared > EPS * EPS:
+                            edges.append((node(l), node(nxt), math.atan2(d.y * ay, d.x * ax)))
+            for axis in (('U', 'V') if self.axis == 'UV' else (self.axis,)):
+                # U: average V along rows of near-horizontal edges; V: average U along columns.
+                i = 1 if axis == 'U' else 0
+                parent = {}
+
+                def find(n):
+                    parent.setdefault(n, n)
+                    while parent[n] != n:
+                        parent[n] = parent[parent[n]]
+                        n = parent[n]
+                    return n
+
+                for a, b, angle in edges:
+                    off = abs(math.sin(angle)) if axis == 'U' else abs(math.cos(angle))
+                    if off <= math.sin(tol) + 1e-9:
+                        parent[find(a)] = find(b)
+                groups = {}
+                for n in list(parent):
+                    groups.setdefault(find(n), []).append(n)
+                for members in groups.values():
+                    if len(members) < 2:
+                        continue
+                    loops = [l for n in members for l in loops_of.get(n, ())]
+                    value = sum(l[uv].uv[i] for l in loops) / len(loops)
+                    for l in loops:
+                        co = l[uv].uv.copy()
+                        co[i] = value
+                        l[uv].uv = co
+                    count += 1
+            update(ob)
+        if not count:
+            self.report({'WARNING'}, "No selected edges within the angle")
+        return {'FINISHED'}
+
+
+class UV_OT_maya_orient_edge(UVOperator, bpy.types.Operator):
+    """Rotate each shell so its selected edge(s) become horizontal (U) or vertical (V)
+    (Maya: Orient to Edges / Rotate to U / V)"""
+    bl_idname = "uv.maya_orient_edge"
+    bl_label = "Orient Edge"
+
+    axis: bpy.props.EnumProperty(
+        items=[('U', "Horizontal (U)", "Make the selected edge horizontal"),
+               ('V', "Vertical (V)", "Make the selected edge vertical"),
+               ('AUTO', "Nearest", "Rotate to whichever of U / V is closer")],
+        default='AUTO')
+
+    def execute(self, context):
+        sync = is_sync(context)
+        aspect = image_aspect(context)
+        shells, meshes = selected_shells(context)
+        done = 0
+        for ob, uv, isl in shells:
+            d = _edge_direction(isl, uv, sync, aspect)
+            if d is None:
+                continue
+            angle = math.atan2(d.y, d.x)
+            to_u = _wrap_half_turn(-angle)
+            to_v = _wrap_half_turn(math.pi / 2 - angle)
+            if self.axis == 'U':
+                delta = to_u
+            elif self.axis == 'V':
+                delta = to_v
+            else:
+                delta = to_u if abs(to_u) <= abs(to_v) else to_v
+            loops = island_loops(isl)
+            transform_loops(loops, uv, center(loops, uv), aspect_rotation(context, delta))
+            done += 1
+        update_all(meshes)
+        if not done:
+            self.report({'WARNING'}, "Select an edge (or two UVs) on the shells to orient")
+            return {'CANCELLED'}
+        return {'FINISHED'}
+
+
 classes = (
+    UV_OT_maya_straighten,
+    UV_OT_maya_orient_edge,
     UV_OT_maya_move,
     UV_OT_maya_rotate,
     UV_OT_maya_scale,

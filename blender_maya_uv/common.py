@@ -26,6 +26,11 @@ def _update_checker_image(self, context):
     display.update_checker_image(self)
 
 
+def _reset_uv_symmetry(self, context):
+    from . import uv_symmetry
+    uv_symmetry.reset()
+
+
 def _update_shell_select(self, context):
     from . import shell_select
     shell_select._update_shell_select(self, context)
@@ -54,6 +59,9 @@ class MayaUVSettings(bpy.types.PropertyGroup):
     match_tolerance: bpy.props.FloatProperty(
         name="Tolerance", description="Distance for Match UVs", default=0.01, min=0.0,
         soft_max=0.1, precision=4)
+    straighten_angle: bpy.props.FloatProperty(
+        name="Angle", description="Straighten only edges within this angle of U / V",
+        default=math.radians(30.0), min=0.0, max=math.radians(45.0), subtype='ANGLE')
     distribute_spacing: bpy.props.FloatProperty(
         name="Spacing", description="Gap between shells for Distribute "
                                     "(0 = spread evenly between the first and last shell)",
@@ -118,6 +126,24 @@ class MayaUVSettings(bpy.types.PropertyGroup):
     border_width: bpy.props.FloatProperty(name="Border Width", default=3.0, min=1.0, max=10.0)
     isolate: bpy.props.BoolProperty(default=False)
 
+    # UV symmetry selection
+    uv_symmetry: bpy.props.EnumProperty(
+        name="Symmetry",
+        description="Also select the mirror of what you select (Maya: Select > Symmetry)",
+        items=[('OFF', "Off", "No symmetry"),
+               ('X', "X", "Mirror across the object's X axis in 3D"),
+               ('Y', "Y", "Mirror across the object's Y axis in 3D"),
+               ('Z', "Z", "Mirror across the object's Z axis in 3D"),
+               ('U', "U", "Mirror across the vertical line U = Center in UV space"),
+               ('V', "V", "Mirror across the horizontal line V = Center in UV space")],
+        default='OFF', update=_reset_uv_symmetry)
+    uv_symmetry_center: bpy.props.FloatProperty(
+        name="Center", description="Mirror line for U / V symmetry", default=0.5,
+        soft_min=0.0, soft_max=1.0, precision=3, update=_reset_uv_symmetry)
+    uv_symmetry_tolerance: bpy.props.FloatProperty(
+        name="Tolerance", description="How close the mirrored position must be",
+        default=0.001, min=0.0, soft_max=0.05, precision=4, update=_reset_uv_symmetry)
+
     # 3D Viewport
     shell_select_3d: bpy.props.BoolProperty(
         name="UV Shell Select",
@@ -141,7 +167,12 @@ def addon_prefs(context):
 # ---------------------------------------------------------------------------
 
 def is_sync(context):
-    return context.scene.tool_settings.use_uv_select_sync
+    """False without UV sync selection, else the mesh select mode: 'VERT', 'EDGE' or 'FACE'."""
+    ts = context.scene.tool_settings
+    if not ts.use_uv_select_sync:
+        return False
+    vert, edge, _face = ts.mesh_select_mode
+    return 'VERT' if vert else ('EDGE' if edge else 'FACE')
 
 
 def visible_faces(bm, sync):
@@ -152,7 +183,18 @@ def visible_faces(bm, sync):
 
 def loop_selected(loop, uv, sync):
     if sync:
-        return loop.vert.select
+        # A seam vertex is shared with the neighboring shell. Count its loop as
+        # selected only through selected faces when there are any, so moving a
+        # selected shell doesn't drag the neighbor's corner along.
+        if loop.face.select:
+            return True
+        if sync == 'FACE':
+            return False
+        if sync == 'EDGE':
+            picked = loop.edge.select or loop.link_loop_prev.edge.select
+        else:
+            picked = loop.vert.select
+        return picked and not any(f.select for f in loop.vert.link_faces)
     if hasattr(loop, "uv_select_vert"):  # Blender 5.0+
         return loop.uv_select_vert
     return loop[uv].select
@@ -446,7 +488,20 @@ def set_selection(context, bm, uv, faces, *, verts=(), edges=(), select_faces=()
         return
 
     face_set = set(faces)
-    vert_loops = set()
+    new_api = hasattr(bmesh.types.BMLoop, "uv_select_vert_set")
+
+    def set_vert(l, value):
+        if new_api:
+            l.uv_select_vert_set(value)
+        else:
+            l[uv].select = value
+
+    def set_edge(l, value):
+        if new_api:
+            l.uv_select_edge_set(value)
+        else:
+            l[uv].select_edge = value
+
     edge_loops = set()
     for f in select_faces:
         edge_loops.update(f.loops)
@@ -457,27 +512,27 @@ def set_selection(context, bm, uv, faces, *, verts=(), edges=(), select_faces=()
             if l2.face in face_set and uv_edge_matches(l, l2, uv):
                 edge_loops.add(l2)
             l2 = l2.link_loop_radial_next
+    vert_loops = set(verts)
     for l in edge_loops:
         vert_loops.add(l)
         vert_loops.add(l.link_loop_next)
-    vert_loops.update(verts)
-    for l in list(vert_loops):
-        vert_loops.update(_sticky_loops(l, uv, face_set))
 
-    new_api = hasattr(bmesh.types.BMLoop, "uv_select_vert_set")
-    for l in vert_loops:
-        if new_api:
-            l.uv_select_vert_set(state)
-        else:
-            l[uv].select = state
-    for l in edge_loops:
-        if new_api:
-            l.uv_select_edge_set(state)
-        else:
-            l[uv].select_edge = state
     if new_api:
         for f in select_faces:
             f.uv_select_set(state)
+    for l in edge_loops:
+        set_edge(l, state)
+    for l in list(vert_loops):
+        group = _sticky_loops(l, uv, face_set)
+        if not state and l not in verts and any(
+                loop_edge_selected(m, uv, False) or loop_edge_selected(m.link_loop_prev, uv, False)
+                for m in group):
+            continue  # still used by a selected UV edge: keep it
+        for m in group:
+            set_vert(m, state)
+        set_vert(l, state)
+
+    if new_api:
         # uv_select_flush_mode() follows bm.select_mode (the mesh mode), not the
         # UV mode, so flush with the UV mode or vertex mode would add every edge
         # between two selected UVs.
@@ -497,4 +552,27 @@ class UVOperator:
 
 
 def rotation(angle):
+    # Exact matrices for multiples of 90 degrees, so repeated quarter turns don't drift.
+    quarter = angle / (math.pi / 2)
+    if abs(quarter - round(quarter)) < 1e-9:
+        cos, sin = ((1, 0), (0, 1), (-1, 0), (0, -1))[round(quarter) % 4]
+        return Matrix(((cos, -sin), (sin, cos)))
     return Matrix.Rotation(angle, 2)
+
+
+def image_aspect(context):
+    """(x, y) scale of the image shown in the UV editor (1, 1 for none / square)."""
+    space = context.space_data
+    image = getattr(space, "image", None) if space is not None and space.type == 'IMAGE_EDITOR' else None
+    if image is not None:
+        w, h = image.size
+        if w > 0 and h > 0:
+            m = max(w, h)
+            return w / m, h / m
+    return 1.0, 1.0
+
+
+def aspect_rotation(context, angle):
+    """Rotation that looks rigid on a non-square image (like Blender's own rotate)."""
+    ax, ay = image_aspect(context)
+    return Matrix(((1 / ax, 0), (0, 1 / ay))) @ rotation(angle) @ Matrix(((ax, 0), (0, ay)))

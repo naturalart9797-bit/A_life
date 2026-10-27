@@ -1,7 +1,7 @@
 schema_version = "1.0.0"
 
 id = "maya_style_uv_toolkit"
-version = "2.1.0"
+version = "2.2.0"
 name = "Maya Style UV Toolkit"
 tagline = "Maya-like UV Toolkit panel for the UV Editor"
 maintainer = "naturalart9797"
