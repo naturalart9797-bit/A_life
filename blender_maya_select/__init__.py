@@ -283,15 +283,14 @@ class MESH_OT_maya_path_click_select(bpy.types.Operator):
                 and context.area is not None and context.area.type == 'VIEW_3D')
 
     def invoke(self, context, event):
-        bm = bmesh.from_edit_mesh(context.edit_object.data)
-        if bm.select_history.active is None:
-            # Nothing to start a path from: behave like a normal click.
-            return bpy.ops.view3d.select('INVOKE_DEFAULT', deselect_all=True)
+        # shortest_path_pick selects the clicked element when nothing is selected,
+        # and returns PASS_THROUGH when nothing is under the cursor (or there is no
+        # path). Passing through lets the normal click-select run, so clicking
+        # empty space clears the selection and box-drag from empty space still works.
         result = bpy.ops.mesh.shortest_path_pick('INVOKE_DEFAULT')
-        if 'CANCELLED' in result:
-            # Clicked empty space (or unreachable element): clear / restart.
-            return bpy.ops.view3d.select('INVOKE_DEFAULT', deselect_all=True)
-        return result
+        if 'FINISHED' in result:
+            return {'FINISHED'}
+        return {'PASS_THROUGH'}
 
 
 class MESH_OT_maya_loop_select(bpy.types.Operator):
@@ -367,31 +366,41 @@ class VIEW3D_PT_maya_select(bpy.types.Panel):
 _keymaps = []
 
 
-def _click_value():
-    """Match whatever event value the active keymap uses for click-select."""
-    wm = bpy.context.window_manager
-    for kc in (wm.keyconfigs.active, wm.keyconfigs.default):
-        km = kc.keymaps.get("3D View") if kc else None
-        if not km:
-            continue
-        for kmi in km.keymap_items:
-            if (kmi.idname == "view3d.select" and kmi.type == 'LEFTMOUSE'
-                    and not (kmi.shift or kmi.ctrl or kmi.alt)):
-                return kmi.value
-    return 'CLICK'
+# Active-tool keymaps are handled before the "Mesh" keymap and select on PRESS,
+# so the path pick has to sit in them (addon items are prepended, so ours wins).
+# Circle select is left out on purpose: its press starts painting.
+_PATH_CLICK_KEYMAPS = (
+    ("Mesh", 'EMPTY'),
+    ("3D View Tool: Tweak", 'VIEW_3D'),
+    ("3D View Tool: Tweak (fallback)", 'VIEW_3D'),
+    ("3D View Tool: Select Box", 'VIEW_3D'),
+    ("3D View Tool: Select Box (fallback)", 'VIEW_3D'),
+    ("3D View Tool: Select Lasso", 'VIEW_3D'),
+    ("3D View Tool: Select Lasso (fallback)", 'VIEW_3D'),
+    ("3D View Tool: Select Circle (fallback)", 'VIEW_3D'),
+)
+
+
+def _select_mouse():
+    prefs = getattr(bpy.context.window_manager.keyconfigs.active, "preferences", None)
+    return 'RIGHTMOUSE' if getattr(prefs, "select_mouse", 'LEFT') == 'RIGHT' else 'LEFTMOUSE'
 
 
 def _register_keymaps():
     kc = bpy.context.window_manager.keyconfigs.addon
     if kc is None:  # background mode
         return
+    select_mouse = _select_mouse()
+    for name, space_type in _PATH_CLICK_KEYMAPS:
+        km = kc.keymaps.new(name=name, space_type=space_type, region_type='WINDOW')
+        kmi = km.keymap_items.new(MESH_OT_maya_path_click_select.bl_idname, select_mouse, 'PRESS')
+        _keymaps.append((km, kmi))
+
     km = kc.keymaps.new(name="Mesh", space_type='EMPTY')
-    kmi = km.keymap_items.new(MESH_OT_maya_path_click_select.bl_idname, 'LEFTMOUSE', _click_value())
-    _keymaps.append((km, kmi))
-    kmi = km.keymap_items.new(MESH_OT_maya_loop_select.bl_idname, 'LEFTMOUSE', 'DOUBLE_CLICK')
+    kmi = km.keymap_items.new(MESH_OT_maya_loop_select.bl_idname, select_mouse, 'DOUBLE_CLICK')
     kmi.properties.extend = False
     _keymaps.append((km, kmi))
-    kmi = km.keymap_items.new(MESH_OT_maya_loop_select.bl_idname, 'LEFTMOUSE', 'DOUBLE_CLICK', shift=True)
+    kmi = km.keymap_items.new(MESH_OT_maya_loop_select.bl_idname, select_mouse, 'DOUBLE_CLICK', shift=True)
     kmi.properties.extend = True
     _keymaps.append((km, kmi))
 
