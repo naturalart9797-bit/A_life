@@ -2,18 +2,17 @@
 #
 #  * Symmetry selection: selecting on one side also selects the mirrored
 #    vertex / edge / face (works with click, box, circle, lasso, loop, path...).
-#  * Path click select: plain left-click picks the shortest path from the
-#    last selected element (like Maya's "Select Shortest Edge Path Tool").
-#  * Double-click loop select: double-click an edge to select its loop,
-#    Shift + double-click to add a loop.
+#  * Double-click an edge to select its loop.
+#  * Shift + double-click selects the shortest path from the previously
+#    selected element to the clicked one (like Maya).
 
 bl_info = {
     "name": "Maya Style Select",
     "author": "naturalart9797",
-    "version": (1, 0, 0),
+    "version": (1, 1, 0),
     "blender": (3, 0, 0),
     "location": "View3D > Sidebar (N) > Maya",
-    "description": "Maya-like symmetry selection, path click select and double-click loop select",
+    "description": "Maya-like symmetry selection, double-click loop and Shift + double-click path select",
     "category": "Mesh",
 }
 
@@ -64,15 +63,15 @@ class MayaSelectSettings(bpy.types.PropertyGroup):
         default=True,
         update=_update_symmetry,
     )
-    path_click: bpy.props.BoolProperty(
-        name="Path Click Select",
-        description="Left-click selects the shortest path from the last selected element. "
-                    "Click empty space to clear and start a new path",
-        default=False,
-    )
     double_click_loop: bpy.props.BoolProperty(
         name="Double-Click Loop",
-        description="Double-click selects an edge loop, Shift + double-click adds a loop",
+        description="Double-click selects an edge loop",
+        default=True,
+    )
+    shift_double_click_path: bpy.props.BoolProperty(
+        name="Shift + Double-Click Path",
+        description="Shift + double-click selects the shortest path from the previously "
+                    "selected element to the clicked one",
         default=True,
     )
 
@@ -269,28 +268,49 @@ def _on_load_post(*_args):
 # Operators
 # ---------------------------------------------------------------------------
 
-class MESH_OT_maya_path_click_select(bpy.types.Operator):
-    """Select the shortest path from the last selected element to the clicked one"""
-    bl_idname = "mesh.maya_path_click_select"
-    bl_label = "Path Click Select (Maya)"
+class MESH_OT_maya_path_select(bpy.types.Operator):
+    """Select the shortest path from the previously selected element to the clicked one"""
+    bl_idname = "mesh.maya_path_select"
+    bl_label = "Shift + Double-Click Path Select (Maya)"
     bl_options = {'REGISTER', 'UNDO'}
 
     @classmethod
     def poll(cls, context):
         s = _settings(context)
-        # Failing poll lets the click fall through to normal selection.
-        return (s is not None and s.path_click and context.mode == 'EDIT_MESH'
+        return (s is not None and s.shift_double_click_path and context.mode == 'EDIT_MESH'
                 and context.area is not None and context.area.type == 'VIEW_3D')
 
     def invoke(self, context, event):
-        # shortest_path_pick selects the clicked element when nothing is selected,
-        # and returns PASS_THROUGH when nothing is under the cursor (or there is no
-        # path). Passing through lets the normal click-select run, so clicking
-        # empty space clears the selection and box-drag from empty space still works.
+        # The first click of the double-click already ran Shift + click (toggle),
+        # which made the clicked element active. Drop it from the history so the
+        # path starts from the element selected before it.
+        if _last_op_is_toggle_select(context):
+            _drop_active_from_history(context.edit_object.data)
+
         result = bpy.ops.mesh.shortest_path_pick('INVOKE_DEFAULT')
         if 'FINISHED' in result:
             return {'FINISHED'}
         return {'PASS_THROUGH'}
+
+
+def _drop_active_from_history(me):
+    """Make the previously selected element active again (if there is one)."""
+    bm = bmesh.from_edit_mesh(me)
+    hist = bm.select_history
+    active = hist.active
+    if active is None or not any(type(e) is type(active) and e != active for e in hist):
+        return False
+    hist.remove(active)
+    bmesh.update_edit_mesh(me, loop_triangles=False, destructive=False)
+    return True
+
+
+def _last_op_is_toggle_select(context):
+    ops = context.window_manager.operators
+    if not ops:
+        return False
+    op = ops[-1]
+    return op.bl_idname == "VIEW3D_OT_select" and getattr(op.properties, "toggle", False)
 
 
 class MESH_OT_maya_loop_select(bpy.types.Operator):
@@ -299,8 +319,6 @@ class MESH_OT_maya_loop_select(bpy.types.Operator):
     bl_label = "Double-Click Loop Select (Maya)"
     bl_options = {'REGISTER', 'UNDO'}
 
-    extend: bpy.props.BoolProperty(name="Extend", default=False)
-
     @classmethod
     def poll(cls, context):
         s = _settings(context)
@@ -308,7 +326,7 @@ class MESH_OT_maya_loop_select(bpy.types.Operator):
                 and context.area is not None and context.area.type == 'VIEW_3D')
 
     def invoke(self, context, event):
-        return bpy.ops.mesh.loop_select('INVOKE_DEFAULT', extend=self.extend, deselect=False,
+        return bpy.ops.mesh.loop_select('INVOKE_DEFAULT', extend=False, deselect=False,
                                         toggle=False, ring=False)
 
 
@@ -355,8 +373,8 @@ class VIEW3D_PT_maya_select(bpy.types.Panel):
         col.operator(MESH_OT_maya_symmetrize_selection.bl_idname, icon='ARROW_LEFTRIGHT')
 
         box = layout.box()
-        box.prop(s, "path_click", toggle=True, icon='TRACKING')
         box.prop(s, "double_click_loop")
+        box.prop(s, "shift_double_click_path")
 
 
 # ---------------------------------------------------------------------------
@@ -364,21 +382,6 @@ class VIEW3D_PT_maya_select(bpy.types.Panel):
 # ---------------------------------------------------------------------------
 
 _keymaps = []
-
-
-# Active-tool keymaps are handled before the "Mesh" keymap and select on PRESS,
-# so the path pick has to sit in them (addon items are prepended, so ours wins).
-# Circle select is left out on purpose: its press starts painting.
-_PATH_CLICK_KEYMAPS = (
-    ("Mesh", 'EMPTY'),
-    ("3D View Tool: Tweak", 'VIEW_3D'),
-    ("3D View Tool: Tweak (fallback)", 'VIEW_3D'),
-    ("3D View Tool: Select Box", 'VIEW_3D'),
-    ("3D View Tool: Select Box (fallback)", 'VIEW_3D'),
-    ("3D View Tool: Select Lasso", 'VIEW_3D'),
-    ("3D View Tool: Select Lasso (fallback)", 'VIEW_3D'),
-    ("3D View Tool: Select Circle (fallback)", 'VIEW_3D'),
-)
 
 
 def _select_mouse():
@@ -391,17 +394,12 @@ def _register_keymaps():
     if kc is None:  # background mode
         return
     select_mouse = _select_mouse()
-    for name, space_type in _PATH_CLICK_KEYMAPS:
-        km = kc.keymaps.new(name=name, space_type=space_type, region_type='WINDOW')
-        kmi = km.keymap_items.new(MESH_OT_maya_path_click_select.bl_idname, select_mouse, 'PRESS')
-        _keymaps.append((km, kmi))
-
+    # Double-clicks are matched as DOUBLE_CLICK before being retried as PRESS,
+    # so these in the "Mesh" keymap win over the active tool's click-select.
     km = kc.keymaps.new(name="Mesh", space_type='EMPTY')
     kmi = km.keymap_items.new(MESH_OT_maya_loop_select.bl_idname, select_mouse, 'DOUBLE_CLICK')
-    kmi.properties.extend = False
     _keymaps.append((km, kmi))
-    kmi = km.keymap_items.new(MESH_OT_maya_loop_select.bl_idname, select_mouse, 'DOUBLE_CLICK', shift=True)
-    kmi.properties.extend = True
+    kmi = km.keymap_items.new(MESH_OT_maya_path_select.bl_idname, select_mouse, 'DOUBLE_CLICK', shift=True)
     _keymaps.append((km, kmi))
 
 
@@ -415,7 +413,7 @@ def _unregister_keymaps():
 
 classes = (
     MayaSelectSettings,
-    MESH_OT_maya_path_click_select,
+    MESH_OT_maya_path_select,
     MESH_OT_maya_loop_select,
     MESH_OT_maya_symmetrize_selection,
     VIEW3D_PT_maya_select,
