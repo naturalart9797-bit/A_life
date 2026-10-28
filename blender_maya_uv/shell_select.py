@@ -24,6 +24,8 @@ def _update_shell_select(self, context):
     elif self.shell_prev_select_mode:
         ts.mesh_select_mode = tuple(c == "1" for c in self.shell_prev_select_mode.split(","))
     _prev.clear()
+    from . import mode_watch
+    mode_watch.remember(context)
 
 
 def _new_replace_click():

@@ -9,7 +9,7 @@
 bl_info = {
     "name": "Maya Style UV Toolkit",
     "author": "naturalart9797",
-    "version": (2, 2, 0),
+    "version": (2, 3, 0),
     "blender": (3, 0, 0),
     "location": "UV Editor > Sidebar (N) > UV Toolkit, View3D > Sidebar (N) > Maya > UV",
     "description": "Maya's UV Toolkit, marking menus and UV editor display toggles",
@@ -18,7 +18,8 @@ bl_info = {
 
 import bpy
 
-from . import common, display, ops_select, ops_transform, ops_uv, shell_select, ui, uv_symmetry
+from . import (common, display, mode_watch, ops_select, ops_transform, ops_uv, shell_select, ui,
+               uv_symmetry)
 
 
 class MayaUVPreferences(bpy.types.AddonPreferences):
@@ -31,8 +32,16 @@ class MayaUVPreferences(bpy.types.AddonPreferences):
                     "Turn off to get Blender's right-click context menu back",
         default=True)
 
+    clear_on_mode_change: bpy.props.BoolProperty(
+        name="Maya Component Switching",
+        description="Picking UV / Edge / Face leaves shell mode and starts with an empty "
+                    "selection, like Maya (Ctrl + right-click > Convert keeps the selection). "
+                    "Turn off to keep Blender's selection conversion",
+        default=True)
+
     def draw(self, context):
         self.layout.prop(self, "use_marking_menus")
+        self.layout.prop(self, "clear_on_mode_change")
 
 
 _keymaps = []
@@ -63,6 +72,11 @@ def _register_keymaps():
         props={"extend": False, "deselect": False})
     add(ops_select.UV_OT_maya_path_select.bl_idname, select_mouse, 'DOUBLE_CLICK', shift=True)
 
+    # 1 / 2 / 3: Maya-style component switching that also leaves shell mode
+    # (Blender's own keys do nothing when the mode is already active).
+    for key, mode in (('ONE', 'VERTEX'), ('TWO', 'EDGE'), ('THREE', 'FACE')):
+        add(ops_select.UV_OT_maya_component_mode.bl_idname, key, 'PRESS', props={"mode": mode})
+
     # Marking menus need the right button to be free (left-click select).
     if select_mouse == 'LEFTMOUSE':
         menu = ui.UV_OT_maya_marking_menu.bl_idname
@@ -90,6 +104,9 @@ def register():
     bpy.app.handlers.depsgraph_update_post.append(ops_select.track_uv_active)
     bpy.app.handlers.depsgraph_update_post.append(shell_select.on_depsgraph_update)
     bpy.app.handlers.depsgraph_update_post.append(uv_symmetry.on_depsgraph_update)
+    bpy.app.handlers.depsgraph_update_post.append(mode_watch.on_depsgraph_update)
+    bpy.app.handlers.load_post.append(mode_watch.on_load_post)
+    mode_watch.subscribe()
     display.register_draw()
     _register_keymaps()
 
@@ -99,6 +116,11 @@ def unregister():
         km.keymap_items.remove(kmi)
     _keymaps.clear()
     display.unregister_draw()
+    mode_watch.unsubscribe()
+    if mode_watch.on_load_post in bpy.app.handlers.load_post:
+        bpy.app.handlers.load_post.remove(mode_watch.on_load_post)
+    if mode_watch.on_depsgraph_update in bpy.app.handlers.depsgraph_update_post:
+        bpy.app.handlers.depsgraph_update_post.remove(mode_watch.on_depsgraph_update)
     if uv_symmetry.on_depsgraph_update in bpy.app.handlers.depsgraph_update_post:
         bpy.app.handlers.depsgraph_update_post.remove(uv_symmetry.on_depsgraph_update)
     if shell_select.on_depsgraph_update in bpy.app.handlers.depsgraph_update_post:

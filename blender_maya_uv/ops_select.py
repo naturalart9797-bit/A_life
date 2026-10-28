@@ -6,9 +6,10 @@ import bpy
 import bmesh
 from bpy.app.handlers import persistent
 
+from . import mode_watch
 from .common import (
     UVOperator, EPS, settings, is_sync, edit_meshes, update, islands, selected_islands,
-    is_border_loop, uv_area, set_selection, op_available,
+    is_border_loop, uv_area, set_selection, op_available, addon_prefs,
 )
 
 
@@ -16,19 +17,27 @@ from .common import (
 # Component mode / conversion
 # ---------------------------------------------------------------------------
 
-def _set_uv_mode(context, mode):
-    """Switch the UV component mode, converting the selection like Maya does."""
+def _set_uv_mode(context, mode, convert=True):
+    """Switch the UV component mode (and leave shell mode).
+
+    convert: keep the selection converted to the new mode (for tools that switch
+    on purpose). Otherwise the Maya-style mode watcher may clear it.
+    """
     ts = context.scene.tool_settings
     if is_sync(context):
         mesh_mode = {'VERTEX': 'VERT', 'EDGE': 'EDGE', 'FACE': 'FACE'}[mode]
         bpy.ops.mesh.select_mode(type=mesh_mode)
-        return
+    else:
+        if ts.uv_select_mode == 'ISLAND':  # Blender 4.x shell mode
+            ts.uv_select_mode = 'FACE'
+        if op_available("uv.select_mode") and bpy.ops.uv.select_mode.poll():
+            bpy.ops.uv.select_mode(type=mode)
+        else:
+            ts.uv_select_mode = mode
     if hasattr(ts, "use_uv_select_island"):
         ts.use_uv_select_island = False
-    if op_available("uv.select_mode") and bpy.ops.uv.select_mode.poll():
-        bpy.ops.uv.select_mode(type=mode)
-    else:
-        ts.uv_select_mode = mode
+    if convert:
+        mode_watch.remember(context)
 
 
 def _set_shell_mode(context):
@@ -40,6 +49,12 @@ def _set_shell_mode(context):
     elif 'ISLAND' in {i.identifier for i in ts.bl_rna.properties['uv_select_mode'].enum_items}:
         ts.uv_select_mode = 'ISLAND'
     bpy.ops.uv.select_linked()
+    mode_watch.remember(context)
+
+
+def _in_shell_mode(context):
+    ts = context.scene.tool_settings
+    return getattr(ts, "use_uv_select_island", False) or ts.uv_select_mode == 'ISLAND'
 
 
 class UV_OT_maya_component_mode(UVOperator, bpy.types.Operator):
@@ -57,8 +72,16 @@ class UV_OT_maya_component_mode(UVOperator, bpy.types.Operator):
     def execute(self, context):
         if self.mode == 'SHELL':
             _set_shell_mode(context)
-        else:
-            _set_uv_mode(context, self.mode)
+            return {'FINISHED'}
+        # Maya: picking a component type leaves shell mode and starts with an
+        # empty selection (Ctrl + right-click "Convert" keeps it instead).
+        left_shell = _in_shell_mode(context)
+        sync = is_sync(context)
+        _set_uv_mode(context, self.mode, convert=False)
+        prefs = addon_prefs(context)
+        if (prefs is None or prefs.clear_on_mode_change) and (left_shell or not sync):
+            mode_watch.clear_selection(context, mesh=bool(sync))
+        mode_watch.remember(context)
         return {'FINISHED'}
 
 
