@@ -7,7 +7,7 @@ Blender の UV 展開を Maya の UV Toolkit とマーキングメニューに�
 
 * **UV エディター > サイドバー（N）> UV Toolkit** タブ：Maya の UV Toolkit と同じセクション構成
 * **UV エディターのヘッダー**：Checker / Distortion / Texture Borders / Isolate のボタン
-* **3D ビュー > サイドバー > Maya > UV**：**UV Shell Select**（3D ビューで UV シェル単位に選択）・UV エディターを開く・チェッカー・カット・Auto Seams・投影
+* **3D ビュー > サイドバー > Maya > UV**：**UV Shell Select**（3D ビューで UV シェル単位に選択）・UV エディターを開く・チェッカー・カット・**Sew / Move and Sew**（3D ビューで選んだ辺を縫う）・Auto Seams・投影
 
 ## 3D ビューで UV シェル単位に選択（UV Shell Select）
 

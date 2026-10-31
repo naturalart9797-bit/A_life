@@ -475,6 +475,9 @@ class VIEW3D_PT_maya_uv(bpy.types.Panel):
         row.operator("mesh.mark_seam", text="Cut").clear = False
         row.operator("mesh.mark_seam", text="Uncut").clear = True
         row = layout.row(align=True)
+        row.operator("uv.maya_sew", text="Sew").move = False
+        row.operator("uv.maya_sew", text="Move and Sew").move = True
+        row = layout.row(align=True)
         row.operator("uv.maya_auto_seams", text="Auto Seams")
         row.prop(s, "auto_seam_angle", text="")
         draw_create(layout)

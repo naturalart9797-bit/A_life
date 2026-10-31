@@ -9,7 +9,7 @@
 bl_info = {
     "name": "Maya Style UV Toolkit",
     "author": "naturalart9797",
-    "version": (2, 4, 0),
+    "version": (2, 4, 1),
     "blender": (3, 0, 0),
     "location": "UV Editor > Sidebar (N) > UV Toolkit, View3D > Sidebar (N) > Maya > UV",
     "description": "Maya's UV Toolkit, marking menus and UV editor display toggles",

@@ -134,24 +134,31 @@ class UV_OT_maya_auto_seams(UVOperator, bpy.types.Operator):
 # Cut and Sew
 # ---------------------------------------------------------------------------
 
-def _sew_pairs(faces, uv, sync):
-    """(selected loop, partner loop) for every selected UV edge that is split in UV space:
-    the same mesh edge whose other face has its UVs somewhere else."""
-    face_set = set(faces)
+def _sew_pairs(context, bm, uv, shown):
+    """(selected loop, partner loop) for every selected edge that is split in UV space:
+    the same mesh edge whose other face has its UVs somewhere else.
+
+    The partner may be outside the UV editor (sync off shows only the faces selected
+    in 3D). With nothing selected in UV space, edges selected in the 3D view are used.
+    """
+    sync = is_sync(context)
+    candidates = [l for f in shown for l in f.loops
+                  if loop_edge_selected(l, uv, sync)
+                  or (loop_selected(l, uv, sync) and loop_selected(l.link_loop_next, uv, sync))]
+    in_3d = context.area is not None and context.area.type == 'VIEW_3D'
+    if not candidates and not sync and (in_3d or not any(f.select for f in bm.faces)):
+        candidates = [l for e in bm.edges if e.select and not e.hide
+                      for l in e.link_loops[:1] if not l.face.hide]
     pairs = []
     seen = set()
-    for f in faces:
-        for l in f.loops:
-            if l.edge.index in seen:
-                continue
-            if not (loop_edge_selected(l, uv, sync) or (
-                    loop_selected(l, uv, sync) and loop_selected(l.link_loop_next, uv, sync))):
-                continue
-            for l2 in l.edge.link_loops:
-                if l2 is not l and l2.face in face_set and not uv_edge_matches(l, l2, uv):
-                    pairs.append((l, l2))
-                    seen.add(l.edge.index)
-                    break
+    for l in candidates:
+        if l.edge.index in seen:
+            continue
+        for l2 in l.edge.link_loops:
+            if l2 is not l and not l2.face.hide and not uv_edge_matches(l, l2, uv):
+                pairs.append((l, l2))
+                seen.add(l.edge.index)
+                break
     return pairs
 
 
@@ -181,12 +188,12 @@ def _similarity(src, dst):
 
 def sew(context, move):
     """Sew the selected UV edges to their partners. Returns the number of edges sewn."""
-    sync = is_sync(context)
     sewn = 0
-    for ob, bm, uv, faces in edit_meshes(context):
-        pairs = _sew_pairs(faces, uv, sync)
+    for ob, bm, uv, shown in edit_meshes(context):
+        pairs = _sew_pairs(context, bm, uv, shown)
         if not pairs:
             continue
+        faces = [f for f in bm.faces if not f.hide]  # partners may be outside the UV editor
         shells = islands(faces, uv)
         shell_of = {f: i for i, isl in enumerate(shells) for f in isl}
 
