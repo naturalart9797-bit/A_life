@@ -24,13 +24,18 @@ def is_active(ts):
 
 
 def set_active(ts, value):
-    _prev.clear()
     if hasattr(ts, "use_uv_select_island"):
         ts.use_uv_select_island = value
     elif value:
         ts.uv_select_mode = 'ISLAND'
     elif ts.uv_select_mode == 'ISLAND':
         ts.uv_select_mode = 'FACE'
+    # The selection as it is now is the baseline: the next change grows to shells.
+    _prev.clear()
+    view_layer = bpy.context.view_layer
+    for ob in (view_layer.objects if view_layer else ()):
+        if ob.type == 'MESH' and ob.mode == 'EDIT':
+            remember(ob, ts)
     from . import mode_watch
     mode_watch.remember(bpy.context)
 
