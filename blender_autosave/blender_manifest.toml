@@ -1,0 +1,15 @@
+schema_version = "1.0.0"
+
+id = "blender_autosave"
+version = "1.0.0"
+name = "Auto Save Pro"
+tagline = "Periodic autosave with timestamped, rotated backups"
+maintainer = "naturalart9797"
+type = "add-on"
+
+blender_version_min = "4.2.0"
+license = ["SPDX:GPL-3.0-or-later"]
+category = "System"
+
+[permissions]
+files = "Write autosave backups of .blend files to disk"
