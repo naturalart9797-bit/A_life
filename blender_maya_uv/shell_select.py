@@ -1,8 +1,10 @@
 # UV Shell selection in the 3D Viewport (Maya: UV Shell component mode).
 #
-# While enabled, every selection change in mesh edit mode is grown to whole
-# UV shells: selecting any face of a shell selects the shell, deselecting a
-# face of a shell deselects the shell. Works with click, box, lasso, etc.
+# Linked to the UV Editor's island (shell) select: while it is on, every
+# selection made in the 3D Viewport is grown to whole UV shells, like the UV
+# Editor does. Selecting any part of a shell selects the shell, deselecting a
+# part of it deselects the shell. Works with click, box, lasso, etc., and in
+# vertex, edge and face mode.
 
 import bpy
 import bmesh
@@ -11,89 +13,144 @@ from bpy.app.handlers import persistent
 from .common import islands
 
 
-# mesh pointer -> frozenset of selected face indices after the last update
+# mesh pointer -> (mode, frozenset of selected element indices) after the last update
 _prev = {}
 _state = {"busy": False, "last_op": 0}
 
 
-def _update_shell_select(self, context):
-    ts = context.scene.tool_settings
-    if self.shell_select_3d:
-        self.shell_prev_select_mode = ",".join(str(int(b)) for b in ts.mesh_select_mode)
-        ts.mesh_select_mode = (False, False, True)
-    elif self.shell_prev_select_mode:
-        ts.mesh_select_mode = tuple(c == "1" for c in self.shell_prev_select_mode.split(","))
+def is_active(ts):
+    """Shell select is on (Blender 5: Island toggle, Blender 4: Island mode)."""
+    return getattr(ts, "use_uv_select_island", False) or ts.uv_select_mode == 'ISLAND'
+
+
+def set_active(ts, value):
     _prev.clear()
+    if hasattr(ts, "use_uv_select_island"):
+        ts.use_uv_select_island = value
+    elif value:
+        ts.uv_select_mode = 'ISLAND'
+    elif ts.uv_select_mode == 'ISLAND':
+        ts.uv_select_mode = 'FACE'
     from . import mode_watch
-    mode_watch.remember(context)
+    mode_watch.remember(bpy.context)
 
 
-def _new_replace_click():
-    """True when a click-select that replaces the selection just ran.
+def _new_operator():
+    """(idname, properties) of an operator that ran since the last call, else None."""
+    wm = bpy.context.window_manager
+    if wm is None or not wm.operators:
+        return None
+    op = wm.operators[-1]
+    ptr = op.as_pointer()
+    if ptr == _state["last_op"]:
+        return None
+    _state["last_op"] = ptr
+    return op.bl_idname, op.properties
+
+
+def _is_replace_click(op):
+    """A click-select that replaces the selection.
 
     "Click a face of an already selected shell" removes faces without adding
     any, exactly like Shift-click deselect, so tell them apart by the operator.
     """
-    wm = bpy.context.window_manager
-    if wm is None or not wm.operators:
+    if op is None or op[0] != "VIEW3D_OT_select":
         return False
-    op = wm.operators[-1]
-    ptr = op.as_pointer()
-    if ptr == _state["last_op"]:
-        return False
-    _state["last_op"] = ptr
-    if op.bl_idname != "VIEW3D_OT_select":
-        return False
-    p = op.properties
+    p = op[1]
     return not (getattr(p, "extend", False) or getattr(p, "deselect", False)
                 or getattr(p, "toggle", False))
 
 
-def grow_to_shells(ob, replace=False):
-    """Grow / shrink the face selection of ob to whole UV shells. Returns True if changed."""
+def _mesh_mode(ts):
+    vert, edge, _face = ts.mesh_select_mode
+    return 'VERT' if vert else ('EDGE' if edge else 'FACE')
+
+
+def sync_uv_flags(bm, ts):
+    """With UV sync select, Blender 5 keeps its own UV selection: refresh it from the
+    mesh selection, or the UV editor would move only part of the selection."""
+    if ts.use_uv_select_sync and getattr(bm, "uv_select_sync_valid", False):
+        bm.uv_select_sync_from_mesh()
+
+
+def _elements(bm, mode):
+    elems = {'VERT': bm.verts, 'EDGE': bm.edges, 'FACE': bm.faces}[mode]
+    elems.ensure_lookup_table()
+    return elems
+
+
+def remember(ob, ts):
+    """Take the current selection as the baseline (no growing)."""
+    bm = bmesh.from_edit_mesh(ob.data)
+    mode = _mesh_mode(ts)
+    elems = _elements(bm, mode)
+    _prev[ob.data.as_pointer()] = ((mode, len(elems)), frozenset(e.index for e in elems if e.select))
+
+
+def grow_to_shells(ob, ts, replace=False):
+    """Grow / shrink the selection of ob to whole UV shells. Returns True if changed."""
     me = ob.data
     bm = bmesh.from_edit_mesh(me)
     uv = bm.loops.layers.uv.active
     if uv is None:
         return False
-    bm.faces.ensure_lookup_table()
-    current = frozenset(f.index for f in bm.faces if f.select)
+    mode = _mesh_mode(ts)
+    elems = _elements(bm, mode)
+    current = frozenset(e.index for e in elems if e.select)
     key = me.as_pointer()
     prev = _prev.get(key)
-    if prev is None or (prev and max(prev) >= len(bm.faces)):
-        prev = frozenset()
-    added = current - prev
-    removed = prev - current
+    if prev is None or prev[0] != (mode, len(elems)):
+        # First look (or the mode changed): take the selection as it is.
+        _prev[key] = ((mode, len(elems)), current)
+        return False
+    added, removed = current - prev[1], prev[1] - current
     if not added and not removed and not replace:
-        _prev[key] = current
         return False
 
     faces = [f for f in bm.faces if not f.hide]
-    shell_of = {}
     shells = islands(faces, uv)
-    for i, isl in enumerate(shells):
-        for f in isl:
-            shell_of[f.index] = i
+    shell_of = {f: i for i, isl in enumerate(shells) for f in isl}
 
-    if added or replace:
-        # Selecting: every shell that has a selected face becomes fully selected.
-        keep = {shell_of[i] for i in current if i in shell_of}
-        final = {f.index for i in keep for f in shells[i]}
+    def shells_of(indices, prefer_selected=False):
+        out = set()
+        for i in indices:
+            e = elems[i]
+            fs = [f for f in ([e] if mode == 'FACE' else e.link_faces) if f in shell_of]
+            if prefer_selected:
+                # A seam vertex / edge also touches the neighboring shell: count only
+                # the selected faces around it when there are any.
+                fs = [f for f in fs if f.select] or fs
+            out.update(shell_of[f] for f in fs)
+        return out
+
+    # Shells already selected: those with a selected face.
+    selected = {shell_of[f] for f in faces if f.select}
+    if replace:
+        keep = shells_of(current, prefer_selected=True)
+    elif added:
+        keep = selected | shells_of(added, prefer_selected=True)
     else:
-        # Only deselecting: drop the whole shell of every deselected face.
-        drop = {shell_of[i] for i in removed if i in shell_of}
-        final = {i for i in current if shell_of.get(i) not in drop}
+        keep = selected - shells_of(removed)
 
+    final_faces = {f for i in keep for f in shells[i]}
+    final_verts = {v for f in final_faces for v in f.verts}
+    final_edges = {e for f in final_faces for e in f.edges}
     changed = False
-    if final != current:
-        for i in current - final:
-            bm.faces[i].select_set(False)
-        for i in final - current:
-            bm.faces[i].select_set(True)
+    # Faces first: deselecting a face also deselects its vertices, which would
+    # drop the seam vertices the neighboring selected shell still uses.
+    for seq, final in ((bm.faces, final_faces), (bm.edges, final_edges), (bm.verts, final_verts)):
+        for e in seq:
+            if e.hide:
+                continue
+            want = e in final
+            if e.select != want:
+                e.select = want
+                changed = True
+    if changed:
         bm.select_flush_mode()
+        sync_uv_flags(bm, ts)
         bmesh.update_edit_mesh(me, loop_triangles=False, destructive=False)
-        changed = True
-    _prev[key] = frozenset(final)
+    _prev[key] = ((mode, len(elems)), frozenset(e.index for e in elems if e.select))
     return changed
 
 
@@ -101,8 +158,10 @@ def grow_to_shells(ob, replace=False):
 def on_depsgraph_update(scene, depsgraph=None):
     if _state["busy"]:
         return
-    s = getattr(scene, "maya_uv", None)
-    if s is None or not s.shell_select_3d:
+    ts = scene.tool_settings
+    op = _new_operator()
+    if not is_active(ts):
+        _prev.clear()
         return
     view_layer = bpy.context.view_layer
     if view_layer is None:
@@ -111,17 +170,21 @@ def on_depsgraph_update(scene, depsgraph=None):
     if not objects:
         _prev.clear()
         return
-    replace = _new_replace_click()
+    if op is not None and op[0].startswith("UV_OT_"):
+        # Selected in the UV editor: Blender already selects whole islands there.
+        for ob in objects:
+            remember(ob, ts)
+        return
     _state["busy"] = True
     try:
         changed = False
         for ob in objects:
-            changed |= grow_to_shells(ob, replace)
+            changed |= grow_to_shells(ob, ts, _is_replace_click(op))
     finally:
         _state["busy"] = False
     if changed and bpy.context.screen:
         for area in bpy.context.screen.areas:
-            if area.type == 'VIEW_3D':
+            if area.type in {'VIEW_3D', 'IMAGE_EDITOR'}:
                 area.tag_redraw()
 
 

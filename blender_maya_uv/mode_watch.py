@@ -13,6 +13,7 @@ import bpy
 import bmesh
 from bpy.app.handlers import persistent
 
+from . import shell_select
 from .common import addon_prefs, edit_objects
 
 
@@ -40,6 +41,7 @@ def clear_selection(context, mesh):
                 for e in seq:
                     e.select = False
             bm.select_history.clear()
+            shell_select.sync_uv_flags(bm, context.scene.tool_settings)
         else:
             uv = bm.loops.layers.uv.active
             if uv is None:
@@ -75,20 +77,17 @@ def check(context):
     sync = cur[3]
     _state["busy"] = True
     try:
-        # 3D UV Shell Select: picking vertex / edge mode leaves it.
-        if s.shell_select_3d and prev[2] != cur[2] and cur[2] != (False, False, True):
-            s.shell_prev_select_mode = ""   # keep the mode the user just picked
-            s.shell_select_3d = False
-            if clear:
-                clear_selection(context, mesh=True)
-            return
-
         component_changed = prev[2] != cur[2] if sync else prev[0] != cur[0]
         left_shell = prev[1] and not cur[1]
-        if component_changed and cur[1]:
+        if component_changed and prev[1] and cur[1]:
             # Picked another component while in shell mode: leave shell mode.
             ts.use_uv_select_island = False
             left_shell = True
+        elif not sync and prev[1] and cur[1] and prev[2] != cur[2]:
+            # Picked a component in the 3D view: leave shell mode there too. The 3D
+            # selection decides what the UV editor shows, so keep it.
+            ts.use_uv_select_island = False
+            return
         if clear and (left_shell or (component_changed and not sync)):
             clear_selection(context, mesh=sync)
     finally:

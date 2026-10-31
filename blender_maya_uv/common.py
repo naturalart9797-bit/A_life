@@ -31,9 +31,14 @@ def _reset_uv_symmetry(self, context):
     uv_symmetry.reset()
 
 
-def _update_shell_select(self, context):
+def _shell_select_get(self):
     from . import shell_select
-    shell_select._update_shell_select(self, context)
+    return shell_select.is_active(self.id_data.tool_settings)
+
+
+def _shell_select_set(self, value):
+    from . import shell_select
+    shell_select.set_active(self.id_data.tool_settings, value)
 
 
 class MayaUVSettings(bpy.types.PropertyGroup):
@@ -147,10 +152,9 @@ class MayaUVSettings(bpy.types.PropertyGroup):
     # 3D Viewport
     shell_select_3d: bpy.props.BoolProperty(
         name="UV Shell Select",
-        description="Select whole UV shells in the 3D Viewport (Maya: UV Shell component). "
-                    "Switches to face select while on",
-        default=False, update=_update_shell_select)
-    shell_prev_select_mode: bpy.props.StringProperty(default="")
+        description="Select whole UV shells, in the UV Editor and the 3D Viewport "
+                    "(Maya: UV Shell component). Same switch as the UV Editor's Island select",
+        get=lambda self: _shell_select_get(self), set=lambda self, value: _shell_select_set(self, value))
 
 
 def settings(context):

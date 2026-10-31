@@ -9,7 +9,7 @@
 bl_info = {
     "name": "Maya Style Select",
     "author": "naturalart9797",
-    "version": (1, 1, 0),
+    "version": (1, 1, 1),
     "blender": (3, 0, 0),
     "location": "View3D > Sidebar (N) > Maya",
     "description": "Maya-like symmetry selection, double-click loop and Shift + double-click path select",
@@ -221,6 +221,11 @@ def symmetrize_selection(ob, settings, mode, replace=False):
         for i in to_select:
             elems[i].select_set(True)
         bm.select_flush_mode()
+        # With UV sync select, Blender 5 keeps its own UV selection: refresh it so
+        # the UV editor matches (otherwise moving UVs would move only part of it).
+        if bpy.context.scene.tool_settings.use_uv_select_sync and \
+                getattr(bm, "uv_select_sync_valid", False):
+            bm.uv_select_sync_from_mesh()
         bmesh.update_edit_mesh(me, loop_triangles=False, destructive=False)
         changed = True
         current = frozenset(e.index for e in elems if e.select)
