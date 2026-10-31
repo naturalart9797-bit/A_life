@@ -5,12 +5,12 @@ import math
 
 import bpy
 import bmesh
-from mathutils import Vector
+from mathutils import Matrix, Vector
 
 from .common import (
     UVOperator, EPS, settings, update_all, is_sync, edit_meshes, edit_objects, update, islands,
     island_loops, selected_shells, uv_area, world_area, poly_area, transform_loops, center,
-    loop_selected, loop_edge_selected, face_selected, call_op, rotation,
+    loop_selected, loop_edge_selected, face_selected, call_op, rotation, uv_edge_matches,
 )
 
 
@@ -134,34 +134,150 @@ class UV_OT_maya_auto_seams(UVOperator, bpy.types.Operator):
 # Cut and Sew
 # ---------------------------------------------------------------------------
 
-def _editor_region(context):
-    if context.area is not None and context.area.type == 'IMAGE_EDITOR':
-        return next((r for r in context.area.regions if r.type == 'WINDOW'), None)
-    return None
+def _sew_pairs(faces, uv, sync):
+    """(selected loop, partner loop) for every selected UV edge that is split in UV space:
+    the same mesh edge whose other face has its UVs somewhere else."""
+    face_set = set(faces)
+    pairs = []
+    seen = set()
+    for f in faces:
+        for l in f.loops:
+            if l.edge.index in seen:
+                continue
+            if not (loop_edge_selected(l, uv, sync) or (
+                    loop_selected(l, uv, sync) and loop_selected(l.link_loop_next, uv, sync))):
+                continue
+            for l2 in l.edge.link_loops:
+                if l2 is not l and l2.face in face_set and not uv_edge_matches(l, l2, uv):
+                    pairs.append((l, l2))
+                    seen.add(l.edge.index)
+                    break
+    return pairs
+
+
+def _corners(la, lb):
+    """Pairs of loops at the same mesh vertex on the two sides of an edge."""
+    if lb.vert is la.vert:
+        return ((la, lb), (la.link_loop_next, lb.link_loop_next))
+    return ((la, lb.link_loop_next), (la.link_loop_next, lb))
+
+
+def _similarity(src, dst):
+    """Rotation + uniform scale + translation that best maps src points onto dst."""
+    cs = sum(src, Vector((0.0, 0.0))) / len(src)
+    cd = sum(dst, Vector((0.0, 0.0))) / len(dst)
+    num = den = ss = 0.0
+    for p, q in zip(src, dst):
+        p, q = p - cs, q - cd
+        num += p.x * q.y - p.y * q.x
+        den += p.x * q.x + p.y * q.y
+        ss += p.length_squared
+    if ss < EPS * EPS:
+        return Matrix.Identity(2), cs, cd  # a single point: just move
+    angle = math.atan2(num, den)
+    scale = math.hypot(num, den) / ss
+    return rotation(angle) * scale, cs, cd
+
+
+def sew(context, move):
+    """Sew the selected UV edges to their partners. Returns the number of edges sewn."""
+    sync = is_sync(context)
+    sewn = 0
+    for ob, bm, uv, faces in edit_meshes(context):
+        pairs = _sew_pairs(faces, uv, sync)
+        if not pairs:
+            continue
+        shells = islands(faces, uv)
+        shell_of = {f: i for i, isl in enumerate(shells) for f in isl}
+
+        moved = set()
+        if move:
+            # Move each partner shell onto its selected side (the smaller shell moves).
+            groups = {}
+            for la, lb in pairs:
+                a, b = shell_of[la.face], shell_of[lb.face]
+                if a != b:
+                    groups.setdefault((a, b), []).append((la, lb))
+            for (a, b), group in groups.items():
+                area = lambda i: sum(uv_area(f, uv) for f in shells[i])
+                # The smaller shell moves; on a tie, the partner of the selected edge.
+                mover = a if area(a) < area(b) * (1.0 - 1e-6) else b
+                if mover in moved:
+                    continue
+                src, dst = [], []
+                for la, lb in group:
+                    for ca, cb in _corners(la, lb):
+                        fixed, moving = (ca, cb) if mover == b else (cb, ca)
+                        src.append(moving[uv].uv.copy())
+                        dst.append(fixed[uv].uv.copy())
+                mat2, cs, cd = _similarity(src, dst)
+                for l in island_loops(shells[mover]):
+                    l[uv].uv = cd + mat2 @ (l[uv].uv - cs)
+                moved.add(mover)
+
+        # Merge the UVs on both sides of every edge: a UV vertex is a mesh vertex
+        # at one UV position, shared by all its loops.
+        def node(l):
+            co = l[uv].uv
+            return (l.vert.index, round(co.x, 6), round(co.y, 6))
+
+        loops_of = {}
+        for f in faces:
+            for l in f.loops:
+                loops_of.setdefault(node(l), []).append(l)
+        parent = {}
+
+        def find(n):
+            parent.setdefault(n, n)
+            while parent[n] != n:
+                parent[n] = parent[parent[n]]
+                n = parent[n]
+            return n
+
+        fixed_nodes = set()
+        for la, lb in pairs:
+            for ca, cb in _corners(la, lb):
+                na, nb = node(ca), node(cb)
+                parent[find(na)] = find(nb)
+                if move:
+                    for l, n in ((ca, na), (cb, nb)):
+                        if shell_of[l.face] not in moved:
+                            fixed_nodes.add(n)
+        members = {}
+        for n in list(parent):
+            members.setdefault(find(n), []).append(n)
+        for group in members.values():
+            anchor = [n for n in group if n in fixed_nodes] or group
+            target = Vector((sum(n[1] for n in anchor) / len(anchor),
+                             sum(n[2] for n in anchor) / len(anchor)))
+            # Use the exact UV of an anchor loop, not the rounded key.
+            exact = [loops_of[n][0][uv].uv for n in anchor if loops_of.get(n)]
+            if exact:
+                target = sum(exact, Vector((0.0, 0.0))) / len(exact)
+            for n in group:
+                for l in loops_of.get(n, ()):
+                    l[uv].uv = target
+        for la, lb in pairs:
+            la.edge.seam = False
+        sewn += len(pairs)
+        update(ob)
+    return sewn
 
 
 class UV_OT_maya_sew(UVOperator, bpy.types.Operator):
-    """Sew the selected UV edges together (Maya: Sew / Move and Sew)"""
+    """Sew the selected UV edges to the matching edges of the other shell
+    (Maya: Sew / Move and Sew). Select the edges on one side only"""
     bl_idname = "uv.maya_sew"
     bl_label = "Sew"
 
     move: bpy.props.BoolProperty(
-        name="Move", description="Move the smaller shell to the other one instead of "
-                                 "meeting in the middle", default=False)
+        name="Move", description="Move the smaller shell onto the other one (keeping its "
+                                 "shape) instead of meeting in the middle", default=False)
 
     def execute(self, context):
-        # Stitch draws its preview in the region it runs in and crashes without
-        # one, so run it in the UV editor's main region, not the sidebar.
-        region = _editor_region(context)
-        if region is None:
-            self.report({'WARNING'}, "Run this from the UV Editor")
+        if not sew(context, self.move):
+            self.report({'WARNING'}, "Select UV edges on a shell border (one side is enough)")
             return {'CANCELLED'}
-        ts = context.scene.tool_settings
-        edge_mode = (ts.mesh_select_mode[1] if is_sync(context) else ts.uv_select_mode == 'EDGE')
-        with context.temp_override(region=region):
-            bpy.ops.uv.stitch(
-                'EXEC_DEFAULT', mode='EDGE' if edge_mode else 'VERTEX',
-                snap_islands=self.move, midpoint_snap=not self.move, clear_seams=True)
         return {'FINISHED'}
 
 

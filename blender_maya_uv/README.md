@@ -59,7 +59,7 @@ Maya と同じく、UV / Edge / Face に切り替えると **シェル選択モ�
 | Tools | Select / Move / Rotate / Scale / Cut（Rip）/ Grab / Unfold（Relax ブラシ）/ Pinch |
 | Transform | Pivot（Selection / Shell / UV Origin / 2D Cursor）、矢印で移動、回転、拡大縮小（UV / U / V）、Flip、Align（Shell ピボットならシェル単位）、Snap to Tile（3×3）、Straighten UVs / U / V（角度の許容値つき）、**Edge Horizontal / Edge Vertical**（選んだ辺が水平 / 垂直になるようシェルを回転）、Orient Shells、Match UVs、Snap to Pixels、Randomize、Normalize、Unitize |
 | Create | Planar X / Y / Z / Best、Camera-based、Cylindrical、Spherical、Cube、Automatic |
-| Cut and Sew | Cut、Sew、Move and Sew、Split、Create Shell、Create Shell (Grid)、Seams from Shells、Clear Seams、Auto Seams（角度指定） |
+| Cut and Sew | Cut、**Sew**（選んだ辺を、3D で同じ辺になっている相手シェルの辺と中間点でつなぐ。片側を選ぶだけでよい）、**Move and Sew**（小さいほうのシェルを形を保ったまま回転・移動・拡大縮小して相手に合わせてからつなぐ）、Split、Create Shell、Create Shell (Grid)、Seams from Shells、Clear Seams、Auto Seams（角度指定） |
 | Unfold | **Unfold**（シェルの位置・大きさ・向きを保ったまま展開。U だけ / V だけも可）、Optimize、Straighten Shell、Unfold Brush |
 | Arrange and Layout | Layout（余白・回転・拡大・形状）、Distribute U / V（間隔指定可）、Stack、Stack & Orient、Stack Similar、Unstack、Gather Shells、Normalize Scale |
 | Measure | Map Size、Texel Density の Get / Set、選択の計測（シェル数、UV 面積、3D 面積、テクセル密度、2 点間の距離と角度、辺の長さ） |
