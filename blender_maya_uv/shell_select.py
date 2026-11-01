@@ -10,7 +10,7 @@ import bpy
 import bmesh
 from bpy.app.handlers import persistent
 
-from .common import islands
+from .common import BASELINE_PREFIXES, islands, modal_editing
 
 
 # mesh pointer -> (mode, frozenset of selected element indices) after the last update
@@ -161,7 +161,7 @@ def grow_to_shells(ob, ts, replace=False):
 
 @persistent
 def on_depsgraph_update(scene, depsgraph=None):
-    if _state["busy"]:
+    if _state["busy"] or modal_editing():
         return
     ts = scene.tool_settings
     op = _new_operator()
@@ -175,8 +175,9 @@ def on_depsgraph_update(scene, depsgraph=None):
     if not objects:
         _prev.clear()
         return
-    if op is not None and op[0].startswith("UV_OT_"):
-        # Selected in the UV editor: Blender already selects whole islands there.
+    if op is not None and op[0].startswith(("UV_OT_",) + BASELINE_PREFIXES):
+        # Selected in the UV editor (Blender already selects whole islands there),
+        # or UVs / vertices were just moved: take the selection as it is.
         for ob in objects:
             remember(ob, ts)
         return

@@ -14,7 +14,7 @@ import bmesh
 from bpy.app.handlers import persistent
 
 from . import shell_select
-from .common import addon_prefs, edit_objects
+from .common import addon_prefs, edit_objects, modal_editing
 
 
 _state = {"snap": None, "busy": False}
@@ -60,7 +60,7 @@ def clear_selection(context, mesh):
 
 
 def check(context):
-    if _state["busy"] or context.mode != 'EDIT_MESH':
+    if _state["busy"] or context.mode != 'EDIT_MESH' or modal_editing():
         return
     scene = context.scene
     s = getattr(scene, "maya_uv", None)

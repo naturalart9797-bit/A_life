@@ -11,7 +11,7 @@ from bpy.app.handlers import persistent
 from mathutils import Vector, kdtree
 
 from .common import (
-    is_sync, visible_faces, loop_selected, loop_edge_selected, face_selected,
+    BASELINE_PREFIXES, is_sync, modal_editing, visible_faces, loop_selected, loop_edge_selected, face_selected,
     set_selection, update,
 )
 
@@ -158,24 +158,32 @@ def _elements(bm, keys, mode):
     return [bm.faces[fi].loops[i] for fi, i in keys]
 
 
-def _new_replace_click():
+def _new_operator():
+    """bl_idname and properties of an operator that ran since the last call, else None."""
     wm = bpy.context.window_manager
     if wm is None or not wm.operators:
-        return False
+        return None
     op = wm.operators[-1]
     ptr = op.as_pointer()
     if ptr == _state["last_op"]:
-        return False
+        return None
     _state["last_op"] = ptr
-    if op.bl_idname not in {"UV_OT_select", "VIEW3D_OT_select"}:
+    return op.bl_idname, op.properties
+
+
+def _is_replace_click(op):
+    if op is None or op[0] not in {"UV_OT_select", "VIEW3D_OT_select"}:
         return False
-    p = op.properties
+    p = op[1]
     return not (getattr(p, "extend", False) or getattr(p, "deselect", False)
                 or getattr(p, "toggle", False))
 
 
-def symmetrize(context, ob, settings, replace=False):
-    """Mirror the selection change of ob since the last call. Returns True if changed."""
+def symmetrize(context, ob, settings, replace=False, baseline_only=False):
+    """Mirror the selection change of ob since the last call. Returns True if changed.
+
+    baseline_only: just take the current selection as the baseline.
+    """
     me = ob.data
     bm = bmesh.from_edit_mesh(me)
     uv = bm.loops.layers.uv.active
@@ -192,7 +200,7 @@ def symmetrize(context, ob, settings, replace=False):
         added, removed = current, frozenset()
     else:
         added, removed = current - prev[1], prev[1] - current
-    if not added and not removed:
+    if baseline_only or (not added and not removed):
         _prev[key] = ((mode, len(bm.faces)), current)
         return False
 
@@ -226,7 +234,7 @@ def symmetrize(context, ob, settings, replace=False):
 
 @persistent
 def on_depsgraph_update(scene, depsgraph=None):
-    if _state["busy"]:
+    if _state["busy"] or modal_editing():
         return
     s = getattr(scene, "maya_uv", None)
     if s is None or s.uv_symmetry == 'OFF':
@@ -239,12 +247,14 @@ def on_depsgraph_update(scene, depsgraph=None):
     if not objects:
         _prev.clear()
         return
-    replace = _new_replace_click()
+    op = _new_operator()
+    replace = _is_replace_click(op)
+    baseline = op is not None and op[0].startswith(BASELINE_PREFIXES)
     _state["busy"] = True
     try:
         changed = False
         for ob in objects:
-            changed |= symmetrize(context, ob, s, replace)
+            changed |= symmetrize(context, ob, s, replace, baseline)
     finally:
         _state["busy"] = False
     if changed and context.screen:

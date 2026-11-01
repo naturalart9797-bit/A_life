@@ -9,7 +9,7 @@ from bpy.app.handlers import persistent
 from . import mode_watch
 from .common import (
     UVOperator, EPS, settings, is_sync, edit_meshes, update, islands, selected_islands,
-    is_border_loop, uv_area, set_selection, op_available, addon_prefs,
+    is_border_loop, uv_area, set_selection, op_available, addon_prefs, modal_editing,
 )
 
 
@@ -207,6 +207,8 @@ def _history_snapshot(bm):
 
 @persistent
 def track_uv_active(scene, depsgraph=None):
+    if modal_editing():
+        return
     view_layer = bpy.context.view_layer
     ob = view_layer.objects.active if view_layer else None
     if ob is None or ob.type != 'MESH' or ob.mode != 'EDIT':

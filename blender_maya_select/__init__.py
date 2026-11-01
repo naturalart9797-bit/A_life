@@ -9,7 +9,7 @@
 bl_info = {
     "name": "Maya Style Select",
     "author": "naturalart9797",
-    "version": (1, 1, 1),
+    "version": (1, 1, 2),
     "blender": (3, 0, 0),
     "location": "View3D > Sidebar (N) > Maya",
     "description": "Maya-like symmetry selection, double-click loop and Shift + double-click path select",
@@ -167,29 +167,52 @@ def _elements(bm, mode):
 # Symmetry: keep selection mirrored
 # ---------------------------------------------------------------------------
 
-def _last_op_is_replace_select():
-    """True when a new click-select (without extend/deselect/toggle) just ran.
+# Interactive operators that keep pointers into the edit mesh while they run
+# (transform, rip, UV sculpt, loop cut...). Changing the selection or calling
+# bmesh.update_edit_mesh() under them can crash Blender.
+_MODAL_PREFIXES = ("TRANSFORM_OT_", "UV_OT_", "SCULPT_OT_", "MESH_OT_", "VIEW3D_OT_", "IMAGE_OT_")
+
+
+def _modal_editing():
+    wm = bpy.context.window_manager
+    for win in getattr(wm, "windows", ()):
+        for op in getattr(win, "modal_operators", ()):
+            if op.bl_idname.startswith(_MODAL_PREFIXES):
+                return True
+    return False
+
+
+def _new_operator():
+    """bl_idname and properties of an operator that ran since the last call, else None."""
+    wm = bpy.context.window_manager
+    if wm is None or not wm.operators:
+        return None
+    op = wm.operators[-1]
+    ptr = op.as_pointer()
+    if ptr == _state["last_op"]:
+        return None
+    _state["last_op"] = ptr
+    return op.bl_idname, op.properties
+
+
+def _is_replace_select(op):
+    """True for a click-select without extend/deselect/toggle.
 
     "Click an already selected element" and "Ctrl/Shift deselect its mirror"
     produce the same selection diff, so look at the operator to tell them apart.
     """
-    wm = bpy.context.window_manager
-    if wm is None or not wm.operators:
+    if op is None or op[0] != "VIEW3D_OT_select":
         return False
-    op = wm.operators[-1]
-    ptr = op.as_pointer()
-    if ptr == _state["last_op"]:
-        return False
-    _state["last_op"] = ptr
-    if op.bl_idname != "VIEW3D_OT_select":
-        return False
-    p = op.properties
+    p = op[1]
     return not (getattr(p, "extend", False) or getattr(p, "deselect", False)
                 or getattr(p, "toggle", False))
 
 
-def symmetrize_selection(ob, settings, mode, replace=False):
-    """Mirror the selection change since the last call. Returns True if changed."""
+def symmetrize_selection(ob, settings, mode, replace=False, baseline_only=False):
+    """Mirror the selection change since the last call. Returns True if changed.
+
+    baseline_only: just take the current selection as the baseline.
+    """
     me = ob.data
     bm = bmesh.from_edit_mesh(me)
     vmap, emap, fmap = _get_maps(me, bm, settings)
@@ -210,6 +233,8 @@ def symmetrize_selection(ob, settings, mode, replace=False):
         added = current - prev[1]
         removed = prev[1] - current
 
+    if baseline_only:
+        added = removed = frozenset()
     to_select = {mirror[i] for i in added if i in mirror}
     to_deselect = {mirror[i] for i in removed if i in mirror} - added - to_select
     to_select -= current
@@ -236,7 +261,7 @@ def symmetrize_selection(ob, settings, mode, replace=False):
 
 @persistent
 def _on_depsgraph_update(scene, depsgraph=None):
-    if _state["busy"]:
+    if _state["busy"] or _modal_editing():
         return
     settings = getattr(scene, "maya_select", None)
     if settings is None or not settings.symmetry:
@@ -248,12 +273,15 @@ def _on_depsgraph_update(scene, depsgraph=None):
         return
 
     mode = _primary_mode(scene.tool_settings)
-    replace = _last_op_is_replace_select()
+    op = _new_operator()
+    replace = _is_replace_select(op)
+    # After moving vertices / UVs the selection is taken as it is.
+    baseline = op is not None and op[0].startswith("TRANSFORM_OT_")
     _state["busy"] = True
     try:
         changed = False
         for ob in objects:
-            changed |= symmetrize_selection(ob, settings, mode, replace)
+            changed |= symmetrize_selection(ob, settings, mode, replace, baseline)
     finally:
         _state["busy"] = False
 

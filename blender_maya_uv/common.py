@@ -161,6 +161,24 @@ def settings(context):
     return context.scene.maya_uv
 
 
+# Interactive operators that keep pointers into the edit mesh while they run
+# (transform, rip, UV sculpt, loop cut...). Changing the selection or calling
+# bmesh.update_edit_mesh() under them can crash Blender.
+_MODAL_PREFIXES = ("TRANSFORM_OT_", "UV_OT_", "SCULPT_OT_", "MESH_OT_", "VIEW3D_OT_", "IMAGE_OT_")
+# Operators after which the selection is taken as-is (nothing to grow or mirror).
+BASELINE_PREFIXES = ("TRANSFORM_OT_",)
+
+
+def modal_editing():
+    """True while an interactive mesh / UV operator is running."""
+    wm = bpy.context.window_manager
+    for win in getattr(wm, "windows", ()):
+        for op in getattr(win, "modal_operators", ()):
+            if op.bl_idname.startswith(_MODAL_PREFIXES):
+                return True
+    return False
+
+
 def addon_prefs(context):
     addon = context.preferences.addons.get(__package__)
     return addon.preferences if addon else None
