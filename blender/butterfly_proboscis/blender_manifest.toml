@@ -1,0 +1,13 @@
+schema_version = "1.0.0"
+
+id = "butterfly_proboscis"
+version = "1.0.0"
+name = "Butterfly Proboscis"
+tagline = "Procedural coiled butterfly proboscis that can uncoil for drinking"
+maintainer = "naturalart9797-bit"
+type = "add-on"
+
+blender_version_min = "4.2.0"
+
+license = ["SPDX:GPL-3.0-or-later"]
+tags = ["Add Mesh", "Animation", "Geometry Nodes"]
