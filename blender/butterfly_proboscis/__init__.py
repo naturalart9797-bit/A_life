@@ -31,7 +31,7 @@ from bpy.types import Operator, Panel
 
 GROUP_NAME = "Butterfly Proboscis"
 GROUP_TAG = "butterfly_proboscis_version"
-GROUP_VERSION = 3
+GROUP_VERSION = 4
 MATERIAL_NAME = "Butterfly Proboscis"
 
 # Attributes written by the node group (used for automatic UV seams).
@@ -261,8 +261,8 @@ def _build_node_group():
                "先端の穴の深さ（先端の太さに対する倍率）")
     _new_input(ng, "Tip Lip", "NodeSocketFloat", 0.6, 0.0, 3.0, None,
                "穴のふちの盛り上がり")
-    _new_input(ng, "Profile Resolution", "NodeSocketInt", 16, 4, 256, None,
-               "断面の分割数（4 の倍数に丸められます）")
+    _new_input(ng, "Profile Resolution", "NodeSocketInt", 16, 8, 256, None,
+               "断面の分割数（左右対称にするため 8 の倍数に丸められます）")
     _new_input(ng, "Material", "NodeSocketMaterial", None, None, None, None, "マテリアル")
     _new_input(ng, "Use Edit Mesh", "NodeSocketBool", False, None, None, None,
                "オブジェクトのメッシュ（Edit モードで編集した UV など）を使い、"
@@ -321,10 +321,11 @@ def _build_node_group():
     b.feed(pos.inputs["Z"], z)
 
     # --- tube -----------------------------------------------------------
-    # profile vertex count M, rounded to a multiple of 4 so the end caps can be
-    # filled with a quad grid (outer ring of a k x k grid has 4 * (k - 1) verts)
-    prof_m = b.mul(b.maximum(b.math("ROUND", b.div(I["Profile Resolution"], 4.0)), 1.0),
-                   4.0)
+    # profile vertex count M, rounded to a multiple of 8: the end caps are filled
+    # with a k x k quad grid (outer ring has 4 * (k - 1) verts) and an odd k
+    # keeps that grid mirror-symmetric about the YZ plane.
+    prof_m = b.mul(b.maximum(b.math("ROUND", b.div(I["Profile Resolution"], 8.0)), 1.0),
+                   8.0)
     grid_k = b.add(b.div(prof_m, 4.0), 1.0)
 
     line = b.node("GeometryNodeCurvePrimitiveLine")
@@ -340,6 +341,22 @@ def _build_node_group():
     b.feed(set_radius.inputs["Radius"], taper)
     curve = set_radius.outputs["Curve"]
 
+    # Pin the profile frame: normal = world X (perpendicular to the YZ plane the
+    # proboscis lives in). Profile vertex j then sits at cos(a)*X + sin(a)*B,
+    # a = 2*pi*j/M, which makes every ring mirror-symmetric about X = 0.
+    set_normal = b.node("GeometryNodeSetCurveNormal")
+    if "Mode" in set_normal.inputs:          # Blender 4.5+ (menu socket)
+        set_normal.inputs["Mode"].default_value = "Free"
+    else:
+        try:
+            set_normal.mode = "FREE"
+        except (AttributeError, TypeError):
+            pass
+    if "Normal" in set_normal.inputs:
+        set_normal.inputs["Normal"].default_value = (1.0, 0.0, 0.0)
+    b.feed(set_normal.inputs["Curve"], curve)
+    curve = set_normal.outputs["Curve"]
+
     profile = b.node("GeometryNodeCurvePrimitiveCircle")
     b.feed(profile.inputs["Resolution"], prof_m)
     profile.inputs["Radius"].default_value = 1.0
@@ -352,9 +369,10 @@ def _build_node_group():
     if "Scale" in to_mesh.inputs:  # Blender 4.2+: explicit profile scale
         b.feed(to_mesh.inputs["Scale"], taper)
     tube = to_mesh.outputs["Mesh"]
+    # UV seam along the symmetry plane, on the inner side of the coil (a = 90 deg)
     tube_seam = b.math("COMPARE", b.math("FLOORED_MODULO",
                                          b.node("GeometryNodeInputIndex").outputs["Index"],
-                                         prof_m), 0.0, 0.5)
+                                         prof_m), b.div(prof_m, 4.0), 0.5)
 
     # --- end frames, measured from the tube's first / last vertex ring ----
     # Curve to Mesh stores ring i (curve point i) as vertices i*M .. i*M+M-1,
@@ -401,10 +419,6 @@ def _build_node_group():
         along = b.add(b.mul(b.mul(u, -1.0), b.math("SINE", side_ang)),
                       b.mul(v, b.math("COSINE", side_ang)))
         ang = b.add(side_ang, b.mul(b.div(along, ring), math.pi / 4))
-        # even k: ring vertices sit half a step off angle 0 -> rotate back
-        half_step = b.mul(b.sub(1.0, b.math("MODULO", grid_k, 2.0)),
-                          b.div(math.pi, prof_m))
-        ang = b.sub(ang, half_step)
         return grid.outputs["Mesh"], ring, ang
 
     hole_r = b.math("MINIMUM", b.maximum(I["Tip Hole Radius"], 0.05), 0.95)
@@ -435,7 +449,7 @@ def _build_node_group():
                      b.mul(w_r, b.math("COSINE", w_ang)),
                      b.mul(w_r, b.math("SINE", w_ang)), w_z)
 
-    wall_seam = b.math("LESS_THAN", b.math("ABSOLUTE", w_ang),
+    wall_seam = b.math("LESS_THAN", b.math("ABSOLUTE", b.sub(w_ang, math.pi / 2)),
                        b.div(math.pi * 0.5, prof_m))
 
     disk, d_ring, d_ang = quad_disk()
