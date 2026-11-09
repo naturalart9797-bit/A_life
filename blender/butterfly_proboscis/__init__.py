@@ -31,8 +31,13 @@ from bpy.types import Operator, Panel
 
 GROUP_NAME = "Butterfly Proboscis"
 GROUP_TAG = "butterfly_proboscis_version"
-GROUP_VERSION = 2
+GROUP_VERSION = 3
 MATERIAL_NAME = "Butterfly Proboscis"
+
+# Attributes written by the node group (used for automatic UV seams).
+ATTR_PART = "proboscis_part"   # face: 0 tube, 1 tip lip/wall, 2 tip bottom, 3 base cap
+ATTR_SEAM = "proboscis_seam"   # point: on the lengthwise seam line (angle 0)
+EDIT_VERTS_KEY = "proboscis_edit_topology"
 
 # Face winding of the generated cap parts, so their normals match the tube.
 FLIP_TIP_WALL = True
@@ -153,6 +158,24 @@ class _Builder:
         self.feed(n.inputs["Position"], position)
         return n.outputs["Geometry"]
 
+    def store(self, geometry, name, value, data_type, domain):
+        n = self.node("GeometryNodeStoreNamedAttribute")
+        n.data_type = data_type
+        n.domain = domain
+        self.feed(n.inputs["Geometry"], geometry)
+        self.feed(n.inputs["Name"], name)
+        sock = next(x for x in n.inputs if x.name == "Value" and x.enabled)
+        self.feed(sock, value)
+        return n.outputs["Geometry"]
+
+    def switch(self, condition, if_false, if_true):
+        n = self.node("GeometryNodeSwitch")
+        n.input_type = "GEOMETRY"
+        self.feed(n.inputs["Switch"], condition)
+        self.feed(next(x for x in n.inputs if x.name == "False" and x.enabled), if_false)
+        self.feed(next(x for x in n.inputs if x.name == "True" and x.enabled), if_true)
+        return next(x for x in n.outputs if x.enabled)
+
     def flip(self, mesh):
         n = self.node("GeometryNodeFlipFaces")
         self.feed(n.inputs["Mesh"], mesh)
@@ -201,6 +224,7 @@ def _build_node_group():
     ng[GROUP_TAG] = GROUP_VERSION
     ng["is_butterfly_proboscis"] = True
 
+    ng.interface.new_socket("Geometry", in_out="INPUT", socket_type="NodeSocketGeometry")
     _new_input(ng, "Uncoil", "NodeSocketFloat", 0.0, 0.0, 1.0, "FACTOR",
                "0 = くるくる巻いた状態 / 1 = まっすぐ伸びた状態（キーフレーム可）")
     _new_input(ng, "Length", "NodeSocketFloat", 1.0, 0.001, 1000.0, "DISTANCE",
@@ -240,6 +264,9 @@ def _build_node_group():
     _new_input(ng, "Profile Resolution", "NodeSocketInt", 16, 4, 256, None,
                "断面の分割数（4 の倍数に丸められます）")
     _new_input(ng, "Material", "NodeSocketMaterial", None, None, None, None, "マテリアル")
+    _new_input(ng, "Use Edit Mesh", "NodeSocketBool", False, None, None, None,
+               "オブジェクトのメッシュ（Edit モードで編集した UV など）を使い、"
+               "頂点位置だけを動かす。Make Editable で自動的に ON になります")
     ng.interface.new_socket("Geometry", in_out="OUTPUT", socket_type="NodeSocketGeometry")
 
     b = _Builder(ng)
@@ -325,6 +352,9 @@ def _build_node_group():
     if "Scale" in to_mesh.inputs:  # Blender 4.2+: explicit profile scale
         b.feed(to_mesh.inputs["Scale"], taper)
     tube = to_mesh.outputs["Mesh"]
+    tube_seam = b.math("COMPARE", b.math("FLOORED_MODULO",
+                                         b.node("GeometryNodeInputIndex").outputs["Index"],
+                                         prof_m), 0.0, 0.5)
 
     # --- end frames, measured from the tube's first / last vertex ring ----
     # Curve to Mesh stores ring i (curve point i) as vertices i*M .. i*M+M-1,
@@ -405,6 +435,9 @@ def _build_node_group():
                      b.mul(w_r, b.math("COSINE", w_ang)),
                      b.mul(w_r, b.math("SINE", w_ang)), w_z)
 
+    wall_seam = b.math("LESS_THAN", b.math("ABSOLUTE", w_ang),
+                       b.div(math.pi * 0.5, prof_m))
+
     disk, d_ring, d_ang = quad_disk()
     d_r = b.mul(d_ring, hole_r)
     tip_bottom = place(disk, tip_frame,
@@ -426,8 +459,14 @@ def _build_node_group():
     if FLIP_BASE_CAP:
         base_cap = b.flip(base_cap)
 
+    tube = b.store(tube, ATTR_SEAM, tube_seam, "BOOLEAN", "POINT")
+    tip_wall = b.store(tip_wall, ATTR_SEAM, wall_seam, "BOOLEAN", "POINT")
+    parts = []
+    for part_id, geo in enumerate((tube, tip_wall, tip_bottom, base_cap)):
+        parts.append(b.store(geo, ATTR_PART, part_id, "INT", "FACE"))
+
     join = b.node("GeometryNodeJoinGeometry")
-    for geo in (tube, tip_wall, tip_bottom, base_cap):
+    for geo in parts:
         b.feed(join.inputs["Geometry"], geo)
 
     merge = b.node("GeometryNodeMergeByDistance")
@@ -441,7 +480,34 @@ def _build_node_group():
     set_mat = b.node("GeometryNodeSetMaterial")
     b.feed(set_mat.inputs["Geometry"], smooth.outputs["Geometry"])
     b.feed(set_mat.inputs["Material"], I["Material"])
-    b.feed(go.inputs["Geometry"], set_mat.outputs["Geometry"])
+    generated = set_mat.outputs["Geometry"]
+
+    # --- editable mode: keep the object's own mesh (UVs, seams, materials,
+    # vertex groups ...) and only move its vertices onto the generated shape.
+    # Works while the topology matches; otherwise the mesh is shown unchanged.
+    def counts(geo):
+        n = b.node("GeometryNodeAttributeDomainSize")
+        n.component = "MESH"
+        b.feed(n.inputs["Geometry"], geo)
+        return n.outputs["Point Count"], n.outputs["Face Count"]
+
+    gen_pts, gen_faces = counts(merge.outputs["Geometry"])
+    in_pts, in_faces = counts(I["Geometry"])
+    same = b.mul(b.math("COMPARE", gen_pts, in_pts, 0.5),
+                 b.math("COMPARE", gen_faces, in_faces, 0.5))
+    same_bool = b.node("FunctionNodeCompare")
+    same_bool.data_type = "FLOAT"
+    same_bool.operation = "GREATER_THAN"
+    b.feed(same_bool.inputs["A"], same)
+    same_bool.inputs["B"].default_value = 0.5
+
+    deformed = b.set_position(
+        I["Geometry"],
+        b.sample_position(merge.outputs["Geometry"],
+                          b.node("GeometryNodeInputIndex").outputs["Index"]))
+    edited = b.switch(same_bool.outputs["Result"], I["Geometry"], deformed)
+    result = b.switch(I["Use Edit Mesh"], generated, edited)
+    b.feed(go.inputs["Geometry"], result)
 
     b.layout()
     return ng
@@ -568,6 +634,7 @@ class OBJECT_OT_add_butterfly_proboscis(Operator):
 
         ng = get_node_group()
         mesh = bpy.data.meshes.new("Proboscis")
+        mesh.materials.append(get_material())
         obj = bpy.data.objects.new("Proboscis", mesh)
         context.collection.objects.link(obj)
         obj.location = context.scene.cursor.location
@@ -652,6 +719,148 @@ class OBJECT_OT_proboscis_drink_keys(Operator):
         return {"FINISHED"}
 
 
+def _evaluated_generated_mesh(context, obj, mod):
+    """Return a new Mesh datablock with the procedural shape at its current pose."""
+    set_input(mod, "Use Edit Mesh", False)
+    obj.update_tag()
+    depsgraph = context.evaluated_depsgraph_get()
+    depsgraph.update()
+    eval_obj = obj.evaluated_get(depsgraph)
+    return bpy.data.meshes.new_from_object(eval_obj, preserve_all_data_layers=True,
+                                           depsgraph=depsgraph)
+
+
+def _clean_material_slots(mesh):
+    """Drop empty / unused material slots and remap face material indices."""
+    used = {p.material_index for p in mesh.polygons}
+    keep = [i for i, m in enumerate(mesh.materials) if m is not None and i in used]
+    if len(keep) == len(mesh.materials):
+        return
+    remap = {old: new for new, old in enumerate(keep)}
+    indices = [remap.get(p.material_index, 0) for p in mesh.polygons]
+    mats = [mesh.materials[i] for i in keep]
+    mesh.materials.clear()
+    for m in mats:
+        mesh.materials.append(m)
+    for p, i in zip(mesh.polygons, indices):
+        p.material_index = i
+
+
+def _replace_mesh(obj, mesh):
+    _clean_material_slots(mesh)
+    old = obj.data
+    mesh.name = old.name
+    obj.data = mesh
+    if old.users == 0:
+        bpy.data.meshes.remove(old)
+
+
+def mark_proboscis_seams(mesh):
+    """Seams between tube / tip / base parts plus one lengthwise line."""
+    part = mesh.attributes.get(ATTR_PART)
+    seam = mesh.attributes.get(ATTR_SEAM)
+    if part is None or seam is None:
+        return False
+    face_part = [d.value for d in part.data]
+    on_line = [d.value for d in seam.data]
+    edge_faces = {}
+    for poly in mesh.polygons:
+        for key in poly.edge_keys:
+            edge_faces.setdefault(key, []).append(face_part[poly.index])
+    for edge in mesh.edges:
+        a, b = edge.vertices
+        fp = edge_faces.get(edge.key, [])
+        edge.use_seam = (len(set(fp)) > 1
+                         or (on_line[a] and on_line[b] and all(p in (0, 1) for p in fp)))
+    return True
+
+
+def is_edit_mesh_mode(mod):
+    return bool(get_input(mod, "Use Edit Mesh"))
+
+
+_TOPOLOGY_INPUTS = ("Resolution", "Profile Resolution")
+
+
+def _topology_signature(obj, mod):
+    return [len(obj.data.vertices), len(obj.data.polygons)] + [
+        int(get_input(mod, n) or 0) for n in _TOPOLOGY_INPUTS]
+
+
+def edit_mesh_matches(obj, mod):
+    stored = obj.get(EDIT_VERTS_KEY)
+    return stored is not None and list(stored) == _topology_signature(obj, mod)
+
+
+class OBJECT_OT_proboscis_make_editable(Operator):
+    """口吻を実体のメッシュにして Edit モードで編集可能にする（Uncoil アニメーションは維持）"""
+    bl_idname = "object.proboscis_make_editable"
+    bl_label = "Make Editable (Keep Animation)"
+    bl_options = {"REGISTER", "UNDO"}
+
+    auto_uv: BoolProperty(name="Auto Seams + UV Unwrap",
+                          description="シームを自動で入れて UV 展開する",
+                          default=True)
+
+    @classmethod
+    def poll(cls, context):
+        obj = context.active_object
+        return (obj is not None and obj.type == "MESH"
+                and find_proboscis_modifier(obj) is not None)
+
+    def execute(self, context):
+        obj = context.active_object
+        mod = find_proboscis_modifier(obj)
+        if obj.mode != "OBJECT":
+            bpy.ops.object.mode_set(mode="OBJECT")
+
+        mesh = _evaluated_generated_mesh(context, obj, mod)
+        _replace_mesh(obj, mesh)
+        obj[EDIT_VERTS_KEY] = _topology_signature(obj, mod)
+        set_input(mod, "Use Edit Mesh", True)
+
+        if self.auto_uv and mark_proboscis_seams(mesh):
+            if not mesh.uv_layers:
+                mesh.uv_layers.new(name="UVMap")
+            bpy.ops.object.mode_set(mode="EDIT")
+            bpy.ops.mesh.select_all(action="SELECT")
+            bpy.ops.uv.unwrap(method="ANGLE_BASED", margin=0.002)
+            bpy.ops.object.mode_set(mode="OBJECT")
+
+        obj.update_tag()
+        self.report({"INFO"}, "Edit モードで UV・マテリアル等を編集できます")
+        return {"FINISHED"}
+
+
+class OBJECT_OT_proboscis_apply_mesh(Operator):
+    """今の形で普通のメッシュに確定する（モディファイアを外す / アニメーションは無くなる）"""
+    bl_idname = "object.proboscis_apply_mesh"
+    bl_label = "Apply as Mesh (Freeze)"
+    bl_options = {"REGISTER", "UNDO"}
+
+    @classmethod
+    def poll(cls, context):
+        return find_proboscis_modifier(context.active_object) is not None
+
+    def execute(self, context):
+        obj = context.active_object
+        mod = find_proboscis_modifier(obj)
+        if obj.mode != "OBJECT":
+            bpy.ops.object.mode_set(mode="OBJECT")
+        obj.update_tag()
+        depsgraph = context.evaluated_depsgraph_get()
+        depsgraph.update()
+        mesh = bpy.data.meshes.new_from_object(obj.evaluated_get(depsgraph),
+                                               preserve_all_data_layers=True,
+                                               depsgraph=depsgraph)
+        obj.modifiers.remove(mod)
+        _replace_mesh(obj, mesh)
+        mark_proboscis_seams(mesh)
+        if EDIT_VERTS_KEY in obj:
+            del obj[EDIT_VERTS_KEY]
+        return {"FINISHED"}
+
+
 # --------------------------------------------------------------------------
 # UI
 # --------------------------------------------------------------------------
@@ -701,6 +910,21 @@ class VIEW3D_PT_butterfly_proboscis(Panel):
 
         layout.operator(OBJECT_OT_proboscis_drink_keys.bl_idname, icon="MOD_FLUID")
 
+        box = layout.box()
+        box.label(text="Edit Mode", icon="EDITMODE_HLT")
+        if is_edit_mesh_mode(mod):
+            if edit_mesh_matches(obj, mod):
+                box.label(text="編集可能（UV・マテリアル等）", icon="CHECKMARK")
+            else:
+                box.label(text="頂点数・分割数が変わったので形が動きません", icon="ERROR")
+                box.label(text="元に戻すか Rebuild してください")
+            box.operator(OBJECT_OT_proboscis_make_editable.bl_idname,
+                         text="Rebuild Mesh（UV はリセット）", icon="FILE_REFRESH")
+            box.prop(*_input_ref(mod, "Use Edit Mesh")[:2], text="Use Edit Mesh")
+        else:
+            box.operator(OBJECT_OT_proboscis_make_editable.bl_idname, icon="UV")
+        box.operator(OBJECT_OT_proboscis_apply_mesh.bl_idname, icon="CHECKMARK")
+
 
 def menu_func(self, context):
     self.layout.operator(OBJECT_OT_add_butterfly_proboscis.bl_idname, icon="CURVE_PATH")
@@ -709,6 +933,8 @@ def menu_func(self, context):
 _classes = (
     OBJECT_OT_add_butterfly_proboscis,
     OBJECT_OT_proboscis_drink_keys,
+    OBJECT_OT_proboscis_make_editable,
+    OBJECT_OT_proboscis_apply_mesh,
     VIEW3D_PT_butterfly_proboscis,
 )
 
