@@ -31,8 +31,13 @@ from bpy.types import Operator, Panel
 
 GROUP_NAME = "Butterfly Proboscis"
 GROUP_TAG = "butterfly_proboscis_version"
-GROUP_VERSION = 1
+GROUP_VERSION = 2
 MATERIAL_NAME = "Butterfly Proboscis"
+
+# Face winding of the generated cap parts, so their normals match the tube.
+FLIP_TIP_WALL = True
+FLIP_TIP_BOTTOM = False
+FLIP_BASE_CAP = True
 
 
 # --------------------------------------------------------------------------
@@ -108,6 +113,51 @@ class _Builder:
         self.feed(in_sock, value)
         return out_sock
 
+    def vmath(self, op, a, b=None, scale=None):
+        n = self.node("ShaderNodeVectorMath", operation=op)
+        self.feed(n.inputs[0], a)
+        self.feed(n.inputs[1], b)
+        if scale is not None:
+            self.feed(n.inputs["Scale"], scale)
+        if op in {"LENGTH", "DOT_PRODUCT", "DISTANCE"}:
+            return n.outputs["Value"]
+        return n.outputs["Vector"]
+
+    def xyz(self, x=None, y=None, z=None):
+        n = self.node("ShaderNodeCombineXYZ")
+        self.feed(n.inputs["X"], x)
+        self.feed(n.inputs["Y"], y)
+        self.feed(n.inputs["Z"], z)
+        return n.outputs["Vector"]
+
+    def position(self):
+        return self.node("GeometryNodeInputPosition").outputs["Position"]
+
+    def separate(self, vec):
+        n = self.node("ShaderNodeSeparateXYZ")
+        self.feed(n.inputs[0], vec)
+        return n.outputs["X"], n.outputs["Y"], n.outputs["Z"]
+
+    def sample_position(self, geometry, index):
+        n = self.node("GeometryNodeSampleIndex")
+        n.data_type = "FLOAT_VECTOR"
+        n.domain = "POINT"
+        self.feed(n.inputs["Geometry"], geometry)
+        self.feed(n.inputs["Value"], self.position())
+        self.feed(n.inputs["Index"], index)
+        return n.outputs["Value"]
+
+    def set_position(self, geometry, position):
+        n = self.node("GeometryNodeSetPosition")
+        self.feed(n.inputs["Geometry"], geometry)
+        self.feed(n.inputs["Position"], position)
+        return n.outputs["Geometry"]
+
+    def flip(self, mesh):
+        n = self.node("GeometryNodeFlipFaces")
+        self.feed(n.inputs["Mesh"], mesh)
+        return n.outputs["Mesh"]
+
     def layout(self):
         """Very small auto layout: columns by longest path from the inputs."""
         depth = {n: 0 for n in self.nodes}
@@ -181,8 +231,14 @@ def _build_node_group():
                "先端の太さ（半径）")
     _new_input(ng, "Resolution", "NodeSocketInt", 240, 8, 5000, None,
                "長さ方向の分割数")
-    _new_input(ng, "Profile Resolution", "NodeSocketInt", 12, 3, 256, None,
-               "断面の分割数")
+    _new_input(ng, "Tip Hole Radius", "NodeSocketFloat", 0.5, 0.05, 0.95, "FACTOR",
+               "先端の穴の半径（先端の太さに対する割合）")
+    _new_input(ng, "Tip Hole Depth", "NodeSocketFloat", 0.8, 0.02, 20.0, None,
+               "先端の穴の深さ（先端の太さに対する倍率）")
+    _new_input(ng, "Tip Lip", "NodeSocketFloat", 0.6, 0.0, 3.0, None,
+               "穴のふちの盛り上がり")
+    _new_input(ng, "Profile Resolution", "NodeSocketInt", 16, 4, 256, None,
+               "断面の分割数（4 の倍数に丸められます）")
     _new_input(ng, "Material", "NodeSocketMaterial", None, None, None, None, "マテリアル")
     ng.interface.new_socket("Geometry", in_out="OUTPUT", socket_type="NodeSocketGeometry")
 
@@ -237,35 +293,150 @@ def _build_node_group():
     b.feed(pos.inputs["Y"], y)
     b.feed(pos.inputs["Z"], z)
 
-    # --- geometry ---------------------------------------------------------
+    # --- tube -----------------------------------------------------------
+    # profile vertex count M, rounded to a multiple of 4 so the end caps can be
+    # filled with a quad grid (outer ring of a k x k grid has 4 * (k - 1) verts)
+    prof_m = b.mul(b.maximum(b.math("ROUND", b.div(I["Profile Resolution"], 4.0)), 1.0),
+                   4.0)
+    grid_k = b.add(b.div(prof_m, 4.0), 1.0)
+
     line = b.node("GeometryNodeCurvePrimitiveLine")
     resample = b.node("GeometryNodeResampleCurve")
     b.feed(resample.inputs["Curve"], line.outputs["Curve"])
     b.feed(resample.inputs["Count"], I["Resolution"])
 
-    set_pos = b.node("GeometryNodeSetPosition")
-    b.feed(set_pos.inputs["Geometry"], resample.outputs["Curve"])
-    b.feed(set_pos.inputs["Position"], pos.outputs["Vector"])
+    curve = b.set_position(resample.outputs["Curve"], pos.outputs["Vector"])
 
     taper = b.map_range(s, 0.0, 1.0, I["Base Radius"], I["Tip Radius"], label="Taper")
     set_radius = b.node("GeometryNodeSetCurveRadius")
-    b.feed(set_radius.inputs["Curve"], set_pos.outputs["Geometry"])
+    b.feed(set_radius.inputs["Curve"], curve)
     b.feed(set_radius.inputs["Radius"], taper)
+    curve = set_radius.outputs["Curve"]
 
     profile = b.node("GeometryNodeCurvePrimitiveCircle")
-    b.feed(profile.inputs["Resolution"], I["Profile Resolution"])
+    b.feed(profile.inputs["Resolution"], prof_m)
     profile.inputs["Radius"].default_value = 1.0
 
     to_mesh = b.node("GeometryNodeCurveToMesh")
-    b.feed(to_mesh.inputs["Curve"], set_radius.outputs["Curve"])
+    b.feed(to_mesh.inputs["Curve"], curve)
     b.feed(to_mesh.inputs["Profile Curve"], profile.outputs["Curve"])
     if "Fill Caps" in to_mesh.inputs:
-        to_mesh.inputs["Fill Caps"].default_value = True
+        to_mesh.inputs["Fill Caps"].default_value = False  # caps are built as quads
     if "Scale" in to_mesh.inputs:  # Blender 4.2+: explicit profile scale
         b.feed(to_mesh.inputs["Scale"], taper)
+    tube = to_mesh.outputs["Mesh"]
+
+    # --- end frames, measured from the tube's first / last vertex ring ----
+    # Curve to Mesh stores ring i (curve point i) as vertices i*M .. i*M+M-1,
+    # profile vertex j sits at angle 2*pi*j/M.
+    quarter = b.div(prof_m, 4.0)
+
+    def end_frame(center, neighbour, ring_start):
+        v0 = b.sample_position(tube, ring_start)
+        v1 = b.sample_position(tube, b.add(ring_start, quarter))
+        x_vec = b.vmath("SUBTRACT", v0, center)
+        radius = b.vmath("LENGTH", x_vec)
+        x_dir = b.vmath("NORMALIZE", x_vec)
+        y_dir = b.vmath("NORMALIZE", b.vmath("SUBTRACT", v1, center))
+        z_dir = b.vmath("NORMALIZE", b.vmath("SUBTRACT", center, neighbour))
+        return center, radius, x_dir, y_dir, z_dir
+
+    def place(geometry, frame, lx, ly, lz):
+        """Map local cap coordinates (in units of the end radius) to the frame."""
+        center, radius, x_dir, y_dir, z_dir = frame
+        world = center
+        for d, l in ((x_dir, lx), (y_dir, ly), (z_dir, lz)):
+            world = b.vmath("ADD", world, b.vmath("SCALE", d, scale=b.mul(l, radius)))
+        return b.set_position(geometry, world)
+
+    last = n_minus_1
+    tip_frame = end_frame(b.sample_position(curve, last),
+                          b.sample_position(curve, b.sub(last, 1.0)),
+                          b.mul(last, prof_m))
+    base_frame = end_frame(b.sample_position(curve, 0),
+                           b.sample_position(curve, 1),
+                           0)
+
+    # --- quad disk: k x k grid warped into concentric, evenly spaced rings --
+    def quad_disk():
+        grid = b.node("GeometryNodeMeshGrid")
+        grid.inputs["Size X"].default_value = 2.0
+        grid.inputs["Size Y"].default_value = 2.0
+        b.feed(grid.inputs["Vertices X"], grid_k)
+        b.feed(grid.inputs["Vertices Y"], grid_k)
+        u, v, _ = b.separate(b.position())
+        ring = b.maximum(b.math("ABSOLUTE", u), b.math("ABSOLUTE", v))  # 0..1
+        side = b.math("ROUND", b.div(b.math("ARCTAN2", v, u), math.pi / 2))
+        side_ang = b.mul(side, math.pi / 2)
+        along = b.add(b.mul(b.mul(u, -1.0), b.math("SINE", side_ang)),
+                      b.mul(v, b.math("COSINE", side_ang)))
+        ang = b.add(side_ang, b.mul(b.div(along, ring), math.pi / 4))
+        # even k: ring vertices sit half a step off angle 0 -> rotate back
+        half_step = b.mul(b.sub(1.0, b.math("MODULO", grid_k, 2.0)),
+                          b.div(math.pi, prof_m))
+        ang = b.sub(ang, half_step)
+        return grid.outputs["Mesh"], ring, ang
+
+    hole_r = b.math("MINIMUM", b.maximum(I["Tip Hole Radius"], 0.05), 0.95)
+    hole_d = b.maximum(I["Tip Hole Depth"], 0.02)
+
+    # tip: lip rolls inward from the rim, then a wall down to the hole bottom
+    wall = b.node("GeometryNodeMeshCylinder")
+    try:
+        wall.fill_type = "NONE"
+    except (AttributeError, TypeError):
+        pass
+    b.feed(wall.inputs["Vertices"], prof_m)
+    wall.inputs["Side Segments"].default_value = 6
+    wall.inputs["Radius"].default_value = 1.0
+    wall.inputs["Depth"].default_value = 1.0
+    wx, wy, wz = b.separate(b.position())
+    w_ang = b.math("ARCTAN2", wy, wx)
+    q = b.sub(0.5, wz)                     # 0 = rim (joins the tube) .. 1 = bottom
+    lip_part = 4.0 / 6.0
+    phi = b.mul(b.math("MINIMUM", b.div(q, lip_part), 1.0), math.pi)
+    wall_part = b.maximum(b.div(b.sub(q, lip_part), 1.0 - lip_part), 0.0)
+    lip_a = b.mul(b.sub(1.0, hole_r), 0.5)
+    lip_c = b.mul(b.add(1.0, hole_r), 0.5)
+    w_r = b.add(lip_c, b.mul(lip_a, b.math("COSINE", phi)))
+    w_z = b.sub(b.mul(b.mul(lip_a, I["Tip Lip"]), b.math("SINE", phi)),
+                b.mul(hole_d, wall_part))
+    tip_wall = place(wall.outputs["Mesh"], tip_frame,
+                     b.mul(w_r, b.math("COSINE", w_ang)),
+                     b.mul(w_r, b.math("SINE", w_ang)), w_z)
+
+    disk, d_ring, d_ang = quad_disk()
+    d_r = b.mul(d_ring, hole_r)
+    tip_bottom = place(disk, tip_frame,
+                       b.mul(d_r, b.math("COSINE", d_ang)),
+                       b.mul(d_r, b.math("SINE", d_ang)),
+                       b.mul(hole_d, -1.0))
+
+    # base: slightly domed quad cap
+    disk, d_ring, d_ang = quad_disk()
+    base_cap = place(disk, base_frame,
+                     b.mul(d_ring, b.math("COSINE", d_ang)),
+                     b.mul(d_ring, b.math("SINE", d_ang)),
+                     b.mul(b.sub(1.0, b.mul(d_ring, d_ring)), 0.3))
+
+    if FLIP_TIP_WALL:
+        tip_wall = b.flip(tip_wall)
+    if FLIP_TIP_BOTTOM:
+        tip_bottom = b.flip(tip_bottom)
+    if FLIP_BASE_CAP:
+        base_cap = b.flip(base_cap)
+
+    join = b.node("GeometryNodeJoinGeometry")
+    for geo in (tube, tip_wall, tip_bottom, base_cap):
+        b.feed(join.inputs["Geometry"], geo)
+
+    merge = b.node("GeometryNodeMergeByDistance")
+    b.feed(merge.inputs["Geometry"], join.outputs["Geometry"])
+    min_r = b.math("MINIMUM", I["Base Radius"], I["Tip Radius"])
+    b.feed(merge.inputs["Distance"], b.maximum(b.mul(min_r, 0.005), 1.0e-7))
 
     smooth = b.node("GeometryNodeSetShadeSmooth")
-    b.feed(smooth.inputs["Geometry"], to_mesh.outputs["Mesh"])
+    b.feed(smooth.inputs["Geometry"], merge.outputs["Geometry"])
 
     set_mat = b.node("GeometryNodeSetMaterial")
     b.feed(set_mat.inputs["Geometry"], smooth.outputs["Geometry"])
@@ -489,8 +660,9 @@ _PANEL_GROUPS = (
     ("Animation", ("Uncoil", "Wiggle Amount", "Wiggle Frequency", "Wiggle Phase")),
     ("Shape", ("Length", "Turns", "Inner Radius", "Straight Base", "Base Angle",
                "Extended Bend", "Uncoil Softness")),
-    ("Thickness", ("Base Radius", "Tip Radius", "Resolution", "Profile Resolution",
-                   "Material")),
+    ("Thickness / Tip", ("Base Radius", "Tip Radius", "Tip Hole Radius",
+                         "Tip Hole Depth", "Tip Lip", "Resolution",
+                         "Profile Resolution", "Material")),
 )
 
 

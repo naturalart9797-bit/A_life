@@ -33,9 +33,22 @@
 | Extended Bend | 伸ばしたときの反り |
 | Uncoil Softness | ほどける境目のなめらかさ |
 | Base Radius / Tip Radius | 根元・先端の太さ |
+| Tip Hole Radius | 先端の穴の半径（先端の太さに対する割合） |
+| Tip Hole Depth | 先端の穴の深さ（先端の太さに対する倍率） |
+| Tip Lip | 穴のふちの盛り上がり |
+| Profile Resolution | 断面の分割数（4 の倍数に丸められます） |
 
 > 巻きが重なる場合は Turns を減らすか Base Radius を細くしてください
 > （巻きの隙間 ≒ (Length×(1−Straight Base)/(π×Turns) − 2×Inner Radius) / Turns）。
+
+## メッシュ構造
+
+- **すべて四角ポリゴン**（三角形・N-gon なし）、穴のない閉じたメッシュ、法線は外向き
+- 先端: ふちが内側に丸まった **くぼみ（穴）**。底面も四角ポリゴンのグリッドで埋めています
+- 根元: 四角ポリゴンのゆるいドームで閉じています
+- そのまま Subdivision Surface をかけてもきれいに丸まります
+
+![tip](docs/proboscis_tip.png)
 
 ## アニメーション（水を飲む）
 
