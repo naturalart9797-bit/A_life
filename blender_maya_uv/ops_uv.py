@@ -304,8 +304,8 @@ def _ensure_active_face(context):
 
 
 class UV_OT_maya_create_shell(UVOperator, bpy.types.Operator):
-    """Cut the selected faces out into their own shell and mark its border as seams
-    (Maya: Create Shell / Create Shell (Grid))"""
+    """Cut the selected faces out into their own shell (seams on its border), unfolded in
+    place (Maya: Create Shell / Create Shell (Grid))"""
     bl_idname = "uv.maya_create_shell"
     bl_label = "Create Shell"
 
@@ -313,13 +313,43 @@ class UV_OT_maya_create_shell(UVOperator, bpy.types.Operator):
                                  default=False)
 
     def execute(self, context):
-        bpy.ops.uv.select_split()
-        bpy.ops.uv.seams_from_islands(mark_seams=True)
+        sync = is_sync(context)
+        cut = 0
+        for ob, bm, uv, faces in edit_meshes(context):
+            picked = {f for f in faces if face_selected(f, uv, sync)}
+            border = {e for f in picked for e in f.edges
+                      if any(g not in picked and not g.hide for g in e.link_faces)}
+            for e in border:
+                e.seam = True
+            cut += len(border)
+            update(ob)
+        if not cut:
+            self.report({'WARNING'}, "Select some faces of a shell")
+            return {'CANCELLED'}
+        # Cut along the new seams and unfold the shell in place.
+        unfold_in_place(context, settings(context).unfold_method)
         if self.grid:
             if not _ensure_active_face(context):
                 self.report({'WARNING'}, "Grid needs a selected quad")
                 return {'FINISHED'}
             bpy.ops.uv.follow_active_quads(mode='LENGTH_AVERAGE')
+        return {'FINISHED'}
+
+
+class UV_OT_maya_seams_from_shells(UVOperator, bpy.types.Operator):
+    """Make the seams match the shells exactly: seams on every UV split, none inside a
+    shell. Also cleans up stray seams"""
+    bl_idname = "uv.maya_seams_from_shells"
+    bl_label = "Seams from Shells"
+
+    def execute(self, context):
+        for ob, bm, uv, faces in edit_meshes(context):
+            shown = set(faces)
+            split = uv_split_edges(bm, uv)
+            for e in {e for f in faces for e in f.edges}:
+                if sum(1 for f in e.link_faces if f in shown) >= 2:
+                    e.seam = e in split
+            update(ob)
         return {'FINISHED'}
 
 
@@ -353,52 +383,86 @@ def _best_rotation(old_pts, new_pts):
     return math.atan2(num, den), co, cn
 
 
+def uv_split_edges(bm, uv):
+    """Edges whose UVs are split (shell borders and slits). UVs only a hair apart
+    count as connected."""
+    out = set()
+    for e in bm.edges:
+        loops = [l for l in e.link_loops if not l.face.hide]
+        if any(not uv_edge_matches(loops[0], l, uv) for l in loops[1:]):
+            out.add(e)
+    return out
+
+
+def unfold_in_place(context, method, constraint='NONE'):
+    """Unwrap the selected faces, then put every unwrapped shell back where it was:
+    same center, area and orientation (Maya's Unfold). Pinned shells stay as unwrapped.
+
+    Cuts along the user's seams (Cut) and where the UVs are split, and adds no seams.
+    """
+    before = {}
+    user_seams = {}
+    for ob, bm, uv, faces in edit_meshes(context):
+        before[ob.name] = {f.index: [l[uv].uv.copy() for l in f.loops] for f in faces}
+        # Blender unwraps per seam-bounded region; Maya unfolds per shell. So also cut
+        # where the UVs are already split, just for the unwrap, then give the user's
+        # seams back (Blender's Seams from Islands would add a seam for every UV that is
+        # a hair apart). Hair-split UVs get welded instead of cut.
+        user_seams[ob.name] = [e.seam for e in bm.edges]
+        for e in uv_split_edges(bm, uv):
+            e.seam = True
+        update(ob)
+
+    try:
+        bpy.ops.uv.unwrap(method=method, margin=0.0)
+    finally:
+        for ob, bm, uv, faces in edit_meshes(context):
+            seams = user_seams.get(ob.name)
+            if seams is not None and len(seams) == len(bm.edges):
+                for e, seam in zip(bm.edges, seams):
+                    e.seam = seam
+                update(ob)
+
+    for ob, bm, uv, faces in edit_meshes(context):
+        old = before.get(ob.name)
+        if old is None:
+            continue
+        changed = {f for f in faces
+                   if f.index in old and any((l[uv].uv - o).length_squared > EPS
+                                             for l, o in zip(f.loops, old[f.index]))}
+        for isl in islands(faces, uv):
+            if not changed.issuperset(isl):
+                continue
+            loops = island_loops(isl)
+            if any(l[uv].pin_uv for l in loops):
+                continue  # pinned shells are already placed by their pins
+            old_pts = [p for f in isl for p in old[f.index]]
+            new_pts = [l[uv].uv.copy() for l in loops]
+            old_area = sum(poly_area(old[f.index]) for f in isl)
+            new_area = sum(uv_area(f, uv) for f in isl)
+            if new_area < EPS * EPS or old_area < EPS * EPS:
+                continue
+            angle, co, cn = _best_rotation(old_pts, new_pts)
+            mat2 = rotation(angle) * math.sqrt(old_area / new_area)
+            for l, q, p in zip(loops, new_pts, old_pts):
+                r = co + mat2 @ (q - cn)
+                if constraint == 'U':
+                    r.y = p.y
+                elif constraint == 'V':
+                    r.x = p.x
+                l[uv].uv = r
+        update(ob)
+
+
 class UV_OT_maya_unfold(UVOperator, bpy.types.Operator):
     """Unfold the selected shells in place, keeping each shell's position, size and
-    orientation like Maya. Pinned UVs stay where they are"""
+    orientation like Maya. Adds no seams. Pinned UVs stay where they are"""
     bl_idname = "uv.maya_unfold"
     bl_label = "Unfold"
 
     def execute(self, context):
         s = settings(context)
-        before = {}
-        for ob, bm, uv, faces in edit_meshes(context):
-            before[ob.name] = {f.index: [l[uv].uv.copy() for l in f.loops] for f in faces}
-
-        # Blender unwraps per seam-bounded region; Maya unfolds per shell.
-        # Mark the shell borders as seams so each shell unfolds on its own.
-        bpy.ops.uv.seams_from_islands(mark_seams=True)
-        bpy.ops.uv.unwrap(method=s.unfold_method, margin=0.0)
-
-        for ob, bm, uv, faces in edit_meshes(context):
-            old = before.get(ob.name)
-            if old is None:
-                continue
-            changed = {f for f in faces
-                       if f.index in old and any((l[uv].uv - o).length_squared > EPS
-                                                 for l, o in zip(f.loops, old[f.index]))}
-            for isl in islands(faces, uv):
-                if not changed.issuperset(isl):
-                    continue
-                loops = island_loops(isl)
-                if any(l[uv].pin_uv for l in loops):
-                    continue  # pinned shells are already placed by their pins
-                old_pts = [p for f in isl for p in old[f.index]]
-                new_pts = [l[uv].uv.copy() for l in loops]
-                old_area = sum(poly_area(old[f.index]) for f in isl)
-                new_area = sum(uv_area(f, uv) for f in isl)
-                if new_area < EPS * EPS or old_area < EPS * EPS:
-                    continue
-                angle, co, cn = _best_rotation(old_pts, new_pts)
-                mat2 = rotation(angle) * math.sqrt(old_area / new_area)
-                for l, q, p in zip(loops, new_pts, old_pts):
-                    r = co + mat2 @ (q - cn)
-                    if s.unfold_constraint == 'U':
-                        r.y = p.y
-                    elif s.unfold_constraint == 'V':
-                        r.x = p.x
-                    l[uv].uv = r
-            update(ob)
+        unfold_in_place(context, s.unfold_method, s.unfold_constraint)
         return {'FINISHED'}
 
 
@@ -625,6 +689,7 @@ classes = (
     UV_OT_maya_auto_seams,
     UV_OT_maya_sew,
     UV_OT_maya_create_shell,
+    UV_OT_maya_seams_from_shells,
     UV_OT_maya_straighten_shell,
     UV_OT_maya_unfold,
     UV_OT_maya_optimize,

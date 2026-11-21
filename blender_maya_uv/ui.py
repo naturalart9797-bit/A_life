@@ -259,7 +259,7 @@ class IMAGE_PT_maya_uv_cut_sew(_SubPanel, bpy.types.Panel):
         row.operator("uv.maya_create_shell", text="Create Shell").grid = False
         row.operator("uv.maya_create_shell", text="Grid").grid = True
         row = col.row(align=True)
-        row.operator("uv.seams_from_islands", text="Seams from Shells")
+        row.operator("uv.maya_seams_from_shells", text="Seams from Shells")
         row.operator("uv.mark_seam", text="Clear Seams").clear = True
         row = layout.row(align=True)
         row.operator("uv.maya_auto_seams", text="Auto Seams")
