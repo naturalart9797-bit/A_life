@@ -1,0 +1,13 @@
+schema_version = "1.0.0"
+
+id = "susuki_field"
+version = "1.0.0"
+name = "Susuki Field Generator"
+tagline = "Generate realistic Japanese silver grass fields"
+maintainer = "A_life"
+type = "add-on"
+
+blender_version_min = "4.2.0"
+
+license = ["SPDX:MIT"]
+tags = ["Add Mesh", "Object"]
