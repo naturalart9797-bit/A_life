@@ -29,6 +29,8 @@ import bpy
 from bpy.props import BoolProperty, FloatProperty, IntProperty
 from bpy.types import Operator, Panel
 
+from . import rig
+
 GROUP_NAME = "Butterfly Proboscis"
 GROUP_TAG = "butterfly_proboscis_version"
 GROUP_VERSION = 4
@@ -901,6 +903,8 @@ class VIEW3D_PT_butterfly_proboscis(Panel):
                         text="Add Proboscis")
 
         obj = context.active_object
+        if rig.draw_rig_panel(layout, context):
+            return
         mod = find_proboscis_modifier(obj)
         if mod is None:
             layout.label(text="口吻オブジェクトを選択してください", icon="INFO")
@@ -939,6 +943,11 @@ class VIEW3D_PT_butterfly_proboscis(Panel):
             box.operator(OBJECT_OT_proboscis_make_editable.bl_idname, icon="UV")
         box.operator(OBJECT_OT_proboscis_apply_mesh.bl_idname, icon="CHECKMARK")
 
+        box = layout.box()
+        box.label(text="Bone Rig", icon="ARMATURE_DATA")
+        box.label(text="頭のボーンに付けて、伸ばすと目標へ届くリグを作る")
+        box.operator(rig.OBJECT_OT_proboscis_generate_rig.bl_idname, icon="BONE_DATA")
+
 
 def menu_func(self, context):
     self.layout.operator(OBJECT_OT_add_butterfly_proboscis.bl_idname, icon="CURVE_PATH")
@@ -954,14 +963,14 @@ _classes = (
 
 
 def register():
-    for cls in _classes:
+    for cls in _classes + rig.classes:
         bpy.utils.register_class(cls)
     bpy.types.VIEW3D_MT_mesh_add.append(menu_func)
 
 
 def unregister():
     bpy.types.VIEW3D_MT_mesh_add.remove(menu_func)
-    for cls in reversed(_classes):
+    for cls in reversed(_classes + rig.classes):
         bpy.utils.unregister_class(cls)
 
 
