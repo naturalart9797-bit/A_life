@@ -28,7 +28,7 @@ import math
 import bpy
 from bpy.props import BoolProperty, FloatProperty, IntProperty, StringProperty
 from bpy.types import Operator
-from mathutils import Matrix, Vector
+from mathutils import Matrix, Quaternion, Vector
 
 RIG_TAG = "proboscis_rig"
 CTRL_PROPS = ("extend", "aim")
@@ -99,10 +99,14 @@ class ShapeParams:
             cz += math.sin(t)
         return math.atan2(cz, cy)
 
-    def bone_bounds(self, max_angle, max_len_frac=1.0 / 32.0):
-        """Split the length so no bone bends more than max_angle when coiled."""
+    def bone_bounds(self, max_angle, max_len_frac=1.0 / 32.0, count=0):
+        """Split the length so no bone bends more than max_angle when coiled
+        (or into exactly `count` bones)."""
         L = self.length
         th, ds = self.theta(0.0, 0.0, 0.0)
+        if count:
+            arc = [i * ds for i in range(len(th))]
+            return bounds_by_count(arc, th, count)
 
         def at(l):
             i = min(max(l / ds, 0.0), len(th) - 1.0)
@@ -429,16 +433,47 @@ def tube_centerline(coords, normals, edges, flip=False):
         if len(m):
             pts.append(cv[m].mean(axis=0))
             ss.append(sval[m].mean())
-    pts = _smooth_polyline(np.array(pts), 3)
-    # extend to the real ends of the tube (cap vertices)
+    pts = np.array(pts)
+    ss = np.array(ss)
+    # drop the samples next to the end caps (cap / tip-hole shapes disturb them)
     s_lo, s_hi = float(sval[main].min()), float(sval[main].max())
-    t0 = pts[1] - pts[0]
-    t1 = pts[-1] - pts[-2]
-    pts = np.vstack([pts[0] - t0 / np.linalg.norm(t0) * max(ss[0] - s_lo, 0.0), pts,
-                     pts[-1] + t1 / np.linalg.norm(t1) * max(s_hi - ss[-1], 0.0)])
+    keep = (ss > s_lo + 1.0 * radius) & (ss < s_hi - 1.0 * radius)
+    if keep.sum() >= 8:
+        pts, ss = pts[keep], ss[keep]
+    pts = _smooth_polyline(pts, 3)
+    ss = list(ss)
+    # extend straight to the real ends of the tube: the middle of the end caps
+    def cap_center(sel):
+        m = main[sel]
+        return co[m].mean(axis=0) if len(m) else None
+
+    s_main = sval[main]
+    ends = []
+    for sel, anchor, s_end in ((s_main < s_lo + 0.5 * radius, pts[0], s_lo),
+                               (s_main > s_hi - 0.5 * radius, pts[-1], s_hi)):
+        c_end = cap_center(sel)
+        ends.append(c_end if c_end is not None else anchor)
+    steps = 6
+
+    def bridge(p_from, p_prev, p_to):
+        """Quadratic Bezier from p_from to p_to, tangent-continuous at p_from."""
+        t = p_from - p_prev
+        t = t / max(np.linalg.norm(t), 1e-12)
+        ctrl = p_from + t * (np.linalg.norm(p_to - p_from) * 0.5)
+        out = []
+        for i in range(1, steps + 1):
+            u = i / steps
+            out.append((1 - u) ** 2 * p_from + 2 * (1 - u) * u * ctrl + u * u * p_to)
+        return out
+
+    k = min(3, len(pts) - 1)
+    head = bridge(pts[0], pts[k], ends[0])[::-1]
+    tail = bridge(pts[-1], pts[-1 - k], ends[1])
+    pts = np.vstack([np.array(head), pts, np.array(tail)])
+    ss = ([s_lo + (ss[0] - s_lo) * i / steps for i in range(steps)] + ss
+          + [ss[-1] + (s_hi - ss[-1]) * (i + 1) / steps for i in range(steps)])
     arc = _arc(pts)
-    sval = project_all(pts, arc, lambda v: np.interp(sval[v], [s_lo] + ss + [s_hi],
-                                                       np.arange(len(pts))))
+    sval = project_all(pts, arc, lambda v: np.interp(sval[v], ss, np.arange(len(pts))))
 
     # vertices of other loose parts take the value of their nearest vertex
     if len(main) < n:
@@ -469,8 +504,26 @@ def _signed_angle(a, b, axis):
     return math.atan2(axis.dot(a.cross(b)), a.dot(b))
 
 
-def chain_from_centerline(pts, arc, normal, max_bend, max_len_frac=1.0 / 32.0):
-    """Split the centerline into bones of at most max_bend turning each."""
+def bounds_by_count(arc, phi, count, max_bend=math.radians(15.0), max_len_frac=1.0 / 32.0):
+    """Arc positions splitting the length into exactly `count` bones.
+
+    Same distribution as the automatic split (short where the coil is tight,
+    longer where it is straight): each bone gets an equal share of
+    integral max(|turn| / max_bend, length / (L * max_len_frac)).
+    """
+    import numpy as np
+    count = max(int(count), 4)
+    arc = np.asarray(arc, dtype=float)
+    phi = np.asarray(phi, dtype=float)
+    L = float(arc[-1])
+    cost = np.maximum(np.abs(np.diff(phi)) / max_bend, np.diff(arc) / (L * max_len_frac))
+    acc = np.concatenate([[0.0], np.cumsum(cost)])
+    return [float(x) for x in np.interp(np.linspace(0.0, acc[-1], count + 1), acc, arc)]
+
+
+def chain_from_centerline(pts, arc, normal, max_bend, max_len_frac=1.0 / 32.0, count=0):
+    """Split the centerline into bones of at most max_bend turning each
+    (or into exactly `count` bones)."""
     import numpy as np
     nrm = Vector(normal)
     P = [Vector(p) for p in pts]
@@ -479,6 +532,12 @@ def chain_from_centerline(pts, arc, normal, max_bend, max_len_frac=1.0 / 32.0):
     for k in range(1, len(P) - 1):
         phi.append(phi[-1] + _signed_angle(P[k] - P[k - 1], P[k + 1] - P[k], nrm))
     phi.append(phi[-1])
+    if count:
+        import numpy as np
+        bounds = bounds_by_count(arc, phi, count)
+        arr = np.array([tuple(p) for p in P])
+        chain = [Vector([float(np.interp(b, arc, arr[:, j])) for j in range(3)]) for b in bounds]
+        return chain, bounds
     cuts, start = [0], 0
     for k in range(1, len(P)):
         if (abs(phi[k] - phi[start]) >= max_bend or arc[k] - arc[start] >= L * max_len_frac):
@@ -681,6 +740,9 @@ class _RigOptions:
         name="Head Bone", description="口吻の親にするボーン（頭）")
     prefix: StringProperty(name="Bone Name", default="proboscis",
                            description="作るボーンの名前の頭")
+    bone_count: IntProperty(name="Bone Count", default=0, min=0, max=500,
+                            description="ボーンの本数。0 = 自動（Max Bend per Bone で決める）。"
+                                        "数を指定しても先端ほど短く配置します")
     max_bend: FloatProperty(name="Max Bend per Bone", default=math.radians(15.0),
                             min=math.radians(3.0), max=math.radians(45.0),
                             subtype="ANGLE",
@@ -710,7 +772,11 @@ class _RigOptions:
         if arm is not None and arm.type == "ARMATURE":
             layout.prop_search(self, "parent_bone", arm.data, "bones")
         layout.prop(self, "prefix")
-        layout.prop(self, "max_bend")
+        col = layout.column(align=True)
+        col.prop(self, "bone_count", text="Bone Count (0 = Auto)")
+        sub = col.row()
+        sub.enabled = self.bone_count == 0
+        sub.prop(self, "max_bend")
         col = layout.column(align=True)
         col.prop(self, "knee")
         col.prop(self, "knee_width")
@@ -810,7 +876,8 @@ class OBJECT_OT_proboscis_rig_mesh(_RigOptions, Operator):
         normals = [(nmat @ v.normal).normalized() for v in obj.data.vertices]
         edges = [tuple(e.vertices) for e in obj.data.edges]
         pts, arc, svals, normal, _radius = tube_centerline(coords, normals, edges, self.flip)
-        chain, _bounds = chain_from_centerline(pts, arc, normal, self.max_bend)
+        chain, _bounds = chain_from_centerline(pts, arc, normal, self.max_bend,
+                                               count=self.bone_count)
         nb = len(chain) - 1
         if nb < 4:
             self.report({"ERROR"}, "中心線を取れませんでした（筒状のメッシュですか？）")
@@ -837,7 +904,12 @@ class OBJECT_OT_proboscis_rig_mesh(_RigOptions, Operator):
         scale = L / float(arc[-1])
         _skin(obj, names, [float(v) * scale for v in svals], mids_built)
         _finish(context, arm, obj, world)
-        self.report({"INFO"}, f"{nb} bones / fit error {math.degrees(fit_err):.3f} deg")
+        worst = math.degrees(max(abs(a) for a in rest[1:]))
+        msg = f"{nb} bones / max bend per bone {worst:.0f} deg"
+        if worst > 30:
+            self.report({"WARNING"}, msg + "（巻きがカクカクします。本数を増やしてください）")
+        else:
+            self.report({"INFO"}, msg)
         return {"FINISHED"}
 
 
@@ -876,7 +948,7 @@ class OBJECT_OT_proboscis_generate_rig(_RigOptions, Operator):
             return {"CANCELLED"}
 
         params = ShapeParams(mod)
-        bounds = params.bone_bounds(self.max_bend)
+        bounds = params.bone_bounds(self.max_bend, count=self.bone_count)
         nb = len(bounds) - 1
         coil = params.relative_angles(bounds, 0.0, params.base_angle, params.bend)
         ext = params.relative_angles(bounds, 1.0, params.base_angle, params.bend)
@@ -929,7 +1001,12 @@ class OBJECT_OT_proboscis_generate_rig(_RigOptions, Operator):
 
         src.hide_set(True)
         src.hide_render = True
-        self.report({"INFO"}, f"{nb} bones / fit error {math.degrees(fit_err):.3f} deg")
+        worst = math.degrees(max(abs(a) for a in coil[1:]))
+        msg = f"{nb} bones / max bend per bone {worst:.0f} deg"
+        if worst > 30:
+            self.report({"WARNING"}, msg + "（巻きがカクカクします。本数を増やしてください）")
+        else:
+            self.report({"INFO"}, msg)
         return {"FINISHED"}
 
 
