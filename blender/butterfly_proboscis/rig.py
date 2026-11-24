@@ -99,11 +99,15 @@ class ShapeParams:
             cz += math.sin(t)
         return math.atan2(cz, cy)
 
-    def bone_bounds(self, max_angle, max_len_frac=1.0 / 32.0, count=0):
+    def bone_bounds(self, max_angle, max_len_frac=1.0 / 32.0, count=0, equal=False):
         """Split the length so no bone bends more than max_angle when coiled
         (or into exactly `count` bones)."""
         L = self.length
         th, ds = self.theta(0.0, 0.0, 0.0)
+        if equal:
+            arc = [i * ds for i in range(len(th))]
+            n = max(int(count), 4) if count else auto_equal_count(arc, th, max_angle)
+            return [L * i / n for i in range(n + 1)]
         if count:
             arc = [i * ds for i in range(len(th))]
             return bounds_by_count(arc, th, count)
@@ -521,7 +525,67 @@ def bounds_by_count(arc, phi, count, max_bend=math.radians(15.0), max_len_frac=1
     return [float(x) for x in np.interp(np.linspace(0.0, acc[-1], count + 1), acc, arc)]
 
 
-def chain_from_centerline(pts, arc, normal, max_bend, max_len_frac=1.0 / 32.0, count=0):
+def _place_chords(P, length):
+    """Walk the polyline placing joints at straight-line distance `length`.
+    Returns (joints, arc positions, fractional bone count)."""
+    import numpy as np
+    seg_len = np.linalg.norm(np.diff(P, axis=0), axis=1)
+    seg_arc = np.concatenate([[0.0], np.cumsum(seg_len)])
+    joints, arcs = [P[0]], [0.0]
+    cur, k = P[0], 0
+    while True:
+        hit = None
+        for j in range(k, len(P) - 1):
+            if np.linalg.norm(P[j + 1] - cur) >= length:
+                d = P[j + 1] - P[j]
+                f = P[j] - cur
+                dd = float(d @ d)
+                fd = float(f @ d)
+                disc = max(fd * fd - dd * (float(f @ f) - length * length), 0.0)
+                t = min(max((-fd + math.sqrt(disc)) / max(dd, 1e-20), 0.0), 1.0)
+                hit = (P[j] + d * t, seg_arc[j] + seg_len[j] * t, j)
+                break
+        if hit is None:
+            break
+        cur, a, k = hit
+        joints.append(cur)
+        arcs.append(float(a))
+    rest = float(np.linalg.norm(P[-1] - cur))
+    return joints, arcs, len(joints) - 1 + rest / length
+
+
+def equal_chord_chain(pts, count):
+    """Exactly `count` bones of identical straight length along the polyline."""
+    import numpy as np
+    P = np.asarray(pts, dtype=float)
+    total = float(np.linalg.norm(np.diff(P, axis=0), axis=1).sum())
+    lo, hi = total / count * 0.2, total / count * 1.0001
+    for _ in range(60):
+        mid = 0.5 * (lo + hi)
+        if _place_chords(P, mid)[2] > count:
+            lo = mid
+        else:
+            hi = mid
+    joints, arcs, _ = _place_chords(P, hi)
+    joints, arcs = joints[:count], arcs[:count]
+    joints.append(P[-1])
+    arcs.append(total)
+    return [Vector(j) for j in joints], arcs
+
+
+def auto_equal_count(arc, phi, max_bend, cap=300):
+    """Bones needed so equal-length bones bend <= max_bend at the tightest spot."""
+    import numpy as np
+    arc = np.asarray(arc, dtype=float)
+    phi = np.asarray(phi, dtype=float)
+    w = 3
+    rates = [abs(phi[min(i + w, len(phi) - 1)] - phi[i]) / max(arc[min(i + w, len(arc) - 1)] - arc[i], 1e-12)
+             for i in range(len(phi) - 1)]
+    return int(min(max(math.ceil(float(arc[-1]) * max(rates) / max_bend), 4), cap))
+
+
+def chain_from_centerline(pts, arc, normal, max_bend, max_len_frac=1.0 / 32.0, count=0,
+                          equal=False):
     """Split the centerline into bones of at most max_bend turning each
     (or into exactly `count` bones)."""
     import numpy as np
@@ -532,6 +596,9 @@ def chain_from_centerline(pts, arc, normal, max_bend, max_len_frac=1.0 / 32.0, c
     for k in range(1, len(P) - 1):
         phi.append(phi[-1] + _signed_angle(P[k] - P[k - 1], P[k + 1] - P[k], nrm))
     phi.append(phi[-1])
+    if equal:
+        n = max(int(count), 4) if count else auto_equal_count(arc, phi, max_bend)
+        return equal_chord_chain(pts, n)
     if count:
         import numpy as np
         bounds = bounds_by_count(arc, phi, count)
@@ -743,6 +810,8 @@ class _RigOptions:
     bone_count: IntProperty(name="Bone Count", default=0, min=0, max=500,
                             description="ボーンの本数。0 = 自動（Max Bend per Bone で決める）。"
                                         "数を指定しても先端ほど短く配置します")
+    equal_length: BoolProperty(name="Equal Bone Length", default=False,
+                               description="ボーンを全部同じ長さにする（オフ = 先端ほど短く）")
     max_bend: FloatProperty(name="Max Bend per Bone", default=math.radians(15.0),
                             min=math.radians(3.0), max=math.radians(45.0),
                             subtype="ANGLE",
@@ -773,6 +842,7 @@ class _RigOptions:
             layout.prop_search(self, "parent_bone", arm.data, "bones")
         layout.prop(self, "prefix")
         col = layout.column(align=True)
+        col.prop(self, "equal_length")
         col.prop(self, "bone_count", text="Bone Count (0 = Auto)")
         sub = col.row()
         sub.enabled = self.bone_count == 0
@@ -876,8 +946,9 @@ class OBJECT_OT_proboscis_rig_mesh(_RigOptions, Operator):
         normals = [(nmat @ v.normal).normalized() for v in obj.data.vertices]
         edges = [tuple(e.vertices) for e in obj.data.edges]
         pts, arc, svals, normal, _radius = tube_centerline(coords, normals, edges, self.flip)
-        chain, _bounds = chain_from_centerline(pts, arc, normal, self.max_bend,
-                                               count=self.bone_count)
+        chain, arc_bounds = chain_from_centerline(pts, arc, normal, self.max_bend,
+                                                  count=self.bone_count,
+                                                  equal=self.equal_length)
         nb = len(chain) - 1
         if nb < 4:
             self.report({"ERROR"}, "中心線を取れませんでした（筒状のメッシュですか？）")
@@ -895,14 +966,14 @@ class OBJECT_OT_proboscis_rig_mesh(_RigOptions, Operator):
         ext = [self.extend_angle + k * mids[0]] + [k * (mids[i] - mids[i - 1])
                                                    for i in range(1, nb)]
 
-        names, _ctrl, mids_built, fit_err = build_rig(
+        names, _ctrl, _mids, fit_err = build_rig(
             context, arm, self.parent_bone, self.prefix, chain, axis, rest, rest, ext,
             +1, self.softness, self.knee, self.knee_width, self.knee_share,
             self.create_target)
-        # weights: arc position of each vertex along the centerline, mapped to
-        # the bone chain (centerline arc and chain arc differ only slightly)
-        scale = L / float(arc[-1])
-        _skin(obj, names, [float(v) * scale for v in svals], mids_built)
+        # weights: arc position of each vertex along the centerline vs. the
+        # arc position of each bone's middle on the same centerline
+        arc_mids = [(arc_bounds[i] + arc_bounds[i + 1]) / 2 for i in range(nb)]
+        _skin(obj, names, [float(v) for v in svals], arc_mids)
         _finish(context, arm, obj, world)
         worst = math.degrees(max(abs(a) for a in rest[1:]))
         msg = f"{nb} bones / max bend per bone {worst:.0f} deg"
@@ -948,7 +1019,8 @@ class OBJECT_OT_proboscis_generate_rig(_RigOptions, Operator):
             return {"CANCELLED"}
 
         params = ShapeParams(mod)
-        bounds = params.bone_bounds(self.max_bend, count=self.bone_count)
+        bounds = params.bone_bounds(self.max_bend, count=self.bone_count,
+                                    equal=self.equal_length)
         nb = len(bounds) - 1
         coil = params.relative_angles(bounds, 0.0, params.base_angle, params.bend)
         ext = params.relative_angles(bounds, 1.0, params.base_angle, params.bend)
