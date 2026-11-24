@@ -907,7 +907,13 @@ class VIEW3D_PT_butterfly_proboscis(Panel):
             return
         mod = find_proboscis_modifier(obj)
         if mod is None:
-            layout.label(text="口吻オブジェクトを選択してください", icon="INFO")
+            if obj is not None and obj.type == "MESH":
+                box = layout.box()
+                box.label(text="Bone Rig（自分の口吻メッシュ）", icon="ARMATURE_DATA")
+                box.label(text="巻いた形の口吻メッシュにボーンを入れます")
+                box.operator(rig.OBJECT_OT_proboscis_rig_mesh.bl_idname, icon="BONE_DATA")
+            else:
+                layout.label(text="口吻オブジェクトを選択してください", icon="INFO")
             return
 
         for title, names in _PANEL_GROUPS:

@@ -268,15 +268,412 @@ def rig_target_constraint(arm, ctrl):
 
 
 # --------------------------------------------------------------------------
+# Centerline of an existing tube mesh
+# --------------------------------------------------------------------------
+
+def _dijkstra(adj, seeds, n):
+    import heapq
+    dist = [math.inf] * n
+    heap = []
+    for v in seeds:
+        dist[v] = 0.0
+        heap.append((0.0, v))
+    heapq.heapify(heap)
+    while heap:
+        d, u = heapq.heappop(heap)
+        if d > dist[u]:
+            continue
+        for v, w in adj[u]:
+            nd = d + w
+            if nd < dist[v]:
+                dist[v] = nd
+                heapq.heappush(heap, (nd, v))
+    return dist
+
+
+def _project_on_polyline(co, pts, arc, guess, window):
+    """Arc position of the closest point on pts[guess-window .. guess+window]."""
+    import numpy as np
+    lo = max(int(guess) - window, 0)
+    hi = min(int(guess) + window, len(pts) - 1)
+    a = pts[lo:hi]
+    b = pts[lo + 1:hi + 1]
+    ab = b - a
+    t = np.clip(np.einsum("ij,ij->i", co - a, ab) / np.maximum(np.einsum("ij,ij->i", ab, ab), 1e-20), 0, 1)
+    proj = a + ab * t[:, None]
+    k = int(np.argmin(np.einsum("ij,ij->i", proj - co, proj - co)))
+    return arc[lo + k] + t[k] * (arc[lo + k + 1] - arc[lo + k])
+
+
+def _smooth_polyline(pts, radius=2):
+    import numpy as np
+    sm = pts.copy()
+    for i in range(1, len(pts) - 1):
+        lo, hi = max(i - radius, 0), min(i + radius + 1, len(pts))
+        sm[i] = pts[lo:hi].mean(axis=0)
+    return sm
+
+
+def _arc(pts):
+    import numpy as np
+    seg = np.linalg.norm(np.diff(pts, axis=0), axis=1)
+    return np.concatenate([[0.0], np.cumsum(seg)])
+
+
+def _ls_centers(co, nr, sval, idx, nbins):
+    """Per bin of sval: least-squares tube center c and radius r with
+    co_v ~= c + r * n_v (uses normals, so partial rings do not bias c)."""
+    import numpy as np
+    smax = float(sval[idx].max())
+    b = np.clip((sval[idx] / smax * nbins).astype(int), 0, nbins - 1)
+    centers, radii, svals = [], [], []
+    for k in range(nbins):
+        m = idx[b == k]
+        if len(m) < 3:
+            continue
+        P, N = co[m], nr[m]
+        A = np.zeros((4, 4))
+        A[:3, :3] = np.eye(3) * len(m)
+        A[:3, 3] = A[3, :3] = N.sum(axis=0)
+        A[3, 3] = len(m)
+        rhs = np.concatenate([P.sum(axis=0), [np.einsum("ij,ij->", N, P)]])
+        if np.linalg.cond(A) > 1e8:
+            continue
+        x = np.linalg.solve(A, rhs)
+        centers.append(x[:3])
+        radii.append(x[3])
+        svals.append(float(sval[m].mean()))
+    return np.array(centers), np.array(radii), np.array(svals)
+
+
+def tube_centerline(coords, normals, edges, flip=False):
+    """Centerline of a (coiled) tube mesh.
+
+    Returns (points, arc, per-vertex arc position, plane normal, radius).
+    The base is the end farther from the middle of the coil (outer end).
+    """
+    import numpy as np
+    co = np.array(coords, dtype=float)
+    nr = np.array(normals, dtype=float)
+    nr /= np.maximum(np.linalg.norm(nr, axis=1), 1e-12)[:, None]
+    n = len(co)
+    adj = [[] for _ in range(n)]
+    elen = []
+    for a, b in edges:
+        w = float(np.linalg.norm(co[a] - co[b]))
+        elen.append(w)
+        adj[a].append((b, w))
+        adj[b].append((a, w))
+    h = float(np.median(elen)) if elen else 1.0
+    # largest connected part
+    label = [-1] * n
+    comps = []
+    for v0 in range(n):
+        if label[v0] >= 0:
+            continue
+        stack, members = [v0], []
+        label[v0] = len(comps)
+        while stack:
+            u = stack.pop()
+            members.append(u)
+            for v, _ in adj[u]:
+                if label[v] < 0:
+                    label[v] = label[v0]
+                    stack.append(v)
+        comps.append(members)
+    main = np.array(max(comps, key=len))
+
+    # the two ends of the tube: double sweep of surface distances
+    d0 = np.array(_dijkstra(adj, [int(main[0])], n))
+    end_a = int(main[np.argmax(d0[main])])
+    da = np.array(_dijkstra(adj, [end_a], n))
+    end_b = int(main[np.argmax(da[main])])
+    middle = co[main].mean(axis=0)
+    base = end_a
+    if np.linalg.norm(co[end_a] - middle) < np.linalg.norm(co[end_b] - middle):
+        base = end_b
+    if flip:
+        base = end_b if base == end_a else end_a
+    dist = da if base == end_a else np.array(_dijkstra(adj, [base], n))
+
+    # pass 1: coarse centers from surface distance (bins ~3 rings wide)
+    total = float(dist[main].max())
+    coarse = int(min(max(total / (3.0 * h), 20), 200))
+    c1, r1, s1 = _ls_centers(co, nr, dist, main, coarse)
+    c1 = _smooth_polyline(c1, 1)
+    arc1 = _arc(c1)
+    radius = float(np.median(np.abs(r1)))
+    window = int(math.ceil(4.0 * radius / max(arc1[-1] / max(len(c1) - 1, 1), 1e-12))) + 3
+
+    def project_all(pts, arc, guess_of):
+        out = np.zeros(n)
+        for v in main:
+            out[v] = _project_on_polyline(co[v], pts, arc, guess_of(v), window)
+        return out
+
+    sval = project_all(c1, arc1, lambda v: np.interp(dist[v], s1, np.arange(len(s1))))
+
+    # pass 2: every vertex points at the axis: center_v = co_v - r(s) * n_v
+    r_of = np.interp(sval, arc1, _smooth_polyline(r1[:, None], 2)[:, 0])
+    tang1 = np.gradient(c1, axis=0)
+    tang1 /= np.maximum(np.linalg.norm(tang1, axis=1), 1e-12)[:, None]
+    seg_idx = np.clip(np.searchsorted(arc1, sval) - 1, 0, len(c1) - 1)
+    along = np.abs(np.einsum("ij,ij->i", nr, tang1[seg_idx]))
+    use = np.array([v for v in main if along[v] < 0.6])       # skip end caps
+    cv = co - nr * r_of[:, None]
+    fine = int(min(max(arc1[-1] / h, 50), 600))
+    order = np.clip((sval[use] / max(sval[use].max(), 1e-12) * fine).astype(int), 0, fine - 1)
+    pts, ss = [], []
+    for k in range(fine):
+        m = use[order == k]
+        if len(m):
+            pts.append(cv[m].mean(axis=0))
+            ss.append(sval[m].mean())
+    pts = _smooth_polyline(np.array(pts), 3)
+    # extend to the real ends of the tube (cap vertices)
+    s_lo, s_hi = float(sval[main].min()), float(sval[main].max())
+    t0 = pts[1] - pts[0]
+    t1 = pts[-1] - pts[-2]
+    pts = np.vstack([pts[0] - t0 / np.linalg.norm(t0) * max(ss[0] - s_lo, 0.0), pts,
+                     pts[-1] + t1 / np.linalg.norm(t1) * max(s_hi - ss[-1], 0.0)])
+    arc = _arc(pts)
+    sval = project_all(pts, arc, lambda v: np.interp(sval[v], [s_lo] + ss + [s_hi],
+                                                       np.arange(len(pts))))
+
+    # vertices of other loose parts take the value of their nearest vertex
+    if len(main) < n:
+        from mathutils import kdtree
+        kd = kdtree.KDTree(len(main))
+        for v in main:
+            kd.insert(co[v], int(v))
+        kd.balance()
+        in_main = np.zeros(n, dtype=bool)
+        in_main[main] = True
+        for v in range(n):
+            if not in_main[v]:
+                sval[v] = sval[kd.find(co[v])[1]]
+
+    # plane of the coil, oriented so the coil turns positively about it
+    c = pts - pts.mean(axis=0)
+    normal = np.linalg.eigh(c.T @ c)[1][:, 0]
+    tang = np.diff(pts, axis=0)
+    tang /= np.maximum(np.linalg.norm(tang, axis=1), 1e-12)[:, None]
+    turn = sum(math.atan2(float(np.dot(normal, np.cross(tang[i - 1], tang[i]))),
+                          float(np.dot(tang[i - 1], tang[i]))) for i in range(1, len(tang)))
+    if turn < 0:
+        normal = -normal
+    return pts, arc, sval, normal, radius
+
+
+def _signed_angle(a, b, axis):
+    return math.atan2(axis.dot(a.cross(b)), a.dot(b))
+
+
+def chain_from_centerline(pts, arc, normal, max_bend, max_len_frac=1.0 / 32.0):
+    """Split the centerline into bones of at most max_bend turning each."""
+    import numpy as np
+    nrm = Vector(normal)
+    P = [Vector(p) for p in pts]
+    L = float(arc[-1])
+    phi = [0.0]
+    for k in range(1, len(P) - 1):
+        phi.append(phi[-1] + _signed_angle(P[k] - P[k - 1], P[k + 1] - P[k], nrm))
+    phi.append(phi[-1])
+    cuts, start = [0], 0
+    for k in range(1, len(P)):
+        if (abs(phi[k] - phi[start]) >= max_bend or arc[k] - arc[start] >= L * max_len_frac):
+            cuts.append(k)
+            start = k
+    if cuts[-1] != len(P) - 1:
+        if arc[-1] - arc[cuts[-1]] < 0.25 * (arc[cuts[-1]] - arc[cuts[-2]]) and len(cuts) > 2:
+            cuts[-1] = len(P) - 1
+        else:
+            cuts.append(len(P) - 1)
+    chain = [P[k] for k in cuts]
+    bounds = [float(arc[k]) for k in cuts]
+    return chain, bounds
+
+
+# --------------------------------------------------------------------------
+# Shared rig builder
+# --------------------------------------------------------------------------
+
+def _rest_world_matrix(context, obj, arm):
+    """World matrix of obj with the involved armatures in their rest pose."""
+    rigs = {a for a in (arm, obj.parent) if a is not None and a.type == "ARMATURE"}
+    states = [(a, a.data.pose_position) for a in rigs]
+    for a, _ in states:
+        a.data.pose_position = "REST"
+    context.view_layer.update()
+    mat = obj.matrix_world.copy()
+    for a, st in states:
+        a.data.pose_position = st
+    context.view_layer.update()
+    return mat
+
+
+def _skin(mesh_obj, names, svals, mids):
+    nb = len(names)
+    for n in names:
+        old = mesh_obj.vertex_groups.get(n)
+        if old is not None:
+            mesh_obj.vertex_groups.remove(old)
+    groups = [mesh_obj.vertex_groups.new(name=n) for n in names]
+    for vi, y in enumerate(svals):
+        if y <= mids[0]:
+            groups[0].add([vi], 1.0, "REPLACE")
+        elif y >= mids[-1]:
+            groups[-1].add([vi], 1.0, "REPLACE")
+        else:
+            j = next(j for j in range(nb - 1) if y < mids[j + 1])
+            t = (y - mids[j]) / (mids[j + 1] - mids[j])
+            groups[j].add([vi], 1.0 - t, "REPLACE")
+            groups[j + 1].add([vi], t, "REPLACE")
+    if not any(m.type == "ARMATURE" for m in mesh_obj.modifiers):
+        mesh_obj.modifiers.new("Armature", "ARMATURE")
+
+
+def build_rig(context, arm, parent_bone, prefix, chain, bend_axis, rest, coil, ext,
+              sign, soft, knee, knee_width, knee_share, create_target):
+    """Create bones, controls, target and drivers.
+
+    chain      armature-space joint positions (n_bones + 1)
+    bend_axis  armature-space axis the chain bends around (becomes bone X)
+    rest/coil/ext  relative angle per bone (bone 0 relative to its rest frame)
+               in the rest pose / coiled / default extended
+    sign       +1: positive angle = rotation about +X, -1: about -X
+    Returns (bone names, control bone name, fit error).
+    """
+    nb = len(chain) - 1
+    lens = [(chain[i + 1] - chain[i]).length for i in range(nb)]
+    L = sum(lens)
+    bounds = [0.0]
+    for ln in lens:
+        bounds.append(bounds[-1] + ln)
+    mids = [(bounds[i] + bounds[i + 1]) / 2 for i in range(nb)]
+    profile = _bend_profile(mids, L, knee, knee_width, knee_share)
+    c_bend, c_chord, r_min, fit_err = _fit_reach(lens, profile, L, math.radians(170.0))
+
+    axis = Vector(bend_axis).normalized()
+    y0 = (chain[1] - chain[0]).normalized()
+    curl = sign * axis.cross(y0)          # side the coil / knee bends to
+    names = [f"{prefix}.{i:03d}" for i in range(nb)]
+    ctrl_name = f"{prefix}_ctrl"
+    aim_name = f"MCH-{prefix}_aim"
+
+    for o in context.selected_objects:
+        o.select_set(False)
+    arm.hide_set(False)
+    arm.select_set(True)
+    context.view_layer.objects.active = arm
+    bpy.ops.object.mode_set(mode="EDIT")
+    ebones = arm.data.edit_bones
+    parent = ebones.get(parent_bone) if parent_bone else None
+    deform_coll = _bone_collection(arm.data, "Proboscis")
+    ctrl_coll = _bone_collection(arm.data, "Proboscis Controls")
+    mch_coll = _bone_collection(arm.data, "Proboscis MCH", visible=False)
+
+    def roll(eb):
+        y = (eb.tail - eb.head).normalized()
+        eb.align_roll(axis.cross(y))       # bone X = bend axis
+
+    prev = parent
+    for i, name in enumerate(names):
+        eb = ebones.new(name)
+        eb.head, eb.tail = chain[i], chain[i + 1]
+        roll(eb)
+        eb.parent = prev
+        eb.use_connect = i > 0
+        eb.use_deform = True
+        if deform_coll:
+            deform_coll.assign(eb)
+        prev = eb
+    aim = ebones.new(aim_name)
+    aim.head, aim.tail = chain[0], chain[1]
+    roll(aim)
+    aim.parent = parent
+    aim.use_deform = False
+    if mch_coll:
+        mch_coll.assign(aim)
+    ctrl = ebones.new(ctrl_name)
+    ctrl.head = chain[0] - curl * (0.15 * L) - y0 * (0.05 * L)
+    ctrl.tail = ctrl.head + y0 * (0.15 * L)
+    roll(ctrl)
+    ctrl.parent = parent
+    ctrl.use_deform = False
+    if ctrl_coll:
+        ctrl_coll.assign(ctrl)
+    bpy.ops.object.mode_set(mode="OBJECT")
+
+    pbones = arm.pose.bones
+    cpb = pbones[ctrl_name]
+    _set_prop(cpb, RIG_TAG, True)
+    _set_prop(cpb, "aim_bone", aim_name)
+    _set_prop(cpb, "root_bone", names[0])
+    _set_prop(cpb, "extend", 0.0, "0 = 巻いた状態 / 1 = 伸ばして目標に届く", 0.0, 1.0)
+    _set_prop(cpb, "aim", 1.0, "1 = 目標に向かって伸ばす / 0 = 決まった形に伸ばす", 0.0, 1.0)
+    for p in ("_yaw", "_beta", "_tq", "_bend", "_alpha"):
+        cpb[p] = 0.0
+    cpb["reach_length"] = L
+    cpb["reach_min"] = r_min
+    cpb.lock_location = cpb.lock_rotation = cpb.lock_scale = (True, True, True)
+
+    target = None
+    if create_target:
+        target = bpy.data.objects.new(f"{prefix}_target", None)
+        target.empty_display_type = "SPHERE"
+        target.empty_display_size = 0.03 * L * arm.matrix_world.to_scale().x
+        context.collection.objects.link(target)
+        ang, pos = 0.0, Vector(chain[0])
+        for ln, d in zip(lens, ext):
+            ang += d
+            pos = pos + (y0 * math.cos(ang) + curl * math.sin(ang)) * ln
+        target.location = arm.matrix_world @ pos
+    con = pbones[aim_name].constraints.new("COPY_LOCATION")
+    con.name = "Proboscis Target"
+    con.target = target
+
+    C = ctrl_name
+    zc = "-z" if sign < 0 else "z"
+    _add_driver(arm, f'pose.bones["{C}"]["_yaw"]', None, "atan2(-x, y)",
+                loc_bone=aim_name, ctrl=C)
+    _add_driver(arm, f'pose.bones["{C}"]["_beta"]', None, f"atan2({zc}, sqrt(x*x + y*y))",
+                loc_bone=aim_name, ctrl=C)
+    _add_driver(arm, f'pose.bones["{C}"]["_tq"]', None,
+                f"sqrt(1 - clamp(sqrt(x*x + y*y + z*z) / {L:.6g}, {r_min + 1e-4:.6f}, 1))",
+                loc_bone=aim_name, ctrl=C)
+    _add_driver(arm, f'pose.bones["{C}"]["_bend"]', None, _horner(c_bend),
+                [("t", "_tq")], ctrl=C)
+    _add_driver(arm, f'pose.bones["{C}"]["_alpha"]', None, f"b - ({_horner(c_chord)})",
+                [("t", "_tq"), ("b", "_beta")], ctrl=C)
+
+    w = soft
+    lead = "-" if sign < 0 else ""
+    bone_vars = [("e", "extend"), ("m", "aim"), ("g", "_bend"), ("a", "_alpha")]
+    for i, name in enumerate(names):
+        pb = pbones[name]
+        pb.rotation_mode = "XYZ"
+        pb.lock_location = (True, True, True)
+        coiled = (f"smoothstep(e * {1 + 2 * w:.4f} - {2 * w:.4f}, e * {1 + 2 * w:.4f}, "
+                  f"{mids[i] / L:.5f})")
+        reach = (f"a + g * {profile[0]:.6f}" if i == 0
+                 else f"g * {profile[i] - profile[i - 1]:.6f}")
+        body = f"lerp(lerp({ext[i]:.6f}, {reach}, m), {coil[i]:.6f}, {coiled})"
+        if abs(rest[i]) > 1e-9:
+            body = f"{body} - {rest[i]:.6f}"
+        _add_driver(arm, f'pose.bones["{name}"].rotation_euler', 0, f"{lead}({body})",
+                    bone_vars, ctrl=C)
+    _add_driver(arm, f'pose.bones["{names[0]}"].rotation_euler', 2,
+                "w * m * smoothstep(0, 1, e)",
+                [("e", "extend"), ("m", "aim"), ("w", "_yaw")], ctrl=C)
+    return names, ctrl_name, mids, fit_err
+
+
+# --------------------------------------------------------------------------
 # Operators
 # --------------------------------------------------------------------------
 
-class OBJECT_OT_proboscis_generate_rig(Operator):
-    """口吻をボーンで動くメッシュにする（頭のボーンの子・伸ばすと目標へ届く）"""
-    bl_idname = "object.proboscis_generate_rig"
-    bl_label = "Generate Rig"
-    bl_options = {"REGISTER", "UNDO"}
-
+class _RigOptions:
     armature_name: StringProperty(
         name="Armature",
         description="追加先のアーマチュア（蝶の本体のリグ）。空なら新しく作ります")
@@ -299,24 +696,15 @@ class OBJECT_OT_proboscis_generate_rig(Operator):
                               description="曲がりのうち、ひざが受け持つ割合（残りは先端側のゆるいカーブ）")
     create_target: BoolProperty(name="Create Target", default=True,
                                 description="伸ばした先の目標（Empty）を作る")
-    auto_uv: BoolProperty(name="Auto Seams + UV Unwrap", default=True)
 
-    @classmethod
-    def poll(cls, context):
-        from . import find_proboscis_modifier
-        return find_proboscis_modifier(context.active_object) is not None
-
-    def invoke(self, context, event):
-        obj = context.active_object
+    def prefill(self, obj):
         par = obj.parent
         if par is not None and par.type == "ARMATURE" and not self.armature_name:
             self.armature_name = par.name
             if obj.parent_type == "BONE":
                 self.parent_bone = obj.parent_bone
-        return context.window_manager.invoke_props_dialog(self, width=360)
 
-    def draw(self, context):
-        layout = self.layout
+    def draw_common(self, layout):
         layout.prop_search(self, "armature_name", bpy.data, "objects")
         arm = bpy.data.objects.get(self.armature_name)
         if arm is not None and arm.type == "ARMATURE":
@@ -328,53 +716,172 @@ class OBJECT_OT_proboscis_generate_rig(Operator):
         col.prop(self, "knee_width")
         col.prop(self, "knee_share")
         layout.prop(self, "create_target")
-        layout.prop(self, "auto_uv")
 
-    # ------------------------------------------------------------------
-    def execute(self, context):
-        from . import find_proboscis_modifier, set_input, get_input
-        src = context.active_object
-        mod = find_proboscis_modifier(src)
-        if context.mode != "OBJECT":
-            bpy.ops.object.mode_set(mode="OBJECT")
-
-        arm = None
+    def get_armature(self, context, world):
+        """Existing armature (validated) or a new one. None + report on error."""
         if self.armature_name:
             arm = bpy.data.objects.get(self.armature_name)
             if arm is None or arm.type != "ARMATURE":
                 self.report({"ERROR"}, f"アーマチュアが見つかりません: {self.armature_name}")
-                return {"CANCELLED"}
+                return None
             if self.parent_bone and self.parent_bone not in arm.data.bones:
                 self.report({"ERROR"}, f"ボーンが見つかりません: {self.parent_bone}")
-                return {"CANCELLED"}
+                return None
             if any(b.name.startswith(self.prefix + ".") for b in arm.data.bones):
                 self.report({"ERROR"}, f"'{self.prefix}' のボーンが既にあります。名前を変えてください")
-                return {"CANCELLED"}
+                return None
+            return arm
+        data = bpy.data.armatures.new(f"{self.prefix}_rig")
+        arm = bpy.data.objects.new(f"{self.prefix}_rig", data)
+        context.collection.objects.link(arm)
+        arm.matrix_world = Matrix.LocRotScale(*world.decompose()[:2], Vector((1, 1, 1)))
+        arm.show_in_front = True
+        return arm
+
+
+def _finish(context, arm, mesh_obj, world):
+    mesh_obj.parent = arm
+    mesh_obj.parent_type = "OBJECT"
+    mesh_obj.matrix_world = world
+    for m in mesh_obj.modifiers:
+        if m.type == "ARMATURE":
+            m.object = arm
+    for o in context.selected_objects:
+        o.select_set(False)
+    arm.select_set(True)
+    context.view_layer.objects.active = arm
+    context.view_layer.update()
+
+
+class OBJECT_OT_proboscis_rig_mesh(_RigOptions, Operator):
+    """自分で作った（巻いた形の）口吻メッシュにボーンを入れる。メッシュはそのまま"""
+    bl_idname = "object.proboscis_rig_mesh"
+    bl_label = "Rig This Mesh"
+    bl_options = {"REGISTER", "UNDO"}
+
+    flip: BoolProperty(name="Flip Base / Tip", default=False,
+                       description="根元と先端の判定が逆のときにオン")
+    extend_angle: FloatProperty(name="Extend Direction", default=0.0, subtype="ANGLE",
+                                min=-math.pi, max=math.pi,
+                                description="目標なしで伸ばすときの向き（根元の向きからの角度。正で巻く側）")
+    extend_bend: FloatProperty(name="Extended Bend", default=math.radians(25.0),
+                               subtype="ANGLE", min=-math.tau, max=math.tau,
+                               description="目標なしで伸ばしたときの全体の反り")
+    softness: FloatProperty(name="Uncoil Softness", default=0.15, min=0.01, max=1.0,
+                            subtype="FACTOR", description="ほどける境目のなめらかさ")
+
+    @classmethod
+    def poll(cls, context):
+        from . import find_proboscis_modifier
+        obj = context.active_object
+        return (obj is not None and obj.type == "MESH"
+                and find_proboscis_modifier(obj) is None
+                and find_rig_controls(obj)[1] is None)
+
+    def invoke(self, context, event):
+        self.prefill(context.active_object)
+        return context.window_manager.invoke_props_dialog(self, width=360)
+
+    def draw(self, context):
+        layout = self.layout
+        self.draw_common(layout)
+        layout.prop(self, "flip")
+        col = layout.column(align=True)
+        col.prop(self, "extend_angle")
+        col.prop(self, "extend_bend")
+        col.prop(self, "softness")
+
+    def execute(self, context):
+        obj = context.active_object
+        if context.mode != "OBJECT":
+            bpy.ops.object.mode_set(mode="OBJECT")
+        if len(obj.data.vertices) < 16:
+            self.report({"ERROR"}, "メッシュが小さすぎます")
+            return {"CANCELLED"}
+        arm_pre = bpy.data.objects.get(self.armature_name) if self.armature_name else None
+        world = _rest_world_matrix(context, obj, arm_pre)
+        arm = self.get_armature(context, world)
+        if arm is None:
+            return {"CANCELLED"}
+        to_arm = arm.matrix_world.inverted() @ world
+
+        coords = [to_arm @ v.co for v in obj.data.vertices]
+        nmat = to_arm.to_3x3().inverted().transposed()
+        normals = [(nmat @ v.normal).normalized() for v in obj.data.vertices]
+        edges = [tuple(e.vertices) for e in obj.data.edges]
+        pts, arc, svals, normal, _radius = tube_centerline(coords, normals, edges, self.flip)
+        chain, _bounds = chain_from_centerline(pts, arc, normal, self.max_bend)
+        nb = len(chain) - 1
+        if nb < 4:
+            self.report({"ERROR"}, "中心線を取れませんでした（筒状のメッシュですか？）")
+            return {"CANCELLED"}
+        axis = Vector(normal)
+        dirs = [(chain[i + 1] - chain[i]).normalized() for i in range(nb)]
+        rest = [0.0] + [_signed_angle(dirs[i - 1], dirs[i], axis) for i in range(1, nb)]
+        lens = [(chain[i + 1] - chain[i]).length for i in range(nb)]
+        L = sum(lens)
+        mids, acc = [], 0.0
+        for ln in lens:
+            mids.append(acc + ln / 2)
+            acc += ln
+        k = self.extend_bend / L
+        ext = [self.extend_angle + k * mids[0]] + [k * (mids[i] - mids[i - 1])
+                                                   for i in range(1, nb)]
+
+        names, _ctrl, mids_built, fit_err = build_rig(
+            context, arm, self.parent_bone, self.prefix, chain, axis, rest, rest, ext,
+            +1, self.softness, self.knee, self.knee_width, self.knee_share,
+            self.create_target)
+        # weights: arc position of each vertex along the centerline, mapped to
+        # the bone chain (centerline arc and chain arc differ only slightly)
+        scale = L / float(arc[-1])
+        _skin(obj, names, [float(v) * scale for v in svals], mids_built)
+        _finish(context, arm, obj, world)
+        self.report({"INFO"}, f"{nb} bones / fit error {math.degrees(fit_err):.3f} deg")
+        return {"FINISHED"}
+
+
+class OBJECT_OT_proboscis_generate_rig(_RigOptions, Operator):
+    """アドオンで作った口吻からメッシュとリグを作る（頭のボーンの子・伸ばすと目標へ届く）"""
+    bl_idname = "object.proboscis_generate_rig"
+    bl_label = "Generate Rig"
+    bl_options = {"REGISTER", "UNDO"}
+
+    auto_uv: BoolProperty(name="Auto Seams + UV Unwrap", default=True)
+
+    @classmethod
+    def poll(cls, context):
+        from . import find_proboscis_modifier
+        return find_proboscis_modifier(context.active_object) is not None
+
+    def invoke(self, context, event):
+        self.prefill(context.active_object)
+        return context.window_manager.invoke_props_dialog(self, width=360)
+
+    def draw(self, context):
+        self.draw_common(self.layout)
+        self.layout.prop(self, "auto_uv")
+
+    def execute(self, context):
+        from . import (find_proboscis_modifier, set_input, get_input,
+                       _clean_material_slots, mark_proboscis_seams)
+        src = context.active_object
+        mod = find_proboscis_modifier(src)
+        if context.mode != "OBJECT":
+            bpy.ops.object.mode_set(mode="OBJECT")
+        arm_pre = bpy.data.objects.get(self.armature_name) if self.armature_name else None
+        src_world = _rest_world_matrix(context, src, arm_pre)
+        arm = self.get_armature(context, src_world)
+        if arm is None:
+            return {"CANCELLED"}
 
         params = ShapeParams(mod)
-        L = params.length
         bounds = params.bone_bounds(self.max_bend)
         nb = len(bounds) - 1
-        lens = [bounds[i + 1] - bounds[i] for i in range(nb)]
-        mids = [(bounds[i] + bounds[i + 1]) / 2 for i in range(nb)]
         coil = params.relative_angles(bounds, 0.0, params.base_angle, params.bend)
         ext = params.relative_angles(bounds, 1.0, params.base_angle, params.bend)
-        profile = _bend_profile(mids, L, self.knee, self.knee_width, self.knee_share)
-        c_bend, c_chord, r_min, fit_err = _fit_reach(lens, profile, L, math.radians(170.0))
 
-        # --- where the proboscis sits, in the armature's rest pose ---------
-        rest_states = []
-        for a in {arm, src.parent if src.parent and src.parent.type == "ARMATURE" else None}:
-            if a is not None:
-                rest_states.append((a, a.data.pose_position))
-                a.data.pose_position = "REST"
-        context.view_layer.update()
-        src_world = src.matrix_world.copy()
-        for a, state in rest_states:
-            a.data.pose_position = state
-        context.view_layer.update()
-
-        # --- straight rest mesh from the node group --------------------------
+        # straight rest mesh from the node group
         keep = {n: get_input(mod, n) for n in ("Uncoil", "Base Angle", "Extended Bend",
                                                "Wiggle Amount", "Use Edit Mesh")}
         for n, v in (("Uncoil", 1.0), ("Base Angle", 0.0), ("Extended Bend", 0.0),
@@ -390,157 +897,25 @@ class OBJECT_OT_proboscis_generate_rig(Operator):
             set_input(mod, n, v)
         src.update_tag()
         mesh.name = f"{src.name}_rigged"
-        from . import _clean_material_slots, mark_proboscis_seams
         _clean_material_slots(mesh)
 
-        # --- armature ----------------------------------------------------------
-        if arm is None:
-            arm_data = bpy.data.armatures.new(f"{src.name}_rig")
-            arm = bpy.data.objects.new(f"{src.name}_rig", arm_data)
-            context.collection.objects.link(arm)
-            arm.matrix_world = Matrix.LocRotScale(*src_world.decompose()[:2], Vector((1, 1, 1)))
-            arm.show_in_front = True
         to_arm = arm.matrix_world.inverted() @ src_world
-        scale = (to_arm.to_scale().x + to_arm.to_scale().y + to_arm.to_scale().z) / 3.0
-        up = (to_arm.to_3x3() @ Vector((0.0, 0.0, 1.0))).normalized()
+        chain = [to_arm @ Vector((0.0, b, 0.0)) for b in bounds]
+        side = (to_arm.to_3x3() @ Vector((1.0, 0.0, 0.0))).normalized()
+        names, _ctrl, _mids, fit_err = build_rig(
+            context, arm, self.parent_bone, self.prefix, chain, side, [0.0] * nb, coil, ext,
+            -1, params.soft, self.knee, self.knee_width, self.knee_share,
+            self.create_target)
 
-        names = [f"{self.prefix}.{i:03d}" for i in range(nb)]
-        ctrl_name = f"{self.prefix}_ctrl"
-        aim_name = f"MCH-{self.prefix}_aim"
-
-        for o in context.selected_objects:
-            o.select_set(False)
-        arm.hide_set(False)
-        arm.select_set(True)
-        context.view_layer.objects.active = arm
-        bpy.ops.object.mode_set(mode="EDIT")
-        ebones = arm.data.edit_bones
-        parent = ebones.get(self.parent_bone) if self.parent_bone else None
-        deform_coll = _bone_collection(arm.data, "Proboscis")
-        ctrl_coll = _bone_collection(arm.data, "Proboscis Controls")
-        mch_coll = _bone_collection(arm.data, "Proboscis MCH", visible=False)
-
-        def P(local):
-            return to_arm @ Vector(local)
-
-        prev = parent
-        for i, name in enumerate(names):
-            eb = ebones.new(name)
-            eb.head = P((0.0, bounds[i], 0.0))
-            eb.tail = P((0.0, bounds[i + 1], 0.0))
-            eb.align_roll(up)
-            eb.parent = prev
-            eb.use_connect = i > 0
-            eb.use_deform = True
-            if deform_coll:
-                deform_coll.assign(eb)
-            prev = eb
-        aim = ebones.new(aim_name)
-        aim.head = P((0.0, 0.0, 0.0))
-        aim.tail = P((0.0, bounds[1], 0.0))
-        aim.align_roll(up)
-        aim.parent = parent
-        aim.use_deform = False
-        if mch_coll:
-            mch_coll.assign(aim)
-        ctrl = ebones.new(ctrl_name)
-        ctrl.head = P((0.0, -0.05 * L, 0.15 * L))
-        ctrl.tail = P((0.0, 0.10 * L, 0.15 * L))
-        ctrl.align_roll(up)
-        ctrl.parent = parent
-        ctrl.use_deform = False
-        if ctrl_coll:
-            ctrl_coll.assign(ctrl)
-        bpy.ops.object.mode_set(mode="OBJECT")
-
-        pbones = arm.pose.bones
-        cpb = pbones[ctrl_name]
-        _set_prop(cpb, RIG_TAG, True)
-        _set_prop(cpb, "aim_bone", aim_name)
-        _set_prop(cpb, "root_bone", names[0])
-        _set_prop(cpb, "extend", 0.0, "0 = 巻いた状態 / 1 = 伸ばして目標に届く", 0.0, 1.0)
-        _set_prop(cpb, "aim", 1.0, "1 = 目標に向かって伸ばす / 0 = 決まった形に伸ばす", 0.0, 1.0)
-        for p in ("_yaw", "_beta", "_tq", "_bend", "_alpha"):
-            cpb[p] = 0.0
-        cpb["reach_length"] = L * scale
-        cpb["reach_min"] = r_min
-        cpb.lock_location = cpb.lock_rotation = cpb.lock_scale = (True, True, True)
-
-        # --- target --------------------------------------------------------
-        target = None
-        if self.create_target:
-            target = bpy.data.objects.new(f"{self.prefix}_target", None)
-            target.empty_display_type = "SPHERE"
-            target.empty_display_size = 0.03 * L * src_world.to_scale().x
-            context.collection.objects.link(target)
-            # default spot: the tip of the default extended shape
-            ang, pos = 0.0, Vector((0.0, 0.0, 0.0))
-            for ln, d in zip(lens, ext):
-                ang += d
-                pos += Vector((0.0, math.cos(ang), -math.sin(ang))) * ln
-            target.location = src_world @ pos
-        con = pbones[aim_name].constraints.new("COPY_LOCATION")
-        con.name = "Proboscis Target"
-        con.target = target
-
-        # --- drivers -------------------------------------------------------
-        Ls = L * scale
-        C = ctrl_name
-        _add_driver(arm, f'pose.bones["{C}"]["_yaw"]', None, "atan2(-x, y)",
-                    loc_bone=aim_name, ctrl=C)
-        _add_driver(arm, f'pose.bones["{C}"]["_beta"]', None, "atan2(-z, sqrt(x*x + y*y))",
-                    loc_bone=aim_name, ctrl=C)
-        _add_driver(arm, f'pose.bones["{C}"]["_tq"]', None,
-                    f"sqrt(1 - clamp(sqrt(x*x + y*y + z*z) / {Ls:.6g}, {r_min + 1e-4:.6f}, 1))",
-                    loc_bone=aim_name, ctrl=C)
-        _add_driver(arm, f'pose.bones["{C}"]["_bend"]', None, _horner(c_bend),
-                    [("t", "_tq")], ctrl=C)
-        _add_driver(arm, f'pose.bones["{C}"]["_alpha"]', None, f"b - ({_horner(c_chord)})",
-                    [("t", "_tq"), ("b", "_beta")], ctrl=C)
-
-        w = params.soft
-        bone_vars = [("e", "extend"), ("m", "aim"), ("g", "_bend"), ("a", "_alpha")]
-        for i, name in enumerate(names):
-            pb = pbones[name]
-            pb.rotation_mode = "XYZ"
-            pb.lock_location = (True, True, True)
-            coiled = (f"smoothstep(e * {1 + 2 * w:.4f} - {2 * w:.4f}, e * {1 + 2 * w:.4f}, "
-                      f"{mids[i] / L:.5f})")
-            if i == 0:
-                reach = f"a + g * {profile[0]:.6f}"
-            else:
-                reach = f"g * {profile[i] - profile[i - 1]:.6f}"
-            _add_driver(arm, f'pose.bones["{name}"].rotation_euler', 0,
-                        f"-lerp(lerp({ext[i]:.6f}, {reach}, m), {coil[i]:.6f}, {coiled})",
-                        bone_vars, ctrl=C)
-        _add_driver(arm, f'pose.bones["{names[0]}"].rotation_euler', 2,
-                    "w * m * smoothstep(0, 1, e)",
-                    [("e", "extend"), ("m", "aim"), ("w", "_yaw")], ctrl=C)
-
-        # --- mesh object -------------------------------------------------------
         mesh_obj = bpy.data.objects.new(f"{src.name}_mesh", mesh)
         context.collection.objects.link(mesh_obj)
-        mesh_obj.parent = arm
-        mesh_obj.matrix_world = src_world
-        groups = [mesh_obj.vertex_groups.new(name=n) for n in names]
-        for vi, v in enumerate(mesh.vertices):
-            y = v.co.y
-            if y <= mids[0]:
-                groups[0].add([vi], 1.0, "REPLACE")
-            elif y >= mids[-1]:
-                groups[-1].add([vi], 1.0, "REPLACE")
-            else:
-                j = next(j for j in range(nb - 1) if y < mids[j + 1])
-                t = (y - mids[j]) / (mids[j + 1] - mids[j])
-                groups[j].add([vi], 1.0 - t, "REPLACE")
-                groups[j + 1].add([vi], t, "REPLACE")
-        amod = mesh_obj.modifiers.new("Armature", "ARMATURE")
-        amod.object = arm
+        mids_local = [(bounds[i] + bounds[i + 1]) / 2 for i in range(nb)]
+        _skin(mesh_obj, names, [v.co.y for v in mesh.vertices], mids_local)
+        _finish(context, arm, mesh_obj, src_world)
 
         if self.auto_uv and mark_proboscis_seams(mesh):
             if not mesh.uv_layers:
                 mesh.uv_layers.new(name="UVMap")
-            bpy.ops.object.mode_set(mode="OBJECT")
             arm.select_set(False)
             mesh_obj.select_set(True)
             context.view_layer.objects.active = mesh_obj
@@ -549,16 +924,11 @@ class OBJECT_OT_proboscis_generate_rig(Operator):
             bpy.ops.uv.unwrap(method="ANGLE_BASED", margin=0.002)
             bpy.ops.object.mode_set(mode="OBJECT")
             mesh_obj.select_set(False)
+            arm.select_set(True)
+            context.view_layer.objects.active = arm
 
-        # the procedural source is no longer needed for the animation
         src.hide_set(True)
         src.hide_render = True
-
-        for o in context.selected_objects:
-            o.select_set(False)
-        arm.select_set(True)
-        context.view_layer.objects.active = arm
-        context.view_layer.update()
         self.report({"INFO"}, f"{nb} bones / fit error {math.degrees(fit_err):.3f} deg")
         return {"FINISHED"}
 
@@ -627,6 +997,7 @@ def draw_rig_panel(layout, context):
 
 
 classes = (
+    OBJECT_OT_proboscis_rig_mesh,
     OBJECT_OT_proboscis_generate_rig,
     POSE_OT_proboscis_rig_drink,
 )
