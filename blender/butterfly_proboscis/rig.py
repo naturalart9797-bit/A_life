@@ -638,13 +638,26 @@ def _rest_world_matrix(context, obj, arm):
     return mat
 
 
-def _skin(mesh_obj, names, svals, mids):
+def _skin(mesh_obj, names, svals, mids, bounds=None):
+    """Vertex groups from the position along the tube.
+
+    bounds given: each vertex belongs to exactly one bone (for B-Bones, which
+    bend smoothly themselves); otherwise blend linearly between bone middles.
+    """
     nb = len(names)
     for n in names:
         old = mesh_obj.vertex_groups.get(n)
         if old is not None:
             mesh_obj.vertex_groups.remove(old)
     groups = [mesh_obj.vertex_groups.new(name=n) for n in names]
+    if bounds is not None:
+        import bisect
+        for vi, y in enumerate(svals):
+            j = min(max(bisect.bisect_right(bounds, y) - 1, 0), nb - 1)
+            groups[j].add([vi], 1.0, "REPLACE")
+        if not any(m.type == "ARMATURE" for m in mesh_obj.modifiers):
+            mesh_obj.modifiers.new("Armature", "ARMATURE")
+        return
     for vi, y in enumerate(svals):
         if y <= mids[0]:
             groups[0].add([vi], 1.0, "REPLACE")
@@ -660,7 +673,7 @@ def _skin(mesh_obj, names, svals, mids):
 
 
 def build_rig(context, arm, parent_bone, prefix, chain, bend_axis, rest, coil, ext,
-              sign, soft, knee, knee_width, knee_share, create_target):
+              sign, soft, knee, knee_width, knee_share, create_target, bbone_segments=0):
     """Create bones, controls, target and drivers.
 
     chain      armature-space joint positions (n_bones + 1)
@@ -711,6 +724,11 @@ def build_rig(context, arm, parent_bone, prefix, chain, bend_axis, rest, coil, e
         eb.parent = prev
         eb.use_connect = i > 0
         eb.use_deform = True
+        if bbone_segments > 1:
+            eb.bbone_segments = bbone_segments
+            eb.bbone_handle_type_start = eb.bbone_handle_type_end = "AUTO"
+            if hasattr(eb, "bbone_mapping_mode"):   # Blender 4.0+: follow the curved rest
+                eb.bbone_mapping_mode = "CURVED"
         if deform_coll:
             deform_coll.assign(eb)
         prev = eb
@@ -810,6 +828,12 @@ class _RigOptions:
     bone_count: IntProperty(name="Bone Count", default=0, min=0, max=500,
                             description="ボーンの本数。0 = 自動（Max Bend per Bone で決める）。"
                                         "数を指定しても先端ほど短く配置します")
+    smooth_bbone: BoolProperty(
+        name="Smooth Bending (B-Bone)", default=True,
+        description="ボーン自体をなめらかに曲げて、つなぎ目の波打ちをなくす（Blender 内のアニメ向け）。"
+                    "ゲームエンジンへ FBX で書き出す場合はオフにして本数を多めに")
+    bbone_segments: IntProperty(name="B-Bone Segments", default=16, min=2, max=32,
+                                description="1 本のボーンを何分割で曲げるか")
     equal_length: BoolProperty(name="Equal Bone Length", default=False,
                                description="ボーンを全部同じ長さにする（オフ = 先端ほど短く）")
     max_bend: FloatProperty(name="Max Bend per Bone", default=math.radians(15.0),
@@ -841,6 +865,11 @@ class _RigOptions:
         if arm is not None and arm.type == "ARMATURE":
             layout.prop_search(self, "parent_bone", arm.data, "bones")
         layout.prop(self, "prefix")
+        col = layout.column(align=True)
+        col.prop(self, "smooth_bbone")
+        sub = col.row()
+        sub.enabled = self.smooth_bbone
+        sub.prop(self, "bbone_segments")
         col = layout.column(align=True)
         col.prop(self, "equal_length")
         col.prop(self, "bone_count", text="Bone Count (0 = Auto)")
@@ -969,16 +998,19 @@ class OBJECT_OT_proboscis_rig_mesh(_RigOptions, Operator):
         names, _ctrl, _mids, fit_err = build_rig(
             context, arm, self.parent_bone, self.prefix, chain, axis, rest, rest, ext,
             +1, self.softness, self.knee, self.knee_width, self.knee_share,
-            self.create_target)
+            self.create_target, self.bbone_segments if self.smooth_bbone else 0)
         # weights: arc position of each vertex along the centerline vs. the
         # arc position of each bone's middle on the same centerline
         arc_mids = [(arc_bounds[i] + arc_bounds[i + 1]) / 2 for i in range(nb)]
-        _skin(obj, names, [float(v) for v in svals], arc_mids)
+        _skin(obj, names, [float(v) for v in svals], arc_mids,
+              arc_bounds if self.smooth_bbone else None)
         _finish(context, arm, obj, world)
         worst = math.degrees(max(abs(a) for a in rest[1:]))
         msg = f"{nb} bones / max bend per bone {worst:.0f} deg"
-        if worst > 30:
-            self.report({"WARNING"}, msg + "（巻きがカクカクします。本数を増やしてください）")
+        if self.smooth_bbone and worst > 60:
+            self.report({"WARNING"}, msg + "（先端の巻きが伸びきりません。本数を増やしてください）")
+        elif not self.smooth_bbone and worst > 30:
+            self.report({"WARNING"}, msg + "（伸ばすと波打ちます。B-Bone をオンにするか本数を増やしてください）")
         else:
             self.report({"INFO"}, msg)
         return {"FINISHED"}
@@ -1049,12 +1081,13 @@ class OBJECT_OT_proboscis_generate_rig(_RigOptions, Operator):
         names, _ctrl, _mids, fit_err = build_rig(
             context, arm, self.parent_bone, self.prefix, chain, side, [0.0] * nb, coil, ext,
             -1, params.soft, self.knee, self.knee_width, self.knee_share,
-            self.create_target)
+            self.create_target, self.bbone_segments if self.smooth_bbone else 0)
 
         mesh_obj = bpy.data.objects.new(f"{src.name}_mesh", mesh)
         context.collection.objects.link(mesh_obj)
         mids_local = [(bounds[i] + bounds[i + 1]) / 2 for i in range(nb)]
-        _skin(mesh_obj, names, [v.co.y for v in mesh.vertices], mids_local)
+        _skin(mesh_obj, names, [v.co.y for v in mesh.vertices], mids_local,
+              bounds if self.smooth_bbone else None)
         _finish(context, arm, mesh_obj, src_world)
 
         if self.auto_uv and mark_proboscis_seams(mesh):
@@ -1075,8 +1108,10 @@ class OBJECT_OT_proboscis_generate_rig(_RigOptions, Operator):
         src.hide_render = True
         worst = math.degrees(max(abs(a) for a in coil[1:]))
         msg = f"{nb} bones / max bend per bone {worst:.0f} deg"
-        if worst > 30:
-            self.report({"WARNING"}, msg + "（巻きがカクカクします。本数を増やしてください）")
+        if self.smooth_bbone and worst > 60:
+            self.report({"WARNING"}, msg + "（先端の巻きが伸びきりません。本数を増やしてください）")
+        elif not self.smooth_bbone and worst > 30:
+            self.report({"WARNING"}, msg + "（伸ばすと波打ちます。B-Bone をオンにするか本数を増やしてください）")
         else:
             self.report({"INFO"}, msg)
         return {"FINISHED"}
