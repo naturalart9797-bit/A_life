@@ -199,8 +199,9 @@ def build_fairy():
         z0 = HOLE_Z + (HIP_Z - HOLE_Z) * i / N_TAIL
         z1 = HOLE_Z + (HIP_Z - HOLE_Z) * (i + 1) / N_TAIL
         n = f'DEF-tail.{i + 1:03d}'
-        rig.bone(n, (0, Y, z0), (0, Y, z1), parent=prev, connect=i > 0,
-                 deform=True, coll='Deform')
+        eb = rig.bone(n, (0, Y, z0), (0, Y, z1), parent=prev, connect=i > 0,
+                      deform=True, coll='Deform')
+        eb.inherit_scale = 'NONE'     # 親の伸びを継承しない (ねじれ補正でゆがまないように)
         tail.append(n)
         prev = n
     # 中間チェーン: fit = 穴〜torso を結ぶ (伸縮あり) / fix = 長さ固定
@@ -212,6 +213,9 @@ def build_fairy():
             n = f'MCH-tail_{kind}.{i + 1:03d}'
             rig.bone(n, (0, Y, z0), (0, Y, z1), parent=prev, connect=i > 0, coll='MCH')
             prev = n
+        # ねじれ測定用: チェーンの先にぶら下がり、torso の向きをコピーする
+        rig.bone(f'MCH-twist_{kind}', (0, Y, HIP_Z), (0, Y, HIP_Z + 0.1), parent=prev,
+                 coll='MCH')
 
     # コントローラー: tail_base (穴) / tail_ctrl.01〜 / torso (上半身)
     rig.bone('tail_base', (0, Y, HOLE_Z), (0, Y, HOLE_Z + 0.12), parent='root', coll='Tail')
@@ -340,6 +344,38 @@ def build_fairy():
             c.target, c.subtarget = arm, f'MCH-tail_{kind}.{i + 1:03d}'
             if kind == 'fix':
                 lock_driver(c)
+    # ---- ツイスト補正: 尾の先と torso のねじれの差を、尾全体に根元 0% → 先端 100% で分配
+    for kind in ('fit', 'fix'):
+        c = pb[f'MCH-twist_{kind}'].constraints.new('COPY_ROTATION')
+        c.target, c.subtarget = arm, 'torso'
+    for i in range(N_TAIL):
+        f = (i + 1) / N_TAIL
+        for kind in ('fit', 'fix'):
+            c = pb[tail[i]].constraints.new('TRANSFORM')
+            c.name = f'twist {kind}'
+            c.target, c.subtarget = arm, f'MCH-twist_{kind}'
+            c.owner_space = c.target_space = 'LOCAL'
+            c.map_from = 'ROTATION'
+            c.from_rotation_mode = 'SWING_TWIST_Y'
+            c.from_min_y_rot, c.from_max_y_rot = -math.pi, math.pi
+            c.map_to = 'ROTATION'
+            c.map_to_x_from = c.map_to_y_from = c.map_to_z_from = 'Y'
+            c.to_min_x_rot = c.to_max_x_rot = 0.0
+            c.to_min_z_rot = c.to_max_z_rot = 0.0
+            c.to_min_y_rot, c.to_max_y_rot = -math.pi * f, math.pi * f
+            c.mix_mode_rot = 'AFTER'
+            if kind == 'fix':
+                lock_driver(c)
+            else:
+                d = c.driver_add('influence').driver
+                d.type = 'SCRIPTED'
+                v = d.variables.new()
+                v.name = 'lock'
+                v.type = 'SINGLE_PROP'
+                v.targets[0].id = arm
+                v.targets[0].data_path = 'pose.bones["torso"]["tail_length_lock"]'
+                d.expression = '1 - lock'
+
     c = pb['hips'].constraints.new('COPY_LOCATION')
     c.name = 'ride tail tip'
     c.target, c.subtarget = arm, f'MCH-tail_fix.{N_TAIL:03d}'
