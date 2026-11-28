@@ -13,8 +13,8 @@ flower_v008.blend 用 妖精リグ + 胃袋の膨張・収縮 セットアップ
 
 fairy_rig:
   root (口の底の穴)
-   ├ tail_base / tail_ctrl.01〜06 / torso : 蛇部分のコントローラー (Spline IK, 骨 40 本)
-   └ torso → hips → spine → spine.001 → chest → neck → head
+   ├ tail_base / tail_ctrl.01〜12 / torso : 蛇部分のコントローラー (Spline IK, 骨 40 本, 伸び縮みなし)
+   └ DEF-tail.040 (蛇の先端) → hips → spine → spine.001 → chest → neck → head
                                          chest → shoulder → 腕 (IK/FK 切替) → 指
 """
 
@@ -31,7 +31,7 @@ Y = 0.03            # 体の中心 (y)
 HOLE_Z = 16.98      # 口 (mouth_geo) の底の穴
 HIP_Z = 20.0
 N_TAIL = 40         # 蛇部分の骨の数
-N_TAIL_CTRL = 6     # 途中のコントローラーの数 (根元と torso を除く)
+N_TAIL_CTRL = 12    # 途中のコントローラーの数 (根元と torso を除く)
 RIG_COLL = 'fairy_grp'
 WGT_COLL = 'fairy_rig_widgets'
 
@@ -219,14 +219,15 @@ def build_fairy():
                  coll='Torso' if n == 'torso' else 'Tail')
 
     # --- 体幹 (deform ボーンをそのまま FK コントローラーとして使う)
-    body = [('hips', (0, Y, 20.0), (0, Y, 20.20), 'torso'),
+    # hips は蛇部分の先端の骨にぶら下げる (伸び縮みしないので体が常に先端に乗る)
+    body = [('hips', (0, Y, 20.0), (0, Y, 20.20), f'DEF-tail.{N_TAIL:03d}'),
             ('spine', (0, Y, 20.20), (0, Y, 20.30), 'hips'),
             ('spine.001', (0, Y, 20.30), (0, Y, 20.40), 'spine'),
             ('chest', (0, Y, 20.40), (0, Y + 0.01, 20.58), 'spine.001'),
             ('neck', (0, Y + 0.01, 20.58), (0, 0.0, 20.665), 'chest'),
             ('head', (0, 0.0, 20.665), (0, 0.0, 20.95), 'neck')]
     for n, h, t, p in body:
-        rig.bone(n, h, t, parent=p, deform=True, connect=p not in ('torso',),
+        rig.bone(n, h, t, parent=p, deform=True, connect=True,
                  coll='Torso' if n == 'hips' else 'Body')
 
     # --- 腕・手・指
@@ -247,10 +248,10 @@ def build_fairy():
         rig.bone(f'hand.{s}', wr, hand_tip, parent=f'forearm.{s}', connect=True,
                  deform=True, roll=(0, 0, 1), coll='Arms')
         # IK
-        rig.bone(f'hand_ik.{s}', wr, hand_tip, parent='torso', roll=(0, 0, 1),
+        rig.bone(f'hand_ik.{s}', wr, hand_tip, parent='hips', roll=(0, 0, 1),
                  coll='Arm IK')
         pole = el + V((0, 0.25, 0))
-        rig.bone(f'arm_pole.{s}', pole, pole + V((0, 0.05, 0)), parent='torso',
+        rig.bone(f'arm_pole.{s}', pole, pole + V((0, 0.05, 0)), parent='hips',
                  roll=(0, 0, 1), coll='Arm IK')
         for f, ((bx, by), tip) in FINGERS.items():
             base = V((bx, by, mesh_center_near(fverts, bx, by, z_hint=tip[2]) or tip[2]))
@@ -302,7 +303,7 @@ def build_fairy():
     ik = pb[tail[-1]].constraints.new('SPLINE_IK')
     ik.target = cobj
     ik.chain_count = N_TAIL
-    ik.y_scale_mode = 'FIT_CURVE'
+    ik.y_scale_mode = 'BONE_ORIGINAL'     # 伸び縮みしない
     ik.xz_scale_mode = 'NONE'
     ik.use_curve_radius = False
     ik.use_even_divisions = True
@@ -526,8 +527,14 @@ def main(out_path=None):
     bpy.context.scene.frame_current = frame
     if active:
         set_active(active)
+    # 元ファイルで未使用 (ユーザー 0) のデータも保存時に消えないようにする
+    for attr in ('images', 'materials', 'node_groups', 'textures', 'meshes', 'actions'):
+        for b in getattr(bpy.data, attr):
+            if b.users == 0 and not b.use_fake_user:
+                b.use_fake_user = True
     if out_path:
-        bpy.ops.wm.save_as_mainfile(filepath=out_path, compress=True)
+        # 画像の相対パスを書き換えない (元ファイルと同じフォルダに保存すること)
+        bpy.ops.wm.save_as_mainfile(filepath=out_path, compress=True, relative_remap=False)
         print('[rig] saved', out_path)
 
 
