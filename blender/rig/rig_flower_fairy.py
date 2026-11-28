@@ -13,7 +13,7 @@ flower_v008.blend 用 妖精リグ + 胃袋の膨張・収縮 セットアップ
 
 fairy_rig:
   root (口の底の穴)
-   ├ tail_base / tail_ctrl.01〜18 : 蛇部分のコントローラー (NURBS + Spline IK, 骨 40 本, 移動のみ)
+   ├ tail_ctrl.01〜18 : 蛇部分のコントローラー (穴から境目まで等間隔) (NURBS + Spline IK, 骨 40 本, 移動のみ)
    └ torso → hips → spine → spine.001 → chest → neck → head  (尾とは独立)
                                          chest → shoulder → 腕 (IK/FK 切替) → 指
 """
@@ -32,7 +32,7 @@ HOLE_Z = 16.98      # 口 (mouth_geo) の底の穴
 HIP_Z = 20.2        # 尾と上半身の境目 (お腹のふくらみの一番太いところ)
 N_TAIL = 40         # 蛇部分の骨の数
 N_TAIL_CTRL = 18    # 途中のコントローラーの数 (根元と torso を除く)
-END_TAN = 0.15      # 両端をまっすぐにする長さ (穴から / 上半身へ)
+END_TAN = 0.05      # 両端をまっすぐにする長さ (穴から / 上半身へ)
 RIG_COLL = 'fairy_grp'
 WGT_COLL = 'fairy_rig_widgets'
 
@@ -217,10 +217,9 @@ def build_fairy():
         rig.bone(f'MCH-twist_{kind}', (0, Y, HIP_Z), (0, Y, HIP_Z + 0.1), parent=prev,
                  coll='MCH')
 
-    # コントローラー: tail_base (穴) / tail_ctrl.01〜 / torso (上半身)
-    rig.bone('tail_base', (0, Y, HOLE_Z), (0, Y, HOLE_Z + 0.12), parent='root', coll='Tail')
+    # コントローラー: root (穴) / tail_ctrl.01〜 (穴〜境目を等間隔) / torso (境目 = 上半身)
     rig.bone('torso', (0, Y, HIP_Z), (0, Y, HIP_Z + 0.25), parent='root', coll='Torso')
-    lo, hi = HOLE_Z + END_TAN, HIP_Z - END_TAN
+    lo, hi = HOLE_Z, HIP_Z
     ctrl_names = []
     for i in range(1, N_TAIL_CTRL + 1):
         z = lo + (hi - lo) * i / (N_TAIL_CTRL + 1)
@@ -228,7 +227,7 @@ def build_fairy():
         rig.bone(n, (0, Y, z), (0, Y, z + 0.12), parent='root', coll='Tail')
         ctrl_names.append((n, z))
     # カーブの点: 両端は 2 点ずつ (穴からまっすぐ出て、上半身の向きにまっすぐ入る)
-    curve_pts = ([('tail_base', HOLE_Z), ('tail_base', HOLE_Z + END_TAN)] + ctrl_names +
+    curve_pts = ([('root', HOLE_Z), ('root', HOLE_Z + END_TAN)] + ctrl_names +
                  [('torso', HIP_Z - END_TAN), ('torso', HIP_Z)])
 
     # --- 体幹 (deform ボーンをそのまま FK コントローラーとして使う)
@@ -241,7 +240,7 @@ def build_fairy():
             ('head', (0, 0.0, 20.665), (0, 0.0, 20.95), 'neck')]
     for n, h, t, p in body:
         rig.bone(n, h, t, parent=p, deform=True, connect=p != 'torso',
-                 coll='Torso' if n == 'hips' else 'Body')
+                 coll='Deform' if n == 'hips' else 'Body')   # hips は torso と同じなので操作は torso で
 
     # --- 腕・手・指
     arm_pts = {}
@@ -409,10 +408,9 @@ def build_fairy():
     # ---------------- 形状と色
     rig.shape('root', wgt_circle('root', 0.30), COL_CENTER)
     rig.shape('torso', wgt_circle('torso', 0.20), COL_CENTER)
-    rig.shape('tail_base', wgt_circle('tail_base', 0.16), COL_TAIL)
     for n, z in ctrl_names:
         rig.shape(n, wgt_circle('tail_ctrl', 0.13), COL_TAIL)
-    sizes = {'hips': 0.13, 'spine': 0.12, 'spine.001': 0.12, 'chest': 0.15,
+    sizes = {'spine': 0.12, 'spine.001': 0.12, 'chest': 0.15,
              'neck': 0.06, 'head': 0.13}
     for n, r in sizes.items():
         rig.shape(n, wgt_circle(n, r), COL_CENTER)
@@ -429,7 +427,7 @@ def build_fairy():
     # 動かさなくていいチャンネルはロック
     # 蛇部分の輪は「移動だけ」で形を作る (回転・スケールは効かないのでロック)
     pb['torso'].rotation_mode = 'XYZ'
-    for n, _ in [('tail_base', 0)] + ctrl_names:
+    for n, _ in ctrl_names:
         pb[n].rotation_mode = 'XYZ'
         pb[n].lock_rotation = (True, True, True)
         pb[n].lock_rotation_w = True
