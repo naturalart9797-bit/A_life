@@ -29,7 +29,7 @@ V = Vector
 
 Y = 0.03            # 体の中心 (y)
 HOLE_Z = 16.98      # 口 (mouth_geo) の底の穴
-HIP_Z = 20.0
+HIP_Z = 20.2        # 尾と上半身の境目 (お腹のふくらみの一番太いところ)
 N_TAIL = 40         # 蛇部分の骨の数
 N_TAIL_CTRL = 18    # 途中のコントローラーの数 (根元と torso を除く)
 END_TAN = 0.15      # 両端をまっすぐにする長さ (穴から / 上半身へ)
@@ -233,10 +233,10 @@ def build_fairy():
 
     # --- 体幹 (deform ボーンをそのまま FK コントローラーとして使う)
     # 上半身は torso にぶら下がる (尾を動かしても上半身は動かない)
-    body = [('hips', (0, Y, 20.0), (0, Y, 20.20), 'torso'),
-            ('spine', (0, Y, 20.20), (0, Y, 20.30), 'hips'),
-            ('spine.001', (0, Y, 20.30), (0, Y, 20.40), 'spine'),
-            ('chest', (0, Y, 20.40), (0, Y + 0.01, 20.58), 'spine.001'),
+    body = [('hips', (0, Y, HIP_Z), (0, Y, 20.30), 'torso'),
+            ('spine', (0, Y, 20.30), (0, Y, 20.37), 'hips'),
+            ('spine.001', (0, Y, 20.37), (0, Y, 20.44), 'spine'),
+            ('chest', (0, Y, 20.44), (0, Y + 0.01, 20.58), 'spine.001'),
             ('neck', (0, Y + 0.01, 20.58), (0, 0.0, 20.665), 'chest'),
             ('head', (0, 0.0, 20.665), (0, 0.0, 20.95), 'neck')]
     for n, h, t, p in body:
@@ -493,7 +493,7 @@ def weight_fairy(fairy, arm, tail):
 
     n = len(tail)
     # つなぎ目: BLEND_LO〜BLEND_HI で尾の先 → hips になめらかに移る
-    BLEND_LO, BLEND_HI = HIP_Z - 0.20, HIP_Z + 0.12
+    BLEND_LO, BLEND_HI = HIP_Z - 0.12, HIP_Z + 0.08
     tail_top = BLEND_HI
     for v in fairy.data.vertices:
         p = fairy.matrix_world @ v.co
