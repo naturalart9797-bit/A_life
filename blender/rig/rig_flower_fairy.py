@@ -13,7 +13,7 @@ flower_v008.blend 用 妖精リグ + 胃袋の膨張・収縮 セットアップ
 
 fairy_rig:
   root (口の底の穴)
-   ├ tail_base / tail_ctrl.01〜12 / torso : 蛇部分のコントローラー (Spline IK, 骨 40 本, 伸び縮みなし)
+   ├ tail_base / tail_ctrl.01〜18 / tail_tip : 蛇部分のコントローラー (NURBS + Spline IK, 骨 40 本, 伸び縮みなし, 移動のみ)
    └ DEF-tail.040 (蛇の先端) → hips → spine → spine.001 → chest → neck → head
                                          chest → shoulder → 腕 (IK/FK 切替) → 指
 """
@@ -31,7 +31,7 @@ Y = 0.03            # 体の中心 (y)
 HOLE_Z = 16.98      # 口 (mouth_geo) の底の穴
 HIP_Z = 20.0
 N_TAIL = 40         # 蛇部分の骨の数
-N_TAIL_CTRL = 12    # 途中のコントローラーの数 (根元と torso を除く)
+N_TAIL_CTRL = 18    # 途中のコントローラーの数 (根元と torso を除く)
 RIG_COLL = 'fairy_grp'
 WGT_COLL = 'fairy_rig_widgets'
 
@@ -202,15 +202,6 @@ def build_fairy():
                  deform=True, coll='Deform')
         tail.append(n)
         prev = n
-    # 蛇部分の中間チェーン: コントローラー用 / 巻き付けパス用 (DEF はこの 2 つをブレンド)
-    for kind in ('ctrl', 'path'):
-        prev = 'root'
-        for i in range(N_TAIL):
-            z0 = HOLE_Z + (HIP_Z - HOLE_Z) * i / N_TAIL
-            z1 = HOLE_Z + (HIP_Z - HOLE_Z) * (i + 1) / N_TAIL
-            n = f'MCH-tail_{kind}.{i + 1:03d}'
-            rig.bone(n, (0, Y, z0), (0, Y, z1), parent=prev, connect=i > 0, coll='MCH')
-            prev = n
 
     n_pts = N_TAIL_CTRL + 2
     ctrl_pts = []
@@ -219,13 +210,13 @@ def build_fairy():
         if i == 0:
             n = 'tail_base'
         elif i == n_pts - 1:
-            n = 'torso'
+            n = 'tail_tip'
         else:
             n = f'tail_ctrl.{i:02d}'
         ctrl_pts.append((n, z))
         L = 0.12
         rig.bone(n, (0, Y, z), (0, Y, z + L), parent='root',
-                 coll='Torso' if n == 'torso' else 'Tail')
+                 coll='Tail')
 
     # --- 体幹 (deform ボーンをそのまま FK コントローラーとして使う)
     # hips は蛇部分の先端の骨にぶら下げる (伸び縮みしないので体が常に先端に乗る)
@@ -279,20 +270,19 @@ def build_fairy():
                          connect=k > 0, deform=True, roll=(0, 0, 1), coll='Fingers')
                 prevf = n
     mode('OBJECT')
-    rig.finish_collections(hidden=('Deform', 'MCH'))
+    rig.finish_collections(hidden=('Deform',))
 
     # ---------------- 蛇部分: Spline IK カーブ
     cu = bpy.data.curves.new('fairy_tail_curve', 'CURVE')
     cu.dimensions = '3D'
-    sp = cu.splines.new('BEZIER')
-    sp.bezier_points.add(n_pts - 1)
-    seg = (HIP_Z - HOLE_Z) / (n_pts - 1)
-    for i, bp in enumerate(sp.bezier_points):
-        z = ctrl_pts[i][1]
-        bp.co = V((0, Y, z))
-        bp.handle_left = V((0, Y, z - seg / 3))
-        bp.handle_right = V((0, Y, z + seg / 3))
-        bp.handle_left_type = bp.handle_right_type = 'ALIGNED'
+    # NURBS: 制御点を動かすだけで常になめらか (ハンドルがないのでねじれない)
+    sp = cu.splines.new('NURBS')
+    sp.points.add(n_pts - 1)
+    for i, pt in enumerate(sp.points):
+        pt.co = (0, Y, ctrl_pts[i][1], 1.0)
+    sp.order_u = 4
+    sp.use_endpoint_u = True
+    sp.resolution_u = 12
     cobj = bpy.data.objects.new('fairy_tail_curve', cu)
     cobj.hide_render = True
     cobj.hide_select = True
@@ -305,43 +295,17 @@ def build_fairy():
         h = cobj.modifiers.new(f'Hook-{n}', 'HOOK')
         h.object = arm
         h.subtarget = n
-        h.vertex_indices_set([i * 3, i * 3 + 1, i * 3 + 2])
+        h.vertex_indices_set([i])
         bw = arm.matrix_world @ pb[n].matrix
         h.matrix_inverse = (cobj.matrix_world.inverted() @ bw).inverted()
         h.center = cobj.matrix_world.inverted() @ bw.translation
-    wobj = build_wrap_path(arm)
-
-    def spline_ik(bone, target):
-        ik = pb[bone].constraints.new('SPLINE_IK')
-        ik.target = target
-        ik.chain_count = N_TAIL
-        ik.y_scale_mode = 'BONE_ORIGINAL'     # 伸び縮みしない
-        ik.xz_scale_mode = 'NONE'
-        ik.use_curve_radius = False
-        ik.use_even_divisions = True
-    spline_ik(f'MCH-tail_ctrl.{N_TAIL:03d}', cobj)
-    spline_ik(f'MCH-tail_path.{N_TAIL:03d}', wobj)
-
-    # モード切替: root の tail_mode  0 = コントローラー / 1 = 巻き付けパス
-    root = pb['root']
-    root['tail_mode'] = 0.0
-    root.id_properties_ui('tail_mode').update(
-        min=0.0, max=1.0, soft_min=0.0, soft_max=1.0,
-        description='蛇部分: 0 = 緑の輪で動かす / 1 = fairy_wrap_path に沿わせる (巻き付け)')
-    for i in range(N_TAIL):
-        d = pb[tail[i]]
-        c1 = d.constraints.new('COPY_TRANSFORMS')
-        c1.name = 'ctrl'
-        c1.target, c1.subtarget = arm, f'MCH-tail_ctrl.{i + 1:03d}'
-        c2 = d.constraints.new('COPY_TRANSFORMS')
-        c2.name = 'wrap path'
-        c2.target, c2.subtarget = arm, f'MCH-tail_path.{i + 1:03d}'
-        drv = c2.driver_add('influence').driver
-        drv.type = 'AVERAGE'
-        v = drv.variables.new()
-        v.type = 'SINGLE_PROP'
-        v.targets[0].id = arm
-        v.targets[0].data_path = 'pose.bones["root"]["tail_mode"]'
+    ik = pb[tail[-1]].constraints.new('SPLINE_IK')
+    ik.target = cobj
+    ik.chain_count = N_TAIL
+    ik.y_scale_mode = 'BONE_ORIGINAL'     # 伸び縮みしない
+    ik.xz_scale_mode = 'NONE'
+    ik.use_curve_radius = False
+    ik.use_even_divisions = True
 
     # ---------------- 腕 IK / FK
     for s in ('L', 'R'):
@@ -370,8 +334,8 @@ def build_fairy():
     # ---------------- 形状と色
     rig.shape('root', wgt_circle('root', 0.30), COL_CENTER)
     for n, z in ctrl_pts:
-        if n == 'torso':
-            rig.shape(n, wgt_circle('torso', 0.20), COL_CENTER)
+        if n == 'tail_tip':
+            rig.shape(n, wgt_circle('tail_tip', 0.17), COL_TAIL)
         elif n == 'tail_base':
             rig.shape(n, wgt_circle('tail_base', 0.16), COL_TAIL)
         else:
@@ -391,8 +355,12 @@ def build_fairy():
             for k in (1, 2, 3):
                 rig.shape(f'{f}.{k:02d}.{s}', wgt_circle('finger', 0.008), col)
     # 動かさなくていいチャンネルはロック
+    # 蛇部分の輪は「移動だけ」で形を作る (回転・スケールは効かないのでロック)
     for n, _ in ctrl_pts:
         pb[n].rotation_mode = 'XYZ'
+        pb[n].lock_rotation = (True, True, True)
+        pb[n].lock_rotation_w = True
+        pb[n].lock_scale = (True, True, True)
     for p in pb:
         if p.name.startswith(('upper_arm', 'forearm', 'hand', 'shoulder', 'neck', 'head',
                               'spine', 'chest', 'hips', 'thumb', 'index', 'middle', 'ring',
@@ -406,163 +374,6 @@ def build_fairy():
     for n in ['eye_L_geo', 'eye_R_geo']:
         parent_to_bone(obj(n), arm, 'head')
     return arm
-
-
-# ---------------------------------------------------------------- 巻き付けパス
-WRAP_CORE = r'''
-import bpy, math
-from mathutils import Vector, Matrix
-
-RIG_NAME = 'fairy_rig'
-PATH_NAME = 'fairy_wrap_path'
-
-
-def _perp(axis, hint):
-    u = hint - axis * hint.dot(axis)
-    if u.length < 1e-6:
-        u = axis.orthogonal()
-    return u.normalized()
-
-
-def rebuild_wrap(origin, axis, length, radius=0.12, turns=2.0, pitch=0.14, start=0.3,
-                 direction=1, exit_len=0.8, up=1, parent=None, parent_bone=None):
-    """origin + axis (ワールド) を軸に螺旋のパスを作り直す。
-    最初の点は穴 (fairy_rig の tail_base) にフックされる。"""
-    rig = bpy.data.objects[RIG_NAME]
-    path = bpy.data.objects[PATH_NAME]
-    axis = Vector(axis).normalized() * (1 if up >= 0 else -1)
-    origin = Vector(origin)
-    base_pb = rig.pose.bones['tail_base']
-    base_w = rig.matrix_world @ base_pb.matrix
-    hole = base_w.translation.copy()
-
-    c0 = origin + axis * (length * (start if up >= 0 else 1 - start))
-    u = _perp(axis, hole - c0)          # 穴の側から巻き始める
-    w = axis.cross(u) * (1 if direction >= 0 else -1)
-    base_dir = (base_w.to_3x3() @ Vector((0, 1, 0))).normalized()
-    pts = [hole, hole + base_dir * 0.3]      # 穴からはまっすぐ立ち上がる
-    steps = max(2, int(round(turns * 8)))
-    for k in range(steps + 1):
-        th = 2 * math.pi * turns * k / steps
-        pts.append(c0 + axis * (pitch * th / (2 * math.pi)) +
-                   (u * math.cos(th) + w * math.sin(th)) * radius)
-    end = pts[-1]
-    pts.append(end + axis * exit_len * 0.5)
-    pts.append(end + axis * exit_len)
-
-    # 親子付け (相手の脚と一緒に動く)
-    path.parent = None
-    path.matrix_parent_inverse = Matrix.Identity(4)
-    if parent is not None:
-        if parent_bone:
-            ppb = parent.pose.bones[parent_bone]
-            pm = parent.matrix_world @ ppb.matrix @ Matrix.Translation((0, ppb.length, 0))
-        else:
-            pm = parent.matrix_world.copy()
-        path.parent = parent
-        if parent_bone:
-            path.parent_type = 'BONE'
-            path.parent_bone = parent_bone
-        else:
-            path.parent_type = 'OBJECT'
-        path.matrix_parent_inverse = pm.inverted()
-    path.matrix_basis = Matrix.Translation(c0)
-    bpy.context.view_layer.update()
-
-    inv = path.matrix_world.inverted()
-    cu = path.data
-    cu.splines.clear()
-    sp = cu.splines.new('BEZIER')
-    sp.bezier_points.add(len(pts) - 1)
-    loc = [inv @ p for p in pts]
-    n = len(loc)
-    for i, bp in enumerate(sp.bezier_points):
-        a = loc[max(i - 1, 0)]
-        b = loc[min(i + 1, n - 1)]
-        tan = (b - a) / (6 if 0 < i < n - 1 else 3)
-        bp.handle_left_type = bp.handle_right_type = 'ALIGNED'
-        bp.co = loc[i]
-        bp.handle_left = loc[i] - tan
-        bp.handle_right = loc[i] + tan
-
-    hook = path.modifiers.get('Hook-hole') or path.modifiers.new('Hook-hole', 'HOOK')
-    hook.object = rig
-    hook.subtarget = 'tail_base'
-    hook.vertex_indices_set([0, 1, 2, 3, 4, 5])
-    hook.matrix_inverse = (path.matrix_world.inverted() @ base_w).inverted()
-    hook.center = path.matrix_world.inverted() @ hole
-    return path
-'''
-
-WRAP_TOOL = '''"""
-fairy_wrap.py : 妖精の蛇部分を巻き付ける螺旋パスを作るツール
-
-使い方
-  1. 巻き付けたい相手を選ぶ
-       ボーン     : その Armature をポーズモードにして、脚のボーンをクリック (アクティブ)
-       オブジェクト: オブジェクトモードでクリック (アクティブ)
-                    → オブジェクトのローカル Z 軸のまわりに巻く
-  2. 下の数値を調整して、テキストエディタの「▶ (スクリプト実行)」 / Alt+P
-  3. fairy_rig の root を選び、N パネル > アイテム > プロパティ の tail_mode を 1 にする
-     (このスクリプトは自動で 1 にします。0 に戻すと緑の輪のモード)
-
-パス (fairy_wrap_path) は相手のボーン/オブジェクトにペアレントされるので、
-脚がアニメーションしても巻き付いたままついていきます。
-形は fairy_wrap_path を編集モードで直接いじって微調整できます。
-最初の 2 点は穴にフックされているので動かさないでください。
-"""
-RADIUS = 0.12     # 軸から蛇の中心までの距離 = 相手の半径 + 0.06 (蛇の太さの半分)
-TURNS = 2.0       # 巻く回数
-PITCH = 0.14      # 1 周で軸方向に進む距離 (0.12 以上で蛇どうしが重ならない)
-START = 0.3       # 巻き始める位置 (ボーンの根元 0 〜 先 1)
-DIRECTION = 1     # 巻く向き 1 / -1
-EXIT = 0.8        # 巻き終わってから上半身まで伸ばす長さ
-UP = 1            # 1 = ボーンの先に向かって巻き上がる / -1 = 根元に向かって
-''' + WRAP_CORE + '''
-
-def run():
-    ctx = bpy.context
-    pb = ctx.active_pose_bone
-    ob = ctx.active_object
-    if pb is not None and ob is not None and ob.name != RIG_NAME:
-        head = ob.matrix_world @ pb.head
-        tail = ob.matrix_world @ pb.tail
-        rebuild_wrap(head, tail - head, (tail - head).length, RADIUS, TURNS, PITCH, START,
-                     DIRECTION, EXIT, UP, parent=ob, parent_bone=pb.name)
-        print('fairy_wrap: bone', ob.name, pb.name)
-    elif ob is not None and ob.name not in (RIG_NAME, PATH_NAME):
-        z = (ob.matrix_world.to_3x3() @ Vector((0, 0, 1))).normalized()
-        length = max(ob.dimensions.z, 0.01)
-        origin = ob.matrix_world.translation - z * length * 0.5
-        rebuild_wrap(origin, z, length, RADIUS, TURNS, PITCH, START, DIRECTION, EXIT, UP,
-                     parent=ob)
-        print('fairy_wrap: object', ob.name)
-    else:
-        raise RuntimeError('巻き付ける相手のボーンかオブジェクトを選んでください')
-    bpy.data.objects[RIG_NAME].pose.bones['root']['tail_mode'] = 1.0
-
-
-if __name__ == '__main__':
-    run()
-'''
-
-
-def build_wrap_path(arm):
-    cu = bpy.data.curves.new('fairy_wrap_path', 'CURVE')
-    cu.dimensions = '3D'
-    p = bpy.data.objects.new('fairy_wrap_path', cu)
-    p.hide_render = True
-    p.show_in_front = True
-    get_coll(RIG_COLL).objects.link(p)
-    bpy.context.view_layer.update()
-    ns = {}
-    exec(WRAP_CORE, ns)
-    # 初期形: 花の横の仮の軸に巻き付く形 (ツールで相手の脚に作り直す)
-    ns['rebuild_wrap'](V((0.45, Y, 17.4)), V((0, 0, 1)), 1.2, radius=0.15, turns=2.0,
-                       pitch=0.16, start=0.2, exit_len=0.8)
-    t = bpy.data.texts.get('fairy_wrap.py') or bpy.data.texts.new('fairy_wrap.py')
-    t.from_string(WRAP_TOOL)
-    return p
 
 
 def best_pole_angle(arm, s):
@@ -706,7 +517,7 @@ def build_stomach_keys(amount=0.15):
 def main(out_path=None):
     if bpy.context.object and bpy.context.object.mode != 'OBJECT':
         mode('OBJECT')
-    for n in ['fairy_rig', 'fairy_tail_curve', 'fairy_wrap_path']:
+    for n in ['fairy_rig', 'fairy_tail_curve']:
         if n in bpy.data.objects:
             bpy.data.objects.remove(bpy.data.objects[n])
     active = bpy.context.view_layer.objects.active
