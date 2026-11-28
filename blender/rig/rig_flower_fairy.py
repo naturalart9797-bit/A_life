@@ -13,8 +13,8 @@ flower_v008.blend 用 妖精リグ + 胃袋の膨張・収縮 セットアップ
 
 fairy_rig:
   root (口の底の穴)
-   ├ tail_base / tail_ctrl.01〜18 / tail_tip : 蛇部分のコントローラー (NURBS + Spline IK, 骨 40 本, 伸び縮みなし, 移動のみ)
-   └ DEF-tail.040 (蛇の先端) → hips → spine → spine.001 → chest → neck → head
+   ├ tail_base / tail_ctrl.01〜18 : 蛇部分のコントローラー (NURBS + Spline IK, 骨 40 本, 移動のみ)
+   └ torso → hips → spine → spine.001 → chest → neck → head  (尾とは独立)
                                          chest → shoulder → 腕 (IK/FK 切替) → 指
 """
 
@@ -32,6 +32,7 @@ HOLE_Z = 16.98      # 口 (mouth_geo) の底の穴
 HIP_Z = 20.0
 N_TAIL = 40         # 蛇部分の骨の数
 N_TAIL_CTRL = 18    # 途中のコントローラーの数 (根元と torso を除く)
+END_TAN = 0.15      # 両端をまっすぐにする長さ (穴から / 上半身へ)
 RIG_COLL = 'fairy_grp'
 WGT_COLL = 'fairy_rig_widgets'
 
@@ -202,32 +203,40 @@ def build_fairy():
                  deform=True, coll='Deform')
         tail.append(n)
         prev = n
+    # 中間チェーン: fit = 穴〜torso を結ぶ (伸縮あり) / fix = 長さ固定
+    for kind in ('fit', 'fix'):
+        prev = 'root'
+        for i in range(N_TAIL):
+            z0 = HOLE_Z + (HIP_Z - HOLE_Z) * i / N_TAIL
+            z1 = HOLE_Z + (HIP_Z - HOLE_Z) * (i + 1) / N_TAIL
+            n = f'MCH-tail_{kind}.{i + 1:03d}'
+            rig.bone(n, (0, Y, z0), (0, Y, z1), parent=prev, connect=i > 0, coll='MCH')
+            prev = n
 
-    n_pts = N_TAIL_CTRL + 2
-    ctrl_pts = []
-    for i in range(n_pts):
-        z = HOLE_Z + (HIP_Z - HOLE_Z) * i / (n_pts - 1)
-        if i == 0:
-            n = 'tail_base'
-        elif i == n_pts - 1:
-            n = 'tail_tip'
-        else:
-            n = f'tail_ctrl.{i:02d}'
-        ctrl_pts.append((n, z))
-        L = 0.12
-        rig.bone(n, (0, Y, z), (0, Y, z + L), parent='root',
-                 coll='Tail')
+    # コントローラー: tail_base (穴) / tail_ctrl.01〜 / torso (上半身)
+    rig.bone('tail_base', (0, Y, HOLE_Z), (0, Y, HOLE_Z + 0.12), parent='root', coll='Tail')
+    rig.bone('torso', (0, Y, HIP_Z), (0, Y, HIP_Z + 0.25), parent='root', coll='Torso')
+    lo, hi = HOLE_Z + END_TAN, HIP_Z - END_TAN
+    ctrl_names = []
+    for i in range(1, N_TAIL_CTRL + 1):
+        z = lo + (hi - lo) * i / (N_TAIL_CTRL + 1)
+        n = f'tail_ctrl.{i:02d}'
+        rig.bone(n, (0, Y, z), (0, Y, z + 0.12), parent='root', coll='Tail')
+        ctrl_names.append((n, z))
+    # カーブの点: 両端は 2 点ずつ (穴からまっすぐ出て、上半身の向きにまっすぐ入る)
+    curve_pts = ([('tail_base', HOLE_Z), ('tail_base', HOLE_Z + END_TAN)] + ctrl_names +
+                 [('torso', HIP_Z - END_TAN), ('torso', HIP_Z)])
 
     # --- 体幹 (deform ボーンをそのまま FK コントローラーとして使う)
-    # hips は蛇部分の先端の骨にぶら下げる (伸び縮みしないので体が常に先端に乗る)
-    body = [('hips', (0, Y, 20.0), (0, Y, 20.20), f'DEF-tail.{N_TAIL:03d}'),
+    # 上半身は torso にぶら下がる (尾を動かしても上半身は動かない)
+    body = [('hips', (0, Y, 20.0), (0, Y, 20.20), 'torso'),
             ('spine', (0, Y, 20.20), (0, Y, 20.30), 'hips'),
             ('spine.001', (0, Y, 20.30), (0, Y, 20.40), 'spine'),
             ('chest', (0, Y, 20.40), (0, Y + 0.01, 20.58), 'spine.001'),
             ('neck', (0, Y + 0.01, 20.58), (0, 0.0, 20.665), 'chest'),
             ('head', (0, 0.0, 20.665), (0, 0.0, 20.95), 'neck')]
     for n, h, t, p in body:
-        rig.bone(n, h, t, parent=p, deform=True, connect=True,
+        rig.bone(n, h, t, parent=p, deform=True, connect=p != 'torso',
                  coll='Torso' if n == 'hips' else 'Body')
 
     # --- 腕・手・指
@@ -270,16 +279,16 @@ def build_fairy():
                          connect=k > 0, deform=True, roll=(0, 0, 1), coll='Fingers')
                 prevf = n
     mode('OBJECT')
-    rig.finish_collections(hidden=('Deform',))
+    rig.finish_collections(hidden=('Deform', 'MCH'))
 
     # ---------------- 蛇部分: Spline IK カーブ
     cu = bpy.data.curves.new('fairy_tail_curve', 'CURVE')
     cu.dimensions = '3D'
     # NURBS: 制御点を動かすだけで常になめらか (ハンドルがないのでねじれない)
     sp = cu.splines.new('NURBS')
-    sp.points.add(n_pts - 1)
+    sp.points.add(len(curve_pts) - 1)
     for i, pt in enumerate(sp.points):
-        pt.co = (0, Y, ctrl_pts[i][1], 1.0)
+        pt.co = (0, Y, curve_pts[i][1], 1.0)
     sp.order_u = 4
     sp.use_endpoint_u = True
     sp.resolution_u = 12
@@ -291,21 +300,51 @@ def build_fairy():
     cobj.matrix_parent_inverse = arm.matrix_world.inverted()
     bpy.context.view_layer.update()
     pb = arm.pose.bones
-    for i, (n, _) in enumerate(ctrl_pts):
-        h = cobj.modifiers.new(f'Hook-{n}', 'HOOK')
+    for i, (n, _) in enumerate(curve_pts):
+        h = cobj.modifiers.new(f'Hook-{i:02d}-{n}', 'HOOK')
         h.object = arm
         h.subtarget = n
         h.vertex_indices_set([i])
         bw = arm.matrix_world @ pb[n].matrix
         h.matrix_inverse = (cobj.matrix_world.inverted() @ bw).inverted()
         h.center = cobj.matrix_world.inverted() @ bw.translation
-    ik = pb[tail[-1]].constraints.new('SPLINE_IK')
-    ik.target = cobj
-    ik.chain_count = N_TAIL
-    ik.y_scale_mode = 'BONE_ORIGINAL'     # 伸び縮みしない
-    ik.xz_scale_mode = 'NONE'
-    ik.use_curve_radius = False
-    ik.use_even_divisions = True
+    for kind, ymode in (('fit', 'FIT_CURVE'), ('fix', 'BONE_ORIGINAL')):
+        ik = pb[f'MCH-tail_{kind}.{N_TAIL:03d}'].constraints.new('SPLINE_IK')
+        ik.target = cobj
+        ik.chain_count = N_TAIL
+        ik.y_scale_mode = ymode
+        ik.xz_scale_mode = 'NONE'
+        ik.use_curve_radius = False
+        ik.use_even_divisions = True
+
+    # tail_length_lock: 0 = 上半身は torso に固定 (尾が伸縮) / 1 = 尾の長さ固定 (上半身は尾の先へ)
+    tor = pb['torso']
+    tor['tail_length_lock'] = 0.0
+    tor.id_properties_ui('tail_length_lock').update(
+        min=0.0, max=1.0, soft_min=0.0, soft_max=1.0,
+        description='0 = 上半身は torso の位置に固定 (尾が伸縮して届く) / '
+                    '1 = 尾の長さを固定 (上半身の位置は尾の先、向きは torso)')
+
+    def lock_driver(con):
+        d = con.driver_add('influence').driver
+        d.type = 'AVERAGE'
+        v = d.variables.new()
+        v.type = 'SINGLE_PROP'
+        v.targets[0].id = arm
+        v.targets[0].data_path = 'pose.bones["torso"]["tail_length_lock"]'
+
+    for i in range(N_TAIL):
+        for kind in ('fit', 'fix'):
+            c = pb[tail[i]].constraints.new('COPY_TRANSFORMS')
+            c.name = kind
+            c.target, c.subtarget = arm, f'MCH-tail_{kind}.{i + 1:03d}'
+            if kind == 'fix':
+                lock_driver(c)
+    c = pb['hips'].constraints.new('COPY_LOCATION')
+    c.name = 'ride tail tip'
+    c.target, c.subtarget = arm, f'MCH-tail_fix.{N_TAIL:03d}'
+    c.head_tail = 1.0
+    lock_driver(c)
 
     # ---------------- 腕 IK / FK
     for s in ('L', 'R'):
@@ -333,13 +372,10 @@ def build_fairy():
 
     # ---------------- 形状と色
     rig.shape('root', wgt_circle('root', 0.30), COL_CENTER)
-    for n, z in ctrl_pts:
-        if n == 'tail_tip':
-            rig.shape(n, wgt_circle('tail_tip', 0.17), COL_TAIL)
-        elif n == 'tail_base':
-            rig.shape(n, wgt_circle('tail_base', 0.16), COL_TAIL)
-        else:
-            rig.shape(n, wgt_circle('tail_ctrl', 0.13), COL_TAIL)
+    rig.shape('torso', wgt_circle('torso', 0.20), COL_CENTER)
+    rig.shape('tail_base', wgt_circle('tail_base', 0.16), COL_TAIL)
+    for n, z in ctrl_names:
+        rig.shape(n, wgt_circle('tail_ctrl', 0.13), COL_TAIL)
     sizes = {'hips': 0.13, 'spine': 0.12, 'spine.001': 0.12, 'chest': 0.15,
              'neck': 0.06, 'head': 0.13}
     for n, r in sizes.items():
@@ -356,7 +392,8 @@ def build_fairy():
                 rig.shape(f'{f}.{k:02d}.{s}', wgt_circle('finger', 0.008), col)
     # 動かさなくていいチャンネルはロック
     # 蛇部分の輪は「移動だけ」で形を作る (回転・スケールは効かないのでロック)
-    for n, _ in ctrl_pts:
+    pb['torso'].rotation_mode = 'XYZ'
+    for n, _ in [('tail_base', 0)] + ctrl_names:
         pb[n].rotation_mode = 'XYZ'
         pb[n].lock_rotation = (True, True, True)
         pb[n].lock_rotation_w = True
@@ -419,7 +456,9 @@ def weight_fairy(fairy, arm, tail):
         return (a + ab * t - p).length
 
     n = len(tail)
-    tail_top = HIP_Z - 0.04
+    # つなぎ目: BLEND_LO〜BLEND_HI で尾の先 → hips になめらかに移る
+    BLEND_LO, BLEND_HI = HIP_Z - 0.20, HIP_Z + 0.12
+    tail_top = BLEND_HI
     for v in fairy.data.vertices:
         p = fairy.matrix_world @ v.co
         if p.z < tail_top:
@@ -434,8 +473,12 @@ def weight_fairy(fairy, arm, tail):
             pairs = {}
             for i, w in ((i0, 1 - t), (i0 + 1, t)):
                 name = ('DEF-tail_base' if p.z < HOLE_Z else tail[0]) if i < 0 else \
-                       ('hips' if i >= n else tail[i])
+                       tail[min(i, n - 1)]
                 pairs[name] = pairs.get(name, 0) + w
+            k = smoothstep(BLEND_LO, BLEND_HI, p.z)
+            if k > 0:
+                pairs = {bn: w * (1 - k) for bn, w in pairs.items()}
+                pairs['hips'] = pairs.get('hips', 0) + k
             for bn, w in pairs.items():
                 fairy.vertex_groups[bn].add([v.index], w, 'REPLACE')
         elif sum(g.weight for g in v.groups) < 1e-3:
