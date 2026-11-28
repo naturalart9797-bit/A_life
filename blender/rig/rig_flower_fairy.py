@@ -32,6 +32,7 @@ HOLE_Z = 16.98      # 口 (mouth_geo) の底の穴
 HIP_Z = 20.2        # 尾と上半身の境目 (お腹のふくらみの一番太いところ)
 N_TAIL = 40         # 蛇部分の骨の数
 N_TAIL_CTRL = 18    # 途中のコントローラーの数 (根元と torso を除く)
+BBONE_SEGMENTS = 8  # 尾の骨 1 本あたりの曲線の分割数 (なめらかさ)
 END_TAN = 0.05      # 両端をまっすぐにする長さ (穴から / 上半身へ)
 RIG_COLL = 'fairy_grp'
 WGT_COLL = 'fairy_rig_widgets'
@@ -202,6 +203,10 @@ def build_fairy():
         eb = rig.bone(n, (0, Y, z0), (0, Y, z1), parent=prev, connect=i > 0,
                       deform=True, coll='Deform')
         eb.inherit_scale = 'NONE'     # 親の伸びを継承しない (ねじれ補正でゆがまないように)
+        # B-Bone: 1 本の骨を曲線として曲げる (隣の骨の向きに自動で合わせる)
+        eb.bbone_segments = BBONE_SEGMENTS
+        eb.bbone_handle_type_start = 'AUTO'
+        eb.bbone_handle_type_end = 'AUTO'
         tail.append(n)
         prev = n
     # 中間チェーン: fit = 穴〜torso を結ぶ (伸縮あり) / fix = 長さ固定
