@@ -1,33 +1,35 @@
 # flower_v008 リグ
 
 `flower_v008_rig.blend` は `flower_v008.blend` に `rig_flower_fairy.py` を実行して作ったファイルです（元ファイルはそのまま残してあります）。
-モデルを修正したら、元ファイルを開いて Scripting タブでこのスクリプトを実行すれば、リグを作り直せます。
+モデルを修正したときは、元ファイルを開いて Scripting タブでこのスクリプトを実行すればリグを作り直せます。
+
+骨はすべて普通の FK ボーンです。コントローラーやドライバーはありません。
+ポーズモードで骨を回転・スケールして、キーを打って使います。
+
+## fairy_rig（妖精）— 標準的な人型の骨格
+原点（`root`）は、花の中にある口（mouth_geo）の底の穴です。
+
+```
+root (穴。穴より下に埋まっている部分を固定)
+└ tail.001 … tail.012   蛇の部分 (穴 → 腰)
+  └ hips
+    └ spine └ spine.001 └ chest
+                         ├ neck └ head        (目は head にペアレント)
+                         └ shoulder.L/R └ upper_arm └ forearm └ hand
+                                                           └ thumb / index / middle / ring / pinky (.01 .02 .03)
+```
+
+- 骨コレクション：`Root & Tail` / `Body` / `Arms` / `Fingers`
+- 左右は `.L` / `.R` なので、ポーズのコピー・反転貼り付けが使えます。
+- `fairy_rig` は `flower_rig` の `flower_head` にペアレントされているので、花と一緒に動きます。
 
 ## flower_rig（花）
 | ボーン | 役割 |
 |---|---|
-| `flower_root` | 全体の移動。地面の根はこれに固定 |
-| `stalk_01`〜`05` | 胃袋より上の茎（FK）。回転させるとしなる |
-| `flower_head` | 花の頭（花びら・口）。妖精もここにぶら下がる |
-| `stomach_ctrl` | 胃袋の鼓動のプロパティ（N パネル → アイテム → プロパティ） |
-
-`stomach_ctrl` のプロパティ:
-- `auto_beat`: 1 = 再生するだけで自動で鼓動、0 = 止める
-- `bpm`: 鼓動の速さ
-- `amount`: 膨らみの強さ
-- `wobble`: 6 方向のローブがずれて動く量（バクバク感）
-- `beat`: 手動の膨らみ。キーを打って好きなタイミングで動かせる
+| `flower_root` | 全体。地面の根はこれに固定 |
+| `stalk.001`〜`005` | 胃袋より上の茎 |
+| `flower_head` | 花の頭（花びら・口） |
+| `stomach` | **スケールで胃袋全体が膨張（>1）・収縮（<1）** |
+| `stomach_lobe.*` | front / back / L / R / top / bottom。Y スケールでその方向だけ膨らむ・へこむ |
 
 胃袋に絡んでいる蔓は、胃袋の表面と一緒に動きます。
-
-## fairy_rig（妖精）
-| ボーン | 役割 |
-|---|---|
-| `fairy_root` | 花の穴の根元。全体の基点 |
-| `tail_ctrl_base`, `tail_ctrl_01`〜`03`, `body_ctrl` | 柄（蛇の部分）のカーブを動かすコントローラー。`body_ctrl` は上半身ごと動く |
-| `hips` `spine` `chest` `neck` `head` | 体の FK |
-| `clavicle` `upper_arm` `forearm` `hand` (.L/.R) | 腕の FK |
-| `hand_ik.L/R`, `arm_pole.L/R` | 腕の IK。`hand_ik` のプロパティ `ik_fk` を 1 にすると IK になる |
-
-柄は `tail_01`〜`16` に Spline IK がかかっていて、`fairy_tail_curve` に沿って動きます（非表示コレクション `Tail Deform`）。
-目は `head` ボーンにペアレントされています。
