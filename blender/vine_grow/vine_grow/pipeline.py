@@ -27,9 +27,12 @@ def get_target(context):
 
 
 def target_scale(target, P):
+    """Lengths are given for a 1.7 m figure; scale them to the target's real (world) size."""
     if not P.auto_scale:
         return 1.0
-    d = max(target.dimensions)
+    from mathutils import Vector
+    corners = [target.matrix_world @ Vector(c) for c in target.bound_box]  # includes parent scale
+    d = max(max(c[i] for c in corners) - min(c[i] for c in corners) for i in range(3))
     return d / 1.7 if d > 1e-6 else 1.0
 
 

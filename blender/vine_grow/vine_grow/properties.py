@@ -20,27 +20,27 @@ def _growth_changed(self, context):
 def _point_props():
     """Vine / leaf settings (kept as a group so they can be copied together)."""
     return {
-        'tangle_length': FloatProperty(name="つるの長さ", default=0.3, min=0.005, soft_max=0.5, unit="LENGTH",
+        'tangle_length': FloatProperty(name="つるの長さ", default=0.2, min=0.005, soft_max=0.5, unit="LENGTH",
                                      description="1本のつるの平均の長さ"),
         'curl': FloatProperty(name="うねり", default=0.8, min=0.0, max=4.0,
                             description="つるが曲がりくねる強さ。大きいとループや渦を描いて絡まる"),
-        'curl_length': FloatProperty(name="うねりの大きさ", default=0.025, min=0.001, soft_max=0.2, unit="LENGTH",
+        'curl_length': FloatProperty(name="うねりの大きさ", default=0.018, min=0.001, soft_max=0.2, unit="LENGTH",
                                    description="曲がりくねりの1つの弧の大きさ。小さいほど細かくうねる"),
         'fine_branch': FloatProperty(name="枝分かれ", default=0.25, min=0.0, max=1.0, subtype="FACTOR",
                                    description="節ごとに脇枝が出る確率"),
-        'internode': FloatProperty(name="節の間隔", default=0.025, min=0.003, soft_max=0.2, unit="LENGTH",
+        'internode': FloatProperty(name="節の間隔", default=0.018, min=0.003, soft_max=0.2, unit="LENGTH",
                                  description="茎の節（少しふくらむ所。脇枝・巻きひげが出る）の間隔"),
         'fine_aerial': FloatProperty(name="空中へ伸びる先端", default=0.2, min=0.0, max=1.0, subtype="FACTOR",
                                    description="つるの先端のうち、体を離れて空中へ伸びるものの割合"),
         'fine_step': FloatProperty(name="細かさ（ステップ）", default=0.0025, min=0.0003, soft_max=0.02, unit="LENGTH",
                                  description="つるの節の間隔。小さいほど細かく曲がる（重くなる）"),
-        'fine_r_min': FloatProperty(name="最小の太さ", default=0.0004, min=0.00002, soft_max=0.005, unit="LENGTH"),
-        'fine_r_max': FloatProperty(name="最大の太さ", default=0.002, min=0.0001, soft_max=0.01, unit="LENGTH"),
-        'spread': FloatProperty(name="空間への広がり", default=0.035, min=0.0, soft_max=0.5, unit="LENGTH",
+        'fine_r_min': FloatProperty(name="最小の太さ", default=0.0003, min=0.00002, soft_max=0.005, unit="LENGTH"),
+        'fine_r_max': FloatProperty(name="最大の太さ", default=0.0012, min=0.0001, soft_max=0.01, unit="LENGTH"),
+        'spread': FloatProperty(name="空間への広がり", default=0.02, min=0.0, soft_max=0.5, unit="LENGTH",
                               description="体の表面からどれだけ離れた空間までつるが広がるか"),
         'cling': FloatProperty(name="密着度", default=0.5, min=0.0, max=1.0, subtype="FACTOR",
                              description="0: 空間に均一に広がる / 1: ほとんど体に沿う"),
-        'clearance': FloatProperty(name="体との最小距離", default=0.001, min=0.0, soft_max=0.05, unit="LENGTH",
+        'clearance': FloatProperty(name="体との最小距離", default=0.0008, min=0.0, soft_max=0.05, unit="LENGTH",
                                  description="つるの中心線が体に近づける最小の距離（貫通防止）"),
         'aerial_lift': FloatProperty(name="上へ伸びる強さ", default=0.6, min=-2.0, max=3.0,
                                    description="空中の枝が上（+Z）へ向かう強さ。負なら垂れ下がる"),
@@ -52,9 +52,9 @@ def _point_props():
                                          default=(0.22, 0.03, 0.04)),
         "leaf_chance": FloatProperty(name="葉の付き方", default=0.7, min=0.0, max=1.0, subtype="FACTOR",
                                      description="葉の位置ごとに、実際に葉が付く確率。0で葉なし"),
-        "leaf_spacing": FloatProperty(name="葉の間隔", default=0.03, min=0.003, soft_max=0.3, unit="LENGTH",
+        "leaf_spacing": FloatProperty(name="葉の間隔", default=0.018, min=0.003, soft_max=0.3, unit="LENGTH",
                                       description="茎に沿った葉と葉の間隔"),
-        "leaf_size": FloatProperty(name="葉の大きさ", default=0.022, min=0.001, soft_max=0.3, unit="LENGTH",
+        "leaf_size": FloatProperty(name="葉の大きさ", default=0.012, min=0.001, soft_max=0.3, unit="LENGTH",
                                    description="葉身の長さ"),
         "leaf_size_var": FloatProperty(name="大きさのばらつき", default=0.4, min=0.0, max=1.0, subtype="FACTOR"),
         "leaf_tip_small": FloatProperty(name="先端ほど小さく", default=0.6, min=0.0, max=1.0, subtype="FACTOR",
@@ -123,7 +123,7 @@ class VineGrowSettings(bpy.types.PropertyGroup):
     bump: FloatProperty(name="表面の凹凸", default=0.2, min=0.0, max=1.0, subtype="FACTOR")
 
     # --- density points (Yeti-style) --------------------------------------
-    density: FloatProperty(name="全体の密度", default=50.0, min=0.0, soft_max=500.0,
+    density: FloatProperty(name="全体の密度", default=150.0, min=0.0, soft_max=500.0,
                            description="値 100 で塗った所の密度（100cm² あたりのつるの本数）。塗った値はこれに対する割合")
     show_points: BoolProperty(name="点を表示", default=True, update=_redraw,
                               description="密度の点を、値に応じた色（紫=0 → 青 → 緑 → 黄 → オレンジ=100）で表示")

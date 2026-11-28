@@ -164,9 +164,10 @@ def _tangent(d, n):
     return t.normalized()
 
 
-def _same_level(v, home):
-    """True when density v is close enough to the level `home` a vine started at."""
-    return home * 0.75 <= v <= home * 1.4
+def _floor(here, home):
+    """Lowest density a vine may go on into: a sudden drop (the edge of a stroke) or drifting far
+    below the level it started at sends it back. Soft brush gradients stay passable."""
+    return max(here * 0.7, home * 0.35)
 
 
 def _smooth01(x):
@@ -246,13 +247,13 @@ class Grower:
             u = j / steps
             nz = noise.noise(seed + Vector((s / self.curl_len, 0.0, 0.0)))
             ang = (curl * 0.25 + nz * P.curl * 1.6) * step / self.curl_len * math.tau * 0.25
-            # Stay at the painted level it started in. Where the density ahead leaves that level (thinner
-            # paint, or much denser paint) it makes a U-turn back instead of following the edge, so the
-            # stems spread over the whole area painted with that value and every value keeps its amount.
+            # Stay in the paint. At the edge of a stroke (a sudden drop ahead) or when it has drifted far
+            # below the level it started at, it makes a U-turn back instead of following the edge, so the
+            # stems spread over the painted area rather than piling up along its border.
             if home > 0.0:
                 here = self.field.at(ps)
-                if target is None and not _same_level(self.field.at(ps + d * step * 4.0), home):
-                    target = self._turn_back(ps, n, d, home)
+                if target is None and self.field.at(ps + d * step * 4.0) < _floor(here, home):
+                    target = self._turn_back(ps, n, d, _floor(here, home))
                     if target is None:
                         break  # nowhere to go inside the paint
                 if target is not None:
@@ -261,7 +262,7 @@ class Grower:
                     if abs(turn) < 0.15:
                         target = None
                     ang = max(-0.45, min(0.45, turn))
-                if here < home * 0.5:
+                if here < home * 0.3:
                     outside += 3 if here < home * 0.05 else 1  # unpainted ground: give up quickly
                 else:
                     outside = 0
@@ -329,12 +330,12 @@ class Grower:
             dist = 0.0
             while dist < self.mean_len:
                 dist += probe
-                if not _same_level(self.field.at(p + d * dist), home):
+                if self.field.at(p + d * dist) < home * 0.35:
                     break
             total += dist
         return total / 6.0
 
-    def _turn_back(self, p, n, d, home):
+    def _turn_back(self, p, n, d, floor):
         """A direction back into the paint, preferably away from the edge it just met."""
         probe = self.step * 6.0
         side = n.cross(d)
@@ -342,7 +343,7 @@ class Grower:
         for k in range(12):
             a = math.tau * k / 12
             v = d * math.cos(a) + side * math.sin(a)
-            if _same_level(self.field.at(p + v * probe), home):
+            if self.field.at(p + v * probe) >= floor:
                 good.append(v)
         if not good:
             return None
@@ -455,7 +456,7 @@ class Grower:
                 for _e in range(n_extra):
                     a, rr = rng.uniform(0.0, math.tau), ext * 0.8 * math.sqrt(rng.random())
                     h2 = self.sampler.nearest(hit.loc + (t1 * math.cos(a) + t2 * math.sin(a)) * rr)
-                    if h2 is not None and _same_level(field.raw_at(h2.loc), home):
+                    if h2 is not None and field.raw_at(h2.loc) >= home * 0.35:
                         starts.append(h2)
                 length = fitted
             for h in starts:
