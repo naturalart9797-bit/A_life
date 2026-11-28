@@ -43,6 +43,14 @@ class _FieldBase:
             sv += w * self.dens[i]
         return sv / sw if sw else 0.0
 
+    def raw_at(self, p):
+        """The painted value (as density) of the nearest point, without the blending."""
+        raw = getattr(self, "raw", None)
+        if raw is None:
+            return self.at(p)
+        _co, i, d = self.kd.find(p)
+        return raw[i] if d is not None and d <= self.spacing * 1.8 else 0.0
+
     def dist_at(self, p):
         _co, i, _d = self.kd.find(p)
         return self.dist[i]
@@ -88,6 +96,7 @@ class PointField(_FieldBase):
         # painted 0..100 -> density. Squared so the colours read clearly: 100 (orange) is the full
         # overall density, 50 (green) a quarter, 25 (blue) only a few vines, 0 (purple) none.
         vals = [(max(0.0, min(v, 100.0)) / 100.0) ** 2 * P.density for v in ps.val]
+        self.raw = list(vals)  # the painted values themselves (each vine keeps to its painted level)
         for i, nd in enumerate(self.nodes):
             sw = sv = 0.0
             for _co, j, d in self.kd.find_range(nd.co, blend * 2.0):
@@ -153,6 +162,11 @@ def _tangent(d, n):
     if t.length_squared < 1e-12:
         t = n.orthogonal()
     return t.normalized()
+
+
+def _same_level(v, home):
+    """True when density v is close enough to the level `home` a vine started at."""
+    return home * 0.75 <= v <= home * 1.4
 
 
 def _smooth01(x):
@@ -222,29 +236,31 @@ class Grower:
         height = h0
         next_node = self.internode * rng.uniform(0.3, 1.0)
         swell = 0
+        home = self.field.raw_at(ps)  # the painted level where this vine started: it keeps to that level
         steps = max(3, int(length / step))
-        home = self.field.at(ps)  # the density where this vine started: it keeps to that level
         outside = 0
+        target = None  # direction it is turning back to after reaching the edge of the paint
         for j in range(steps):
             if j == 6 and parent_vid is not None:
                 skip.discard(parent_vid)
             u = j / steps
             nz = noise.noise(seed + Vector((s / self.curl_len, 0.0, 0.0)))
             ang = (curl * 0.25 + nz * P.curl * 1.6) * step / self.curl_len * math.tau * 0.25
-            # stay where it was painted: turn away from where the density falls below the level the vine
-            # started at (no turning inside an evenly painted area, so the vines wander freely there)
+            # Stay at the painted level it started in. Where the density ahead leaves that level (thinner
+            # paint, or much denser paint) it makes a U-turn back instead of following the edge, so the
+            # stems spread over the whole area painted with that value and every value keeps its amount.
             if home > 0.0:
                 here = self.field.at(ps)
-                probe = step * 4.0
-                ahead = self.field.at(ps + d * probe)
-                if ahead < home * 0.75:
-                    side = n.cross(d)
-                    if side.length_squared > 1e-12:
-                        side.normalize()
-                        dl = self.field.at(ps + (d + side).normalized() * probe)
-                        dr = self.field.at(ps + (d - side).normalized() * probe)
-                        turn = 1.2 * min(1.0, 1.0 - ahead / home)
-                        ang += turn if dl >= dr else -turn
+                if target is None and not _same_level(self.field.at(ps + d * step * 4.0), home):
+                    target = self._turn_back(ps, n, d, home)
+                    if target is None:
+                        break  # nowhere to go inside the paint
+                if target is not None:
+                    t = _tangent(target, n)
+                    turn = math.atan2(n.dot(d.cross(t)), max(-1.0, min(1.0, d.dot(t))))
+                    if abs(turn) < 0.15:
+                        target = None
+                    ang = max(-0.45, min(0.45, turn))
                 if here < home * 0.5:
                     outside += 3 if here < home * 0.05 else 1  # unpainted ground: give up quickly
                 else:
@@ -293,19 +309,53 @@ class Grower:
                 if rng.random() < P.tendril_chance * 0.4:
                     self.tendril_spots.append((idx, r, k))
         if cur >= 0 and tree.parent[cur] >= 0:
-            if rng.random() < P.fine_aerial:
+            # shoots into the air only from well painted spots, so they do not stray from the paint
+            dense = home >= self.field.max * 0.5 and self.field.at(ps) >= home * 0.75
+            if dense and rng.random() < P.fine_aerial:
                 cur = self.aerial(cur, vid, r_tip)
             if cur >= 0 and rng.random() < 0.5:
                 self.tendril_spots.append((cur, r_tip, k))
 
     # ------------------------------------------------------------------
+    def _extent(self, p, n, home):
+        """Rough size of the painted patch around p: mean distance to its edge in 6 directions."""
+        probe = max(self.step * 4.0, self.field.spacing)
+        t1 = n.orthogonal().normalized()
+        t2 = n.cross(t1)
+        total = 0.0
+        for k in range(6):
+            a = math.tau * k / 6
+            d = t1 * math.cos(a) + t2 * math.sin(a)
+            dist = 0.0
+            while dist < self.mean_len:
+                dist += probe
+                if not _same_level(self.field.at(p + d * dist), home):
+                    break
+            total += dist
+        return total / 6.0
+
+    def _turn_back(self, p, n, d, home):
+        """A direction back into the paint, preferably away from the edge it just met."""
+        probe = self.step * 6.0
+        side = n.cross(d)
+        good = []
+        for k in range(12):
+            a = math.tau * k / 12
+            v = d * math.cos(a) + side * math.sin(a)
+            if _same_level(self.field.at(p + v * probe), home):
+                good.append(v)
+        if not good:
+            return None
+        back = [v for v in good if v.dot(d) < 0.0] or good
+        return self.rng.choice(back)
+
     def aerial(self, cur, vid, r_end):
         """The tip leaves the body and reaches out into the air."""
         P, rng, tree = self.P, self.rng, self.tree
         step = self.step * 1.3
         n = tree.normal[cur]
         d = (tree.dir[cur] + n * rng.uniform(0.6, 1.6) + UP * P.aerial_lift * 0.4).normalized()
-        length = self.mean_len * rng.uniform(0.08, 0.22)
+        length = self.mean_len * rng.uniform(0.05, 0.15)
         steps = max(3, int(length / step))
         seed = Vector((rng.uniform(0, 500), rng.uniform(0, 500), rng.uniform(0, 500)))
         r0 = self.radii[cur]
@@ -387,10 +437,31 @@ class Grower:
             hit = self.sampler.nearest(nd.co + colonize._rand_unit(rng) * field.spacing * 0.5)
             if hit is None:
                 continue
-            d0 = _tangent(colonize._rand_unit(rng), hit.normal)
-            r0 = self.r_lo + (self.r_hi - self.r_lo) * (rng.random() ** 1.3)
-            self.queue.append((hit, d0, -1, self.mean_len * rng.lognormvariate(0.0, 0.35), r0,
-                               self.clear + r0, k))
+            length = self.mean_len * rng.lognormvariate(0.0, 0.35)
+            home = field.raw_at(hit.loc)
+            if home <= 0.0:
+                continue  # the soft edge of the paint, on unpainted ground: nothing grows from there
+            starts = [hit]
+            if home > 0.0:
+                # In a small painted patch a long vine would only go round and round: fit its length to
+                # the patch, and grow more (shorter) vines there so the amount of stem stays the same.
+                ext = self._extent(hit.loc, hit.normal, home)
+                fitted = min(length, ext * 4.0)
+                # shorter vines also carry fewer and shorter side branches, hence the power
+                extra = (length / fitted) ** 1.7 - 1.0
+                n_extra = int(extra) + (1 if rng.random() < extra - int(extra) else 0)
+                t1 = hit.normal.orthogonal().normalized()
+                t2 = hit.normal.cross(t1)
+                for _e in range(n_extra):
+                    a, rr = rng.uniform(0.0, math.tau), ext * 0.8 * math.sqrt(rng.random())
+                    h2 = self.sampler.nearest(hit.loc + (t1 * math.cos(a) + t2 * math.sin(a)) * rr)
+                    if h2 is not None and _same_level(field.raw_at(h2.loc), home):
+                        starts.append(h2)
+                length = fitted
+            for h in starts:
+                d0 = _tangent(colonize._rand_unit(rng), h.normal)
+                r0 = self.r_lo + (self.r_hi - self.r_lo) * (rng.random() ** 1.3)
+                self.queue.append((h, d0, -1, length, r0, self.clear + r0, k))
         while self.queue and len(self.tree.pos) < P.max_nodes:
             self.vine(*self.queue.pop(0))
         self.tendrils()

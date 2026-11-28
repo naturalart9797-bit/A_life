@@ -37,7 +37,18 @@ class BodySampler:
         self.co = [mw @ v.co for v in mesh.vertices]
         self.vnormals = [(nmat @ v.normal).normalized() for v in mesh.vertices]
         mesh.calc_loop_triangles()
-        self.tris = [tuple(t.vertices) for t in mesh.loop_triangles]
+        # Blender may hand out the triangles in a different order each run: put them in a fixed order
+        # (each rotated to start at its smallest index, winding kept) so the same seed gives the same result.
+        tris = []
+        for t in mesh.loop_triangles:
+            a, b, c = t.vertices
+            if b < a and b < c:
+                a, b, c = b, c, a
+            elif c < a and c < b:
+                a, b, c = c, a, b
+            tris.append((a, b, c))
+        tris.sort()
+        self.tris = tris
 
         # Per-vertex weights (only bone groups when bone names are known). Modifiers such as
         # Subdivision carry the vertex groups over; when one does not, take the nearest original vertex.
