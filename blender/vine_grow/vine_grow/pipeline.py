@@ -78,7 +78,7 @@ def generate(report, context, target):
     if max(pset.val) <= 0.0:
         return None, "密度が塗られていません。ブラシで点に密度を塗ってください"
     if P.density <= 0.0:
-        return None, "全体の密度が 0 です"
+        return None, "つるの密度が 0 です"
     remove_network(target)
     mode = P.bind_mode
     if mode == "ARMATURE" and not binding.target_armatures(target):
@@ -178,7 +178,7 @@ def generate(report, context, target):
 
         # ---- leaves (a separate object, so they can be shown / hidden) ----
         n_leaves = 0
-        if any(p.leaf_chance > 0.0 for p in params):
+        if any(p.leaf_density > 0.0 for p in params):
             lb = MeshBuilder()
             n_leaves = leaves.build(lb, tree, radii, owner, params, scale, push, random.Random(P.seed + 7),
                                     node_weights, lambda i: min(1.0, plen[i] / maxlen), r_ref)

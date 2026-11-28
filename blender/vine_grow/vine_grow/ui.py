@@ -42,7 +42,11 @@ class VINEGROW_PT_main(_Base, bpy.types.Panel):
         if P.target is None:
             layout.label(text="つるを生やすメッシュを選んでください", icon="INFO")
             return
-        layout.prop(P, "density")
+        box = layout.box()
+        box.label(text="密度", icon="MOD_PARTICLES")
+        c = box.column(align=True)
+        c.prop(P, "density")
+        c.prop(P, "leaf_density")
         row = layout.row()
         row.scale_y = 1.5
         row.operator("vine_grow.generate", icon="PLAY")
@@ -78,19 +82,15 @@ class VINEGROW_PT_points(_Base, _Targeted, bpy.types.Panel):
         col = layout.column(align=True)
         col.operator("vine_grow.points_scatter", icon="PARTICLES")
         col.prop(P, "point_spacing")
-        col.prop(P, "point_default")
         box = layout.box()
-        box.row(align=True).prop(P, "brush_tool", expand=True)
         row = box.row()
         row.scale_y = 1.4
-        row.operator("vine_grow.brush", text="ブラシで塗る", icon="BRUSH_DATA")
+        row.operator("vine_grow.brush", text="密度ブラシで塗る", icon="BRUSH_DATA")
         c = box.column(align=True)
         c.prop(P, "brush_value", slider=True)
         c.prop(P, "brush_radius")
         c.prop(P, "brush_strength", slider=True)
-        if P.brush_tool == "ADD":
-            box.prop(P, "add_with_value")
-        box.label(text="Ctrl: 減らす/削除  Shift: ぼかす", icon="INFO")
+        box.label(text="Ctrl: 減らす  Shift: ぼかす", icon="INFO")
         box.label(text="B を押したまま上下: ブラシの大きさ")
         layout.label(text="色: 紫0 → 青 → 緑 → 黄 → 橙100")
         c = layout.column(align=True)
@@ -99,6 +99,8 @@ class VINEGROW_PT_points(_Base, _Targeted, bpy.types.Panel):
         row = layout.row(align=True)
         row.label(text="点 %d 個 / 塗った点 %d 個" % (n, sum(1 for v in ps.val if v > 0.0) if ps else 0))
         row.operator("vine_grow.points_fill", text="", icon="SNAP_FACE")
+        reset = row.operator("vine_grow.points_fill", text="", icon="LOOP_BACK")
+        reset.value = 0.0
         row.operator("vine_grow.points_clear", text="", icon="TRASH")
 
 
@@ -127,7 +129,7 @@ class VINEGROW_PT_leaves(_Base, _Targeted, bpy.types.Panel):
         P = context.scene.vine_grow
         layout = self.layout
         _eye(layout, P, "show_leaves", "葉を表示")
-        _cols(layout, P, ("leaf_chance", "leaf_spacing"),
+        _cols(layout, P, ("leaf_density",),
               ("leaf_size", "leaf_size_var", "leaf_tip_small"),
               ("leaf_width", "leaf_lobe", "leaf_point", "leaf_petiole"),
               ("leaf_cup", "leaf_fold", "leaf_droop", "leaf_face"),

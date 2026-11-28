@@ -51,7 +51,7 @@ class VINEGROW_OT_points_scatter(bpy.types.Operator):
         sampler = BodySampler(context, target)
         spacing = P.point_spacing * pipeline.target_scale(target, P)
         old = points.get(target)
-        ps = points.scatter(sampler, target, spacing, random.Random(P.seed), old, P.point_default)
+        ps = points.scatter(sampler, target, spacing, random.Random(P.seed), old, 0.0)
         if not len(ps):
             self.report({"ERROR"}, "点を打てませんでした（間隔が大きすぎる？）")
             return {"CANCELLED"}
@@ -82,7 +82,7 @@ class VINEGROW_OT_points_clear(bpy.types.Operator):
 class VINEGROW_OT_points_fill(bpy.types.Operator):
     bl_idname = "vine_grow.points_fill"
     bl_label = "全部の点を塗る"
-    bl_description = "全部の点の密度を、ブラシの値にする"
+    bl_description = "全部の点を、ブラシの「塗る密度」で塗る（0 にすると全部リセット）"
     bl_options = {"REGISTER", "UNDO"}
 
     value: bpy.props.FloatProperty(default=-1.0)
@@ -102,9 +102,9 @@ class VINEGROW_OT_points_fill(bpy.types.Operator):
 
 class VINEGROW_OT_brush(bpy.types.Operator):
     bl_idname = "vine_grow.brush"
-    bl_label = "ブラシ"
-    bl_description = ("左ドラッグ: 塗る / 点を追加 / 点を削除。Ctrl: 減らす（追加ブラシでは削除）、Shift: ぼかす。"
-                      "B を押したまま上下: ブラシの大きさ。1/2/3: 塗る/追加/削除。Enter/右クリック/Esc: 終了")
+    bl_label = "密度ブラシ"
+    bl_description = ("左ドラッグ: 点に密度を塗る。Ctrl: 減らす、Shift: ぼかす。B を押したまま上下: ブラシの大きさ。"
+                      "Enter/右クリック/Esc: 終了")
     bl_options = {"REGISTER", "UNDO"}
 
     @classmethod
@@ -123,7 +123,6 @@ class VINEGROW_OT_brush(bpy.types.Operator):
         self.ps = points.get(target) or points.PointSet()
         self.mw = target.matrix_world.copy()
         self.inv = self.mw.inverted()
-        self.rng = random.Random()
         self.stroke = False
         self.mouse = (event.mouse_region_x, event.mouse_region_y)
         self.resize_at = None  # B held: (x, y) where resizing started
@@ -138,10 +137,9 @@ class VINEGROW_OT_brush(bpy.types.Operator):
     # ------------------------------------------------------------------
     def _header(self, context):
         P = context.scene.vine_grow
-        name = {"PAINT": "塗る", "ADD": "点を追加", "REMOVE": "点を削除"}[P.brush_tool]
         context.area.header_text_set(
-            "ブラシ: %s（値 %.3g）  左ドラッグ: 適用  Ctrl: 減らす/削除  Shift: ぼかす  B+上下: 大きさ  "
-            "1/2/3: 塗る/追加/削除  Alt・中ボタン: 視点  Enter/右クリック/Esc: 終了" % (name, P.brush_value))
+            "密度ブラシ（塗る密度 %.3g）  左ドラッグ: 塗る  Ctrl: 減らす  Shift: ぼかす  B+上下: 大きさ  "
+            "Alt・中ボタン: 視点  Enter/右クリック/Esc: 終了" % P.brush_value)
 
     def _draw_circle(self, context):
         try:
@@ -162,8 +160,7 @@ class VINEGROW_OT_brush(bpy.types.Operator):
             pts = [(x + math.cos(a) * r, y + math.sin(a) * r) for a in (math.tau * k / 48 for k in range(48))]
             batch = batch_for_shader(shader, "LINE_LOOP", {"pos": pts})
             shader.bind()
-            col = {"PAINT": points.ramp(P.brush_value / points.VALUE_MAX),
-                   "ADD": (0.9, 0.9, 0.9), "REMOVE": (1.0, 0.3, 0.3)}[P.brush_tool]
+            col = points.ramp(P.brush_value / points.VALUE_MAX)
             shader.uniform_float("color", (col[0], col[1], col[2], 1.0))
             gpu.state.line_width_set(2.0)
             batch.draw(shader)
@@ -202,35 +199,7 @@ class VINEGROW_OT_brush(bpy.types.Operator):
         sc = max(self.mw.to_scale()) or 1.0
         c_loc = self.inv @ hit.loc
         R_loc = R / sc
-        tool = P.brush_tool
-        if tool == "ADD" and event.ctrl:
-            tool = "REMOVE"
         rot = self.inv.to_3x3()
-        if tool == "ADD":
-            spacing = P.point_spacing * pipeline.target_scale(self.target, P) / sc
-            kd = ps.kd() if len(ps) else None
-            added = []
-            tries = int(max(4, (R_loc / max(spacing, 1e-9)) ** 2 * 2))
-            for _ in range(tries):
-                a = self.rng.uniform(0.0, math.tau)
-                rr = R * math.sqrt(self.rng.random())
-                t1 = hit.normal.orthogonal().normalized()
-                t2 = hit.normal.cross(t1)
-                h = self.sampler.nearest(hit.loc + (t1 * math.cos(a) + t2 * math.sin(a)) * rr)
-                if h is None or h.normal.dot(view) > 0.2:
-                    continue
-                p = self.inv @ h.loc
-                if kd is not None and kd.find(p)[2] is not None and kd.find(p)[2] < spacing * 0.9:
-                    continue
-                if any((p - q).length < spacing * 0.9 for q in added):
-                    continue
-                added.append(p)
-                ps.co.append(p)
-                ps.nrm.append((rot @ h.normal).normalized())
-                ps.val.append(P.brush_value if P.add_with_value else P.point_default)
-            if added:
-                ps.changed(structure=True)
-            return
         if not len(ps):
             return
         kd = ps.kd()
@@ -238,15 +207,6 @@ class VINEGROW_OT_brush(bpy.types.Operator):
         if not found:
             return
         nloc = (rot @ hit.normal).normalized()
-        if tool == "REMOVE":
-            dead = {i for _co, i, _d in found if ps.nrm[i].dot(nloc) > -0.2}
-            if dead:
-                keep = [i for i in range(len(ps)) if i not in dead]
-                ps.co = [ps.co[i] for i in keep]
-                ps.nrm = [ps.nrm[i] for i in keep]
-                ps.val = [ps.val[i] for i in keep]
-                ps.changed(structure=True)
-            return
         st = P.brush_strength
         smooth = event.shift
         lower = event.ctrl
@@ -319,12 +279,6 @@ class VINEGROW_OT_brush(bpy.types.Operator):
                 P.brush_radius = max(5, int(P.brush_radius / 1.15))
             elif event.type == "RIGHT_BRACKET":
                 P.brush_radius = min(1000, int(P.brush_radius * 1.15) + 1)
-            elif event.type in {"ONE", "NUMPAD_1"}:
-                P.brush_tool = "PAINT"
-            elif event.type in {"TWO", "NUMPAD_2"}:
-                P.brush_tool = "ADD"
-            elif event.type in {"THREE", "NUMPAD_3"}:
-                P.brush_tool = "REMOVE"
             else:
                 return {"PASS_THROUGH"}
             self._header(context)

@@ -81,9 +81,9 @@ def build(b, tree, radii, owner, params, scale, push, rng, node_weights, node_di
         nxt = None
         for a, i in zip(seq[:-1], seq[1:]):
             P = params[owner[i]]
-            if P.leaf_chance <= 0.0:
+            if P.leaf_density <= 0.0:
                 continue
-            spacing = max(P.leaf_spacing * scale, 1e-6)
+            spacing = 0.1 * scale / P.leaf_density  # leaf_density = leaves per 10 cm of stem
             if nxt is None:
                 nxt = spacing * rng.uniform(0.2, 1.0)
             acc += (tree.pos[i] - tree.pos[a]).length
@@ -91,8 +91,6 @@ def build(b, tree, radii, owner, params, scale, push, rng, node_weights, node_di
                 continue
             nxt = acc + spacing * rng.uniform(0.7, 1.3)
             side = -side
-            if rng.random() > P.leaf_chance:
-                continue
             count += 1
             _leaf(b, tree, radii, i, side, P, scale, push, rng, node_weights(i), node_dist(i), r_ref[owner[i]])
     return count

@@ -50,10 +50,8 @@ def _point_props():
                                         default=(0.45, 0.10, 0.10)),
         'color_thick': FloatVectorProperty(name="太い枝の色", subtype="COLOR", size=3, min=0.0, max=1.0,
                                          default=(0.22, 0.03, 0.04)),
-        "leaf_chance": FloatProperty(name="葉の付き方", default=0.7, min=0.0, max=1.0, subtype="FACTOR",
-                                     description="葉の位置ごとに、実際に葉が付く確率。0で葉なし"),
-        "leaf_spacing": FloatProperty(name="葉の間隔", default=0.018, min=0.003, soft_max=0.3, unit="LENGTH",
-                                      description="茎に沿った葉と葉の間隔"),
+        "leaf_density": FloatProperty(name="葉の密度", default=4.0, min=0.0, soft_max=20.0,
+                                      description="茎 10cm あたりに付く葉の枚数。0 で葉なし"),
         "leaf_size": FloatProperty(name="葉の大きさ", default=0.012, min=0.001, soft_max=0.3, unit="LENGTH",
                                    description="葉身の長さ"),
         "leaf_size_var": FloatProperty(name="大きさのばらつき", default=0.4, min=0.0, max=1.0, subtype="FACTOR"),
@@ -123,8 +121,8 @@ class VineGrowSettings(bpy.types.PropertyGroup):
     bump: FloatProperty(name="表面の凹凸", default=0.2, min=0.0, max=1.0, subtype="FACTOR")
 
     # --- density points (Yeti-style) --------------------------------------
-    density: FloatProperty(name="全体の密度", default=150.0, min=0.0, soft_max=500.0,
-                           description="値 100 で塗った所の密度（100cm² あたりのつるの本数）。塗った値はこれに対する割合")
+    density: FloatProperty(name="つるの密度", default=150.0, min=0.0, soft_max=500.0,
+                           description="塗った値 100（オレンジ）の所に生えるつるの本数（100cm² あたり）。値が低い所ほど少なく、0（紫）の所には生えない")
     show_points: BoolProperty(name="点を表示", default=True, update=_redraw,
                               description="密度の点を、値に応じた色（紫=0 → 青 → 緑 → 黄 → オレンジ=100）で表示")
     show_vines: BoolProperty(name="つるを表示", default=True, update=_show_vines_changed,
@@ -133,18 +131,10 @@ class VineGrowSettings(bpy.types.PropertyGroup):
                                  description="散布・追加する点どうしの間隔")
     point_size: FloatProperty(name="点の表示サイズ", default=0.003, min=0.0002, soft_max=0.03, unit="LENGTH",
                               update=_redraw)
-    point_default: FloatProperty(name="新しい点の値", default=0.0, min=0.0, max=100.0,
-                                 description="散布・追加した点の最初の値（0〜100）")
-    brush_tool: EnumProperty(
-        name="ブラシ", default="PAINT",
-        items=[("PAINT", "塗る", "点の密度を塗る（Ctrl: 減らす / Shift: ぼかす）"),
-               ("ADD", "追加", "点を追加（Ctrl: 削除）"),
-               ("REMOVE", "削除", "点を削除")])
-    brush_value: FloatProperty(name="値", default=100.0, min=0.0, max=100.0,
-                               description="塗る値（0〜100）。100 で「全体の密度」になる")
+    brush_value: FloatProperty(name="塗る密度", default=100.0, min=0.0, max=100.0,
+                               description="ブラシで塗る値（0=紫: 生えない 〜 100=オレンジ: 「つるの密度」どおり）")
     brush_radius: IntProperty(name="半径(px)", default=60, min=2, max=1000)
     brush_strength: FloatProperty(name="強さ", default=0.5, min=0.0, max=1.0, subtype="FACTOR")
-    add_with_value: BoolProperty(name="追加した点をブラシの値で塗る", default=False)
     point_blend: FloatProperty(name="なじませる距離", default=0.02, min=0.0, soft_max=0.2, unit="LENGTH",
                                description="隣り合う点の密度をなめらかにつなぐ距離")
 
